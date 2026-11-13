@@ -34,6 +34,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   let deskA: string;
   let ownerB: string;
   let day = "";
+  let laterDays: string[] = [];
   let exportedAt = "";
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
@@ -59,6 +60,10 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     ref?: string;
     /** Guests beyond the first two (a third, added by a later batch). */
     third?: boolean;
+    /** The trip's date, when not the usual one. */
+    day?: string;
+    /** Instead: this many guests, all at crowd@example.test. */
+    crowd?: number;
     notify: Notify;
   }
 
@@ -72,6 +77,8 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     totals: string[],
   ): Record<string, string> {
     const ref = o.ref ?? o.batchId;
+    const tripDay = o.day ?? day;
+    const tripId = o.day ? `T-${o.day}` : "T-AM";
     return {
       "manifest.csv": [
         "item,file,value",
@@ -91,7 +98,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       ].join("\n"),
       "trips.csv": [
         "source_trip_id,source_product_id,tidegrid_boat_id,local_date,local_start_time,time_zone,utc_offset,seat_capacity",
-        `T-AM,P-SEATS,${t.boats.lark},${day},10:00,UTC,,`,
+        `${tripId},P-SEATS,${t.boats.lark},${tripDay},10:00,UTC,,`,
       ].join("\n"),
       "customers.csv": [
         "source_customer_id,full_name,email,phone",
@@ -99,19 +106,26 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       ].join("\n"),
       "bookings.csv": [
         "source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,included_tax_cents,total_cents,balance_due_date,booked_at",
-        `R-${ref},${day},T-AM,C-${ref},direct,,,3,10000,0,0,0,0,10000,,${exportedAt}`,
+        `R-${ref},${tripDay},${tripId},C-${ref},direct,,,${o.crowd ?? 3},10000,0,0,0,0,10000,,${exportedAt}`,
       ].join("\n"),
       "participants.csv": [
         "source_booking_ref,trip_date,position,full_name,is_minor,email,guardian_name,guardian_email",
-        `R-${ref},${day},1,Ima Sample,false,ima.${ref.toLowerCase()}@example.test,,`,
-        `R-${ref},${day},2,Ola Nomail,false,,,`,
-        ...(o.third
-          ? [`R-${ref},${day},3,Tia Third,false,tia.${ref.toLowerCase()}@example.test,,`]
-          : []),
+        ...(o.crowd
+          ? Array.from(
+              { length: o.crowd },
+              (_, k) => `R-${ref},${tripDay},${k + 1},Guest ${k + 1},false,crowd@example.test,,`,
+            )
+          : [
+              `R-${ref},${tripDay},1,Ima Sample,false,ima.${ref.toLowerCase()}@example.test,,`,
+              `R-${ref},${tripDay},2,Ola Nomail,false,,,`,
+              ...(o.third
+                ? [`R-${ref},${tripDay},3,Tia Third,false,tia.${ref.toLowerCase()}@example.test,,`]
+                : []),
+            ]),
       ].join("\n"),
       "payments.csv": [
         "source_payment_id,source_booking_ref,trip_date,entry_kind,amount_cents,tender,reference,received_at",
-        `PAY-${ref},R-${ref},${day},payment,10000,cash,,${exportedAt}`,
+        `PAY-${ref},R-${ref},${tripDay},payment,10000,cash,,${exportedAt}`,
       ].join("\n"),
     };
   }
@@ -174,10 +188,13 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     ownerA = await member(A.id, "owner");
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
-    const [clock] = await admin<{ day: string; exported: string }[]>`
+    const [clock] = await admin<{ day: string; day4: string; day5: string; exported: string }[]>`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
+             ((now() at time zone 'UTC')::date + 4)::text as day4,
+             ((now() at time zone 'UTC')::date + 5)::text as day5,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
+    laterDays = [clock?.day4 ?? "", clock?.day5 ?? ""];
     exportedAt = clock?.exported ?? "";
   }, 180_000);
 
@@ -306,6 +323,49 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     expect(await sent()).toBe(2);
     await sweep(1);
     expect(await sent()).toBe(4);
+  });
+
+  it("leaves a booking a sending limit held for a later run, and sends it once", async () => {
+    // Eleven guests over two batches share one address, which takes ten an hour.
+    await save(B, ownerB, {
+      batchId: "BUSY1",
+      crowd: 8,
+      day: laterDays[0],
+      notify: "send_at_cutover",
+    });
+    await sweep();
+    const { runId, bookingId } = await save(B, ownerB, {
+      batchId: "BUSY2",
+      crowd: 3,
+      day: laterDays[1],
+      notify: "send_at_cutover",
+    });
+    const delivered = async () =>
+      (await waiverMail(bookingId)).reduce((n, w) => n + w.deliveries, 0);
+    const done = async () =>
+      (
+        await admin<{ n: number }[]>`
+          select count(*)::int as n from public.import_waiver_email_done
+           where run_id = ${runId} and booking_id = ${bookingId}`
+      )[0]?.n;
+    const first = await sweep();
+    expect(await delivered()).toBe(2);
+    expect(await done()).toBe(0);
+    expect(first.complete).toBe(false);
+    // An hour later (moved back, with the guard off for that statement only).
+    await admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries d
+                  set created_at = d.created_at - interval '61 minutes',
+                      send_after = d.send_after - interval '61 minutes'
+                where d.recipient_email = 'crowd@example.test'`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    await sweep();
+    expect(await delivered()).toBe(3);
+    expect(await done()).toBe(1);
+    await sweep();
+    expect(await delivered()).toBe(3);
   });
 
   it("finds no other tenant's batch, and releases no batch that never held", async () => {
