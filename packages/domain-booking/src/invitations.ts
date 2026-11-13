@@ -81,6 +81,8 @@ export type InviteParticipantResult =
   | { kind: "place_not_named" }
   /** An adult with no email of their own; a minor always has a guardian's. */
   | { kind: "no_address" }
+  /** An imported booking gets no email from TideGrid (W3-G2.13, part A). */
+  | { kind: "imported_booking" }
   | { kind: "limit_reached" };
 
 interface InviteeRow {
@@ -112,8 +114,9 @@ export async function inviteParticipant(
     state: "confirmed" | "canceled";
     party_size: number;
     departed: boolean;
+    source: string;
   }>`
-    select b.state, b.party_size, t.starts_at <= now() as departed
+    select b.state, b.party_size, t.starts_at <= now() as departed, b.source
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
      where b.tenant_id = ${tenantId} and b.id = ${input.bookingId}
@@ -122,6 +125,7 @@ export async function inviteParticipant(
   if (!booking) return { kind: "booking_not_found" };
   if (booking.state !== "confirmed") return { kind: "booking_canceled" };
   if (booking.departed) return { kind: "trip_departed" };
+  if (booking.source === "imported") return { kind: "imported_booking" };
   const givenUp = await placesGivenUp(trx, tenantId, input.bookingId);
   if (givenUp.includes(input.position)) return { kind: "place_removed" };
   if (input.position > booking.party_size + givenUp.length) {

@@ -2118,12 +2118,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
       ["trip id text", dayPath(A.id, { date: d0, tripId: "trip" }), 400, "validation_failed"],
       ["after text", dayPath(A.id, { date: d0, after: "cursor" }), 400, "validation_failed"],
       // G2.12e: the source is the API's own value, exactly.
-      [
-        "source partner",
-        `${dayPath(A.id, { date: d0 })}&source=partner`,
-        400,
-        "validation_failed",
-      ],
+      ["source partner", `${dayPath(A.id, { date: d0 })}&source=partner`, 400, "validation_failed"],
       ["source empty", `${dayPath(A.id, { date: d0 })}&source=`, 400, "validation_failed"],
       [
         "source in another case",

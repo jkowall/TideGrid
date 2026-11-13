@@ -274,16 +274,20 @@ CREATE FUNCTION app.import_checkout_live(p_tenant uuid, p_checkout uuid)
   $$;
 
 -- The import capacity path's gate: a hold owned by such a checkout, for the
--- ledger row's own trip and party.
+-- ledger row's own trip and party. The owner ref is parsed to its checkout id
+-- first, so every hold insert finds the ledger row by index, not by a scan.
 CREATE FUNCTION app.import_hold_live(p_tenant uuid, p_owner_ref text, p_trip uuid, p_party integer)
   RETURNS boolean
   LANGUAGE sql
   SET search_path = pg_catalog, pg_temp
   AS $$
-    SELECT EXISTS (
+    SELECT p_owner_ref ~ '^checkout_session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       AND EXISTS (
       SELECT 1 FROM public.import_bookings ib
        WHERE ib.tenant_id = p_tenant
-         AND p_owner_ref = 'checkout_session:' || ib.checkout_session_id::text
+         AND ib.checkout_session_id = (CASE
+               WHEN p_owner_ref ~ '^checkout_session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+               THEN substr(p_owner_ref, 18)::uuid END)
          AND ib.trip_id = p_trip AND ib.party_size = p_party
          AND app.import_record_live(p_tenant, ib.record_id, 'bookings.csv'))
   $$;
@@ -1370,9 +1374,10 @@ BEGIN
     FROM public.payment_refunds r
    WHERE r.tenant_id = NEW.tenant_id AND r.payment_id = b.payment_id;
   -- A lost dispute took its amount back from the card payment.
-  SELECT (SELECT CASE WHEN p.state = 'succeeded' THEN p.amount ELSE 0 END
+  -- An imported booking has no card payment, so its share is 0, not NULL.
+  SELECT coalesce((SELECT CASE WHEN p.state = 'succeeded' THEN p.amount ELSE 0 END
             FROM public.payments p
-           WHERE p.tenant_id = NEW.tenant_id AND p.id = b.payment_id)
+           WHERE p.tenant_id = NEW.tenant_id AND p.id = b.payment_id), 0)
          - (SELECT coalesce(sum(d.amount), 0) FROM public.payment_disputes d
              WHERE d.tenant_id = NEW.tenant_id AND d.payment_id = b.payment_id
                AND d.status = 'lost')

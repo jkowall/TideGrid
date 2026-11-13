@@ -76,7 +76,16 @@ export type ImportCommitResult =
   /** The batch was committed already; a final delta is a new batch. */
   | { kind: "already_committed"; batchId: string }
   /** A product the batch books has no cancellation policy yet. */
-  | { kind: "product_missing_policy"; batchId: string; productIds: string[] };
+  | { kind: "product_missing_policy"; batchId: string; productIds: string[] }
+  /** More new rows than one commit writes; split the batch. */
+  | { kind: "too_large"; batchId: string; rows: number; limit: number };
+
+/**
+ * New rows one commit writes at most. A commit is one transaction that holds
+ * its trips' locks until it ends, so a bigger one would stall the trips'
+ * checkouts; a bigger export is sent as several batches.
+ */
+export const MAX_COMMIT_ROWS = 5_000;
 
 type Files = Partial<Record<ImportFile, string | undefined>>;
 
@@ -219,18 +228,32 @@ export async function runImportCommit(
     return { kind: "refused", runId, contentHash, checkedAt: checkedAt.toISOString(), result };
   }
 
-  // Every booked product needs a policy version: the booking's terms of record.
-  const policies = await latestPolicies(
-    trx,
-    tenantId,
-    plan.trips.filter((t) => !t.unchanged).map((t) => t.productId),
-  );
-  const missing = [
+  // Every booked product needs a policy version: the booking's terms of
+  // record. A new booking can sit on an unchanged trip, so this keys on the
+  // trips the new bookings name, not on the trips being written.
+  const tripProducts = new Map(plan.trips.map((t) => [t.sourceTripId, t.productId]));
+  const bookedProducts = [
     ...new Set(
-      plan.trips.filter((t) => !t.unchanged && !policies.has(t.productId)).map((t) => t.productId),
+      plan.bookings
+        .filter((b) => !b.unchanged)
+        .map((b) => tripProducts.get(b.sourceTripId))
+        .filter((id): id is string => id !== undefined),
     ),
   ];
+  const policies = await latestPolicies(trx, tenantId, bookedProducts);
+  const missing = bookedProducts.filter((id) => !policies.has(id));
   if (missing.length > 0) return { kind: "product_missing_policy", batchId, productIds: missing };
+
+  const newRows = [plan.trips, plan.customers, plan.bookings, plan.participants, plan.payments]
+    .flat()
+    .filter((r) => !r.unchanged).length;
+  if (newRows > MAX_COMMIT_ROWS) {
+    return { kind: "too_large", batchId, rows: newRows, limit: MAX_COMMIT_ROWS };
+  }
+  // A trip's checkouts wait on this commit's lock, so it gives up rather than
+  // queue behind a long one, and never runs long itself.
+  await sql`set local lock_timeout = '10s'`.execute(trx);
+  await sql`set local statement_timeout = '30s'`.execute(trx);
 
   await sql`savepoint import_commit`.execute(trx);
   try {

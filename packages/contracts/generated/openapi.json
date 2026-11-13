@@ -14177,7 +14177,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {
@@ -18747,7 +18747,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {
@@ -32237,7 +32237,7 @@
             }
           },
           "409": {
-            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); or the email could not be built (waiver_email_invalid). A refusal is final for its Idempotency-Key: send again with a new key",
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
             "content": {
               "application/json": {
                 "schema": {
@@ -46777,6 +46777,14 @@
                       ],
                       "description": "Why nothing was saved: the files no longer pass their checks (not_clean, with the issues listed), or TideGrid changed while saving (write_refused). A refused commit is recorded, so the next try needs a fresh dry run"
                     },
+                    "refusedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 63,
+                      "description": "For write_refused: the name of the TideGrid rule that refused the save, when known, for support to look up. Null otherwise"
+                    },
                     "counts": {
                       "type": [
                         "object",
@@ -46829,6 +46837,7 @@
                     "errorsCsv",
                     "committed",
                     "refusal",
+                    "refusedBy",
                     "counts"
                   ]
                 }
@@ -47040,7 +47049,7 @@
             }
           },
           "422": {
-            "description": "idempotency_key_reused",
+            "description": "More new rows than one commit writes (import_too_large); send the export as several batches. Or idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {

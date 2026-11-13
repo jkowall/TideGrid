@@ -114,7 +114,12 @@ export type SendResult =
   /** The trip ends too soon for a link to be of use. */
   | { kind: "trip_over" }
   /** The email could not be built from the booking's details; nothing was queued. */
-  | { kind: "email_invalid" };
+  | { kind: "email_invalid" }
+  /**
+   * An imported booking: its waiver email is held until the import's release
+   * step (W3-G2.13, part D). The request stays pending, with no email.
+   */
+  | { kind: "imported_booking" };
 
 export interface SendInput {
   requestId: string;
@@ -189,6 +194,10 @@ export async function sendWaiverRequest(
   if (!request) throw new Error("waiver request not found in this tenant");
   if (request.state !== "pending") return { kind: "not_pending", state: request.state };
   if (input.kind === "resend" && !input.reason) throw new TypeError("a resend needs a reason");
+  const { rows: sourceRows } = await sql<{ source: string }>`
+    select source from bookings
+     where tenant_id = ${ctx.tenantId} and id = ${request.booking_id}`.execute(trx);
+  if (sourceRows[0]?.source === "imported") return { kind: "imported_booking" };
 
   const booking =
     input.booking ?? (await loadBookingContext(trx, ctx.tenantId, request.booking_id));

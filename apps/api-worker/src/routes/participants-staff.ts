@@ -300,7 +300,7 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or booking (booking_not_found)"),
       409: errorBody(
-        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
       ),
       422: errorBody(
         "No such place in this party (position_out_of_range), or idempotency_key_reused",

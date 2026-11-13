@@ -168,7 +168,9 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       409: errorBody(
         "The run number is not the batch's next one (import_run_number_used); its earlier runs name another source system (import_source_changed); its latest run is not a clean dry run (import_no_clean_dry_run); the files differ from the dry run's (import_changed_since_dry_run); the batch was saved already (import_already_committed); or a booked product has no cancellation policy (import_product_missing_policy)",
       ),
-      422: errorBody("idempotency_key_reused"),
+      422: errorBody(
+        "More new rows than one commit writes (import_too_large); send the export as several batches. Or idempotency_key_reused",
+      ),
     },
   });
 
@@ -236,10 +238,17 @@ function commitResponse(done: ImportCommitResult): ImportCommitResponse {
         "import_product_missing_policy",
         `A product this batch books has no cancellation policy yet: ${done.productIds.join(", ")}`,
       );
+    case "too_large":
+      throw new ApiError(
+        422,
+        "import_too_large",
+        `This batch writes ${done.rows} new rows; one commit writes at most ${done.limit}. Send the export as several batches.`,
+      );
   }
   const r = done.result;
   const checkedAt = done.kind === "committed" ? done.committedAt : done.checkedAt;
-  const clean = done.kind === "committed" || done.kind === "write_refused" ? r.clean : false;
+  // A run the database refused was recorded as not clean.
+  const clean = done.kind === "committed" ? r.clean : false;
   return {
     run: {
       id: done.runId,
@@ -264,6 +273,7 @@ function commitResponse(done: ImportCommitResult): ImportCommitResponse {
         : done.kind === "write_refused"
           ? "write_refused"
           : "not_clean",
+    refusedBy: done.kind === "write_refused" ? done.constraint : null,
     counts: done.kind === "committed" ? done.counts : null,
   };
 }

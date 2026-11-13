@@ -59,6 +59,8 @@ export interface TripInfo {
 /** A record an earlier commit imported, found by its file and deduplication key. */
 export interface ImportedRecord {
   rowHash: string;
+  /** For a booking: it is no longer confirmed in TideGrid (canceled since). */
+  closed?: boolean;
 }
 
 /** A payment or refund an earlier commit imported for a booking. */
@@ -830,6 +832,8 @@ export async function validateImport(
       if (row.raw.size > 0) row.hash = await rowHash(file, row);
     }
   }
+  // Imported bookings canceled in TideGrid since: nothing new is added to them.
+  const closedBookings = new Set<string>();
   if (lookup.imported) {
     const wanted = new Map<DataFile, string[]>();
     for (const [file, fr] of byFile) {
@@ -844,6 +848,7 @@ export async function validateImport(
         if (!found) continue;
         if (found.rowHash === row.hash) {
           row.unchanged = true;
+          if (file === "bookings.csv" && found.closed) closedBookings.add(row.key);
         } else {
           report.add(
             file,
@@ -1546,6 +1551,16 @@ export async function validateImport(
       bookingFor("payments.csv", row);
       continue;
     }
+    if (!row.unchanged && closedBookings.has(booking.row.key)) {
+      report.add(
+        "payments.csv",
+        row,
+        "source_booking_ref",
+        "booking_closed",
+        "The booking this row adds to was canceled in TideGrid since it was imported.",
+      );
+      continue;
+    }
     if (booking.ota) {
       report.add(
         "payments.csv",
@@ -1620,6 +1635,28 @@ export async function validateImport(
         "total_cents",
         "refund_exceeds_payments",
         "The booking's refunds exceed its payments, so its money cannot be taken over.",
+      );
+      continue;
+    }
+    // TideGrid's ledger caps a booking's refunds at what it cost, so an
+    // overpayment returned before TideGrid cannot be taken over as such.
+    if (sumOut > booking.total) {
+      for (const e of list.filter((x) => x.refund)) {
+        report.add(
+          "payments.csv",
+          e.row,
+          "amount_cents",
+          "refunds_exceed_total",
+          `The booking's refunds (${sumOut}) exceed its total of ${booking.total}.`,
+          String(e.amount),
+        );
+      }
+      report.add(
+        "bookings.csv",
+        booking.row,
+        "total_cents",
+        "refunds_exceed_total",
+        "The booking's refunds exceed its total, so its money cannot be taken over. Net the overpayment and its refund out of the export.",
       );
       continue;
     }
@@ -1744,6 +1781,16 @@ export async function validateImport(
     if (row.refused) continue;
     const booking = bookingFor("participants.csv", row);
     if (!booking) continue;
+    if (!row.unchanged && closedBookings.has(booking.row.key)) {
+      report.add(
+        "participants.csv",
+        row,
+        "source_booking_ref",
+        "booking_closed",
+        "The booking this row adds to was canceled in TideGrid since it was imported.",
+      );
+      continue;
+    }
     const position = n(row, "position") as number;
     const party = n(booking.row, "party_size") as number;
     if (position > party) {

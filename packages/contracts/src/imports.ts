@@ -145,6 +145,13 @@ export const ImportCommitResponse = ImportDryRunResponse.extend({
     .describe(
       "Why nothing was saved: the files no longer pass their checks (not_clean, with the issues listed), or TideGrid changed while saving (write_refused). A refused commit is recorded, so the next try needs a fresh dry run",
     ),
+  refusedBy: z
+    .string()
+    .max(63)
+    .nullable()
+    .describe(
+      "For write_refused: the name of the TideGrid rule that refused the save, when known, for support to look up. Null otherwise",
+    ),
   counts: ImportCommitCounts.nullable(),
 });
 export type ImportCommitResponse = z.infer<typeof ImportCommitResponse>;

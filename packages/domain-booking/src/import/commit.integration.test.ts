@@ -10,6 +10,7 @@ import type {} from "@tidegrid/database/global-setup";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
+import { inviteParticipant } from "../invitations.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
 import { runImportCommit } from "./commit.ts";
 import { runImportDryRun } from "./dry-run.ts";
@@ -56,6 +57,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     skip?: string[];
     /** A different name for C-1 (a changed row). */
     renameC1?: string;
+    /** A further cash payment on R-2. */
+    extraPayment?: boolean;
   }
 
   /**
@@ -81,6 +84,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       ["R-1", `PAY-2,R-1,${day},refund,2500,cash,,${exportedAt}`],
       ["R-3", `PAY-3,R-3,${day},payment,50000,check,CHK-77,${exportedAt}`],
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
+      ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
     ].filter(([ref]) => !skip.has(ref as string));
     const totals: Record<string, number> = { "R-1": 10000, "R-2": 8000, "R-3": 50000 };
     const parties: Record<string, number> = { "R-1": party, "R-2": 2, "R-3": 3 };
@@ -368,6 +372,12 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const [emailsAfter] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.email_messages where tenant_id = ${A.id}`;
     expect(emailsAfter?.n).toBe(emailsBefore?.n);
+    // A later batch adds nothing to the canceled booking.
+    const more = await dryRun(A, ownerA, { batchId: "SAVE-4", extraPayment: true });
+    expect(more.result.clean).toBe(false);
+    expect(more.result.issues).toContainEqual(
+      expect.objectContaining({ file: "payments.csv", code: "booking_closed" }),
+    );
   });
 
   it("commits only the latest clean dry run of the same files", async () => {
@@ -497,5 +507,38 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       trx.selectFrom("import_records").select("id").where("tenant_id", "=", A.id).execute(),
     );
     expect(seen).toEqual([]);
+  });
+
+  it("adds a new booking to a trip an earlier commit brought in", async () => {
+    // The first commit brings in every trip but books nothing on the 10:00 one.
+    await dryRun(B, ownerB, { batchId: "MORE-1", skip: ["R-1"] });
+    const first = await commit(B, ownerB, { batchId: "MORE-1", run: 2, skip: ["R-1"] });
+    if (first.kind !== "committed") throw new Error(JSON.stringify(first));
+    // The second books R-1 on that trip, now unchanged: its product's policy
+    // is looked up all the same.
+    await dryRun(B, ownerB, { batchId: "MORE-2" });
+    const second = await commit(B, ownerB, { batchId: "MORE-2", run: 2 });
+    if (second.kind !== "committed") throw new Error(JSON.stringify(second));
+    expect(second.counts).toMatchObject({
+      trips: 0,
+      bookings: 1,
+      participants: 1,
+      payments: 1,
+      refunds: 1,
+    });
+    const [booking] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${B.id} and r.external_id = 'R-1'`;
+    if (!booking) throw new Error("no imported booking R-1");
+
+    // TideGrid sends an imported booking no email, invitations included.
+    const ctx = staffCtx(B.id, ownerB);
+    expect(
+      await inTenantTransaction(runtime.db, ctx, (trx) =>
+        inviteParticipant(trx, ctx, { bookingId: booking.id, position: 1 }),
+      ),
+    ).toEqual({ kind: "imported_booking" });
   });
 });

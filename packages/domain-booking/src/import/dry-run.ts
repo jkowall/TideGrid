@@ -36,6 +36,20 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
            where tenant_id = ${tenantId} and file = ${file}
              and dedupe_key = any(${wanted}::text[])`.execute(trx);
         for (const r of rows) out.set(`${file}|${r.dedupe_key}`, { rowHash: r.row_hash });
+        if (file === "bookings.csv" && rows.length > 0) {
+          // Whether each imported booking is still confirmed in TideGrid.
+          const { rows: closed } = await sql<{ dedupe_key: string }>`
+            select r.dedupe_key from import_records r
+              join import_bookings ib on ib.tenant_id = r.tenant_id and ib.record_id = r.id
+              join bookings b
+                on b.tenant_id = ib.tenant_id and b.checkout_session_id = ib.checkout_session_id
+             where r.tenant_id = ${tenantId} and r.file = 'bookings.csv'
+               and r.dedupe_key = any(${wanted}::text[]) and b.state <> 'confirmed'`.execute(trx);
+          for (const r of closed) {
+            const found = out.get(`${file}|${r.dedupe_key}`);
+            if (found) found.closed = true;
+          }
+        }
       }
       return out;
     },
