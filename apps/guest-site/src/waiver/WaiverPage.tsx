@@ -671,7 +671,18 @@ function SignedView({
             </Button>
           ) : waiver.access === "dock_lookup" ? (
             // Back to the party, for the next person, while the lookup lasts.
-            <ButtonLink variant="ghost" icon="arrow-left" href="/dock" onClick={linkClick}>
+            // This phone may go to the next person: end this signer's session
+            // first, so Back no longer shows their signed waiver.
+            <ButtonLink
+              variant="ghost"
+              icon="arrow-left"
+              href="/dock"
+              onClick={(e) => {
+                clearStoredSession();
+                void endSession(secret);
+                linkClick(e);
+              }}
+            >
               Back to your party
             </ButtonLink>
           ) : (

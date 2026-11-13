@@ -12,7 +12,7 @@ export function rememberLookup(found: Found): void {
 }
 
 export function recallLookup(now = Date.now()): Found | null {
-  if (held && Date.parse(held.party.expiresAt) <= now) held = null;
+  if (held && held.endsAt <= now) held = null;
   return held;
 }
 

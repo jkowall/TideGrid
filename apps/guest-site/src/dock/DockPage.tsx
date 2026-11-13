@@ -34,7 +34,9 @@ type Trouble =
   | "network"
   | "ended"
   | "not_pending"
-  | "crew_signing";
+  | "crew_signing"
+  | "busy"
+  | "failed";
 
 type Phase =
   | { kind: "form"; busy: boolean; trouble: Trouble | null }
@@ -76,16 +78,28 @@ const troubles: Record<Trouble, { tone: "error" | "warning"; title: string; body
     title: "The crew is already helping this person sign",
     body: "Finish signing with the crew, or ask them.",
   },
+  busy: {
+    tone: "warning",
+    title: "Too many requests",
+    body: "Wait a minute, then try again.",
+  },
+  failed: {
+    tone: "error",
+    title: "Something went wrong",
+    body: "Try again. If it keeps happening, ask the crew.",
+  },
 };
 
 function troubleOf(result: Exclude<Result<unknown>, { kind: "ok" }>): Trouble {
-  if (result.kind !== "refused") return "network";
+  if (result.kind === "network") return "network";
+  if (result.kind === "unreadable") return "failed";
   switch (result.code) {
     case "dock_lookup_not_found":
       return "not_found";
     case "dock_lookup_limited":
-    case "rate_limited":
       return "limited";
+    case "rate_limited":
+      return "busy";
     case "dock_code_invalid":
       return "invalid";
     case "dock_lookup_ended":
@@ -95,7 +109,7 @@ function troubleOf(result: Exclude<Result<unknown>, { kind: "ok" }>): Trouble {
     case "dock_crew_signing":
       return "crew_signing";
     default:
-      return result.status >= 500 ? "network" : "not_found";
+      return "failed";
   }
 }
 
@@ -323,7 +337,7 @@ export function DockPage({
     const result = await readParty(found.secret);
     if (!current(found)) return;
     if (result.kind === "ok") {
-      const fresh = { secret: found.secret, party: result.value };
+      const fresh = { ...found, party: result.value };
       rememberLookup(fresh);
       setPhase((was) =>
         was.kind === "party" && was.found.secret === found.secret && was.starting === null
@@ -349,18 +363,18 @@ export function DockPage({
   }, [shownKey]);
 
   // The lookup lapses after 15 minutes: back to the form, saying so.
-  const expiresAt = phase.kind === "party" ? phase.found.party.expiresAt : null;
+  const endsAt = phase.kind === "party" ? phase.found.endsAt : null;
   useEffect(() => {
-    if (!expiresAt) return;
+    if (endsAt === null) return;
     const timer = setTimeout(
       () => {
         forgetLookup();
         setPhase({ kind: "form", busy: false, trouble: "ended" });
       },
-      Math.max(0, Date.parse(expiresAt) - Date.now()),
+      Math.max(0, endsAt - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [expiresAt]);
+  }, [endsAt]);
 
   const start = async (found: Found, position: number) => {
     setPhase({ kind: "party", found, starting: position, trouble: null });

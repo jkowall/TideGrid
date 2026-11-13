@@ -17,6 +17,19 @@ import { call, type Result } from "../waiver/api.ts";
 export interface Found {
   secret: string;
   party: DockParty;
+  /**
+   * When this phone treats the lookup as ended, by its own clock: the
+   * server's remaining lifetime counted from receipt, so a phone whose clock
+   * is off is not shut out. The server's 401 stays the real answer.
+   */
+  endsAt: number;
+}
+
+const lookupLifetimeMs = 15 * 60_000;
+
+function endsAtFor(expiresAt: string, now = Date.now()): number {
+  const left = Date.parse(expiresAt) - now;
+  return now + (left > 0 && left <= lookupLifetimeMs ? left : lookupLifetimeMs);
 }
 
 export async function lookUp(body: DockLookupRequest): Promise<Result<Found>> {
@@ -25,7 +38,14 @@ export async function lookUp(body: DockLookupRequest): Promise<Result<Found>> {
     body,
   });
   return result.kind === "ok"
-    ? { ...result, value: { secret: result.value.lookupSecret, party: result.value.party } }
+    ? {
+        ...result,
+        value: {
+          secret: result.value.lookupSecret,
+          party: result.value.party,
+          endsAt: endsAtFor(result.value.party.expiresAt),
+        },
+      }
     : result;
 }
 

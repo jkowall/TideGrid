@@ -406,6 +406,41 @@ describe("the waiver page", () => {
     expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
   });
 
+  it("on a dock session, keeps the guest's own phone behavior and goes back to the party, ending this signer's session", async () => {
+    const dock = waiver({ access: "dock_lookup" });
+    const calls = stubApi((call) => {
+      if (call.url.endsWith("/waiver-sessions")) {
+        return json(201, { sessionSecret: secret, waiver: dock });
+      }
+      if (call.method === "DELETE") return new Response(null, { status: 204 });
+      return json(201, { waiver: { ...signedWaiver(), access: "dock_lookup" } });
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByText("Boating has risks.");
+    // The guest's own phone: the session survives a reload.
+    expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toContain(secret);
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+      target: { value: "Ann Adult" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+    await screen.findByRole("heading", { name: "Waiver signed" });
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    const back = screen.getByRole("link", { name: "Back to your party" });
+    expect(back.getAttribute("href")).toBe("/dock");
+    fireEvent.click(back);
+    // The next person may hold this phone: this signer's session ends.
+    expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+    await waitFor(() =>
+      expect(calls.at(-1)).toMatchObject({
+        method: "DELETE",
+        url: expect.stringMatching(/\/v1\/public\/waiver-sessions\/current$/),
+        authorization: `Bearer ${secret}`,
+      }),
+    );
+  });
+
   describe("on a shared device (a staff-assisted link)", () => {
     const signFlow = async () => {
       fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));

@@ -14,7 +14,7 @@ The pages for part 1's lookup: the guest site's `/dock` page and the console's p
 
 - **D1: who prints the code.** Owners and booking staff, who run the dock (`bookings.read`); finance does not see the page.
 - **D2: one code for every trip.** The code opens the guest site's `/dock` address and holds nothing else, so one print serves every trip and never needs changing.
-- **D3: the guest's own phone.** A signing started at the dock behaves like one from an email (no idle clear, the session kept for the tab), not like the crew's shared device. After signing, "Back to your party" returns to the list without typing again for the rest of the lookup's 15 minutes; the lookup lives in the tab's memory only.
+- **D3: the guest's own phone.** A signing started at the dock behaves like one from an email (no idle clear, the session kept for the tab), not like the crew's shared device. After signing, "Back to your party" ends that signer's session (so the next person handed the phone cannot go Back to the signed waiver or its copy) and returns to the list without typing again for the rest of the lookup's 15 minutes, read fresh with the lookup's secret (`GET /v1/public/waiver-dock/party`, rate limited like the other public commands, changing nothing). The lookup lives in the tab's memory only, and the phone counts its 15 minutes from receipt, so a phone with a wrong clock is not shut out.
 
 ### 2026-11-13: W3-G2.15-rest, the dock QR lookup, part 1 (coordinator defaults pending owner confirmation)
 
