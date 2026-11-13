@@ -23,14 +23,19 @@ type Load =
   | Exclude<DockCodeRead, { kind: "failed" }>
   | { kind: "failed"; reason: ReadFailure; failures: number; retrying: boolean };
 
-/** The QR code as one SVG path; null when the address is too long for it. */
-export function DockQr({ url }: { url: string }) {
-  let code: ReturnType<typeof encodeQr>;
+type QrCode = ReturnType<typeof encodeQr>;
+
+/** The address as a QR code, or null when it is too long for one. */
+function qrFor(url: string): QrCode | null {
   try {
-    code = encodeQr(url);
+    return encodeQr(url);
   } catch {
     return null;
   }
+}
+
+/** The QR code as one SVG path. */
+export function DockQr({ code }: { code: QrCode }) {
   const size = code.size + 8;
   return (
     <svg
@@ -115,7 +120,7 @@ export function DockCodePage({
 }
 
 function DockSheet({ url, tenantName }: { url: string; tenantName: string }) {
-  const qr = <DockQr url={url} />;
+  const code = qrFor(url);
   const shown = url.replace(/^https?:\/\//, "");
   return (
     <>
@@ -127,14 +132,16 @@ function DockSheet({ url, tenantName }: { url: string; tenantName: string }) {
       <section className="dock-sheet" aria-label="The sign to print">
         <p className="dock-sheet__operator">{tenantName}</p>
         <h2 className="dock-sheet__title">Sign your waiver here</h2>
-        {qr ?? (
+        {code ? (
+          <DockQr code={code} />
+        ) : (
           <Notice tone="error" title="The QR code didn't fit">
             Your booking site's address is too long for a QR code. Guests can type the address below
             instead.
           </Notice>
         )}
         <ol className="dock-sheet__steps">
-          <li>Scan the code with your phone's camera.</li>
+          <li>{code ? "Scan the code with your phone's camera." : "Go to the address below."}</li>
           <li>Enter your booking code and the last name of the person who booked.</li>
           <li>Sign for each person in your party who still needs to.</li>
         </ol>

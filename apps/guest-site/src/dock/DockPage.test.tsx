@@ -204,4 +204,29 @@ describe("the dock page", () => {
     expect(await screen.findByText("Your lookup ended")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Find my booking" })).toBeTruthy();
   });
+
+  it("ignores a Sign answer that arrives after the guest moved on", async () => {
+    const navigate = vi.fn();
+    let answer: (r: Response) => void = () => {};
+    stubApi((call) =>
+      call.path === "/v1/public/waiver-dock/lookups"
+        ? json(201, { lookupSecret: secret, party: party() })
+        : (new Promise<Response>((resolve) => {
+            answer = resolve;
+          }) as unknown as Response),
+    );
+    renderPage(navigate);
+    await findBooking();
+    fireEvent.click(await screen.findByRole("button", { name: "Sign for Lee B." }));
+    fireEvent.click(screen.getByRole("button", { name: "Look up another booking" }));
+    answer(
+      json(201, {
+        path: `/waiver#t=${token}`,
+        expiresAt: new Date(Date.now() + 900_000).toISOString(),
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Find my booking" })).toBeTruthy();
+  });
 });

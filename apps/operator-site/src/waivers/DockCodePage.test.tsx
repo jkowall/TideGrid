@@ -63,4 +63,12 @@ describe("the dock QR code page", () => {
     expect(await screen.findByRole("button", { name: /Try again|Reload/ })).toBeTruthy();
     expect(screen.queryByRole("img")).toBeNull();
   });
+
+  it("says so on the sign when the address is too long for a QR code", async () => {
+    stub(() => json(200, { url: `https://${"a".repeat(240)}.example.test/dock` }));
+    render(<DockCodePage membership={membership("owner")} focusHeading={false} />);
+    expect(await screen.findByText("The QR code didn't fit")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("Go to the address below.")).toBeTruthy();
+  });
 });

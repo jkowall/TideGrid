@@ -308,9 +308,20 @@ export function DockPage({
   });
   const moved = useRef(false);
 
+  // A late answer counts only while the page is open and its lookup is still the one held.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const current = (found: Found) => mounted.current && recallLookup()?.secret === found.secret;
+
   // Read the party again: someone may have just signed, on this phone or another.
   const refresh = async (found: Found, trouble: Trouble | null) => {
     const result = await readParty(found.secret);
+    if (!current(found)) return;
     if (result.kind === "ok") {
       const fresh = { secret: found.secret, party: result.value };
       rememberLookup(fresh);
@@ -354,6 +365,7 @@ export function DockPage({
   const start = async (found: Found, position: number) => {
     setPhase({ kind: "party", found, starting: position, trouble: null });
     const result = await startSigning(found.secret, position);
+    if (!current(found)) return;
     if (result.kind === "ok") {
       navigate(result.value.path);
       return;
