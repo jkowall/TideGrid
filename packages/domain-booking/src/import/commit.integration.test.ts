@@ -9,8 +9,11 @@ import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/dat
 import type {} from "@tidegrid/database/global-setup";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+<<<<<<< HEAD
 import { sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
+=======
+>>>>>>> origin/claude/project-thread-g7e2w1
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { inviteParticipant } from "../invitations.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
@@ -31,12 +34,15 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
   let ownerB: string;
   let day: string;
   let exportedAt: string;
+<<<<<<< HEAD
   /** The day before the trips, when a charter's balance falls due. */
   let dueDay: string;
   let C: CheckoutFixture;
   let D: CheckoutFixture;
   let ownerC: string;
   let ownerD: string;
+=======
+>>>>>>> origin/claude/project-thread-g7e2w1
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
     const id = randomUUID();
@@ -67,8 +73,11 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     renameC1?: string;
     /** A further cash payment on R-2. */
     extraPayment?: boolean;
+<<<<<<< HEAD
     /** What came in on the R-3 charter, when less than its total: it then owes a balance. */
     charterPaid?: number;
+=======
+>>>>>>> origin/claude/project-thread-g7e2w1
   }
 
   /**
@@ -82,10 +91,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const bookings = [
       ["R-1", `R-1,${day},T-AM,C-1,direct,,,${party},10000,0,0,0,0,10000,,${exportedAt}`],
       ["R-2", `R-2,${day},T-PM,C-2,staff_assisted,phone,,2,8000,0,0,0,0,8000,,`],
+<<<<<<< HEAD
       [
         "R-3",
         `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,${o.charterPaid === undefined ? "" : dueDay},`,
       ],
+=======
+      ["R-3", `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,,`],
+>>>>>>> origin/claude/project-thread-g7e2w1
     ].filter(([ref]) => !skip.has(ref as string));
     const participants = [
       ["R-1", `R-1,${day},1,Ima Sample,false,ima.sample@example.test,,`],
@@ -95,6 +108,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const payments = [
       ["R-1", `PAY-1,R-1,${day},payment,12500,cash,,${exportedAt}`],
       ["R-1", `PAY-2,R-1,${day},refund,2500,cash,,${exportedAt}`],
+<<<<<<< HEAD
       ...(o.charterPaid === 0
         ? []
         : [
@@ -103,6 +117,9 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
               `PAY-3,R-3,${day},payment,${o.charterPaid ?? 50000},check,CHK-77,${exportedAt}`,
             ],
           ]),
+=======
+      ["R-3", `PAY-3,R-3,${day},payment,50000,check,CHK-77,${exportedAt}`],
+>>>>>>> origin/claude/project-thread-g7e2w1
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
       ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
     ].filter(([ref]) => !skip.has(ref as string));
@@ -201,6 +218,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       createCheckoutFixture(admin, runtime.db, "imc-a", { days: 6 }),
       createCheckoutFixture(admin, runtime.db, "imc-b", { days: 6 }),
     ]);
+<<<<<<< HEAD
     [C, D] = await Promise.all([
       createCheckoutFixture(admin, runtime.db, "imc-c", { days: 6 }),
       createCheckoutFixture(admin, runtime.db, "imc-d", { days: 6 }),
@@ -217,6 +235,16 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     day = clock?.day ?? "";
     exportedAt = clock?.exported ?? "";
     dueDay = clock?.due ?? "";
+=======
+    ownerA = await member(A.id, "owner");
+    deskA = await member(A.id, "booking_staff");
+    ownerB = await member(B.id, "owner");
+    const [clock] = await admin<{ day: string; exported: string }[]>`
+      select ((now() at time zone 'UTC')::date + 3)::text as day,
+             to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
+    day = clock?.day ?? "";
+    exportedAt = clock?.exported ?? "";
+>>>>>>> origin/claude/project-thread-g7e2w1
   }, 180_000);
 
   afterAll(async () => {
@@ -569,6 +597,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       ),
     ).toEqual({ kind: "imported_booking" });
   });
+<<<<<<< HEAD
 
   it("takes over a charter's balance: what came in, and what is owed by when", async () => {
     for (const [t, owner, paid] of [
@@ -606,4 +635,6 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       ).toEqual({ kind: "imported_booking" });
     }
   });
+=======
+>>>>>>> origin/claude/project-thread-g7e2w1
 });

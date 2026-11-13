@@ -234,8 +234,13 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
+<<<<<<< HEAD
   // An imported booking's email is held (W3-G2.13).
   if (!done) return { kind: "imported_booking" };
+=======
+  // An imported booking (W3-G2.13) carries no balance yet, so never gets here.
+  if (!done) throw new Error("an imported booking has no balance link");
+>>>>>>> origin/claude/project-thread-g7e2w1
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
     subjectType: "booking",

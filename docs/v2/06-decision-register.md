@@ -8,6 +8,7 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+<<<<<<< HEAD
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part B, charter balances (coordinator defaults pending owner confirmation)
 
 Part B of the commit step (part A is the entry below). An imported private charter may now carry its outstanding balance. Migration `0045` and the [database README](../../packages/database/README.md#import-charter-balances-0045). Coordinator defaults, pending owner confirmation:
@@ -17,6 +18,8 @@ Part B of the commit step (part A is the entry below). An imported private chart
 - **D3: no refund on a charter that owes.** A charter with a balance and a legacy refund is refused (`refund_with_balance`), because TideGrid reads a balance from the money that came in; the export nets the refund out of the payments instead.
 - **D4: no balance email yet.** A staff request to send the balance link on an imported booking is refused (`booking_imported`), and balance reminders are held, until the import's email release (part D). Staff can still record cash or check toward the balance.
 
+=======
+>>>>>>> origin/claude/project-thread-g7e2w1
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part A (coordinator defaults pending owner confirmation)
 
 Builds the commit step the owner unblocked by approving the import draft (the 2026-11-13 entry below), including question 12, the import capacity path. Part A saves trips, customers, bookings, participants, and legacy payments and refunds; charter balances (part B), opening balances (part C), and legacy waiver status with the import's email rules (part D) follow. Migration `0044` and the [database contract](../../packages/database/README.md#import-commits-0044); API `POST /v1/staff/tenants/{tenantId}/import-commits`. Under the owner's go of 2026-11-10 on the rest of Wave 3: synthetic data only, no provider call, account, new Worker binding, or deploy. Coordinator defaults, pending owner confirmation:
