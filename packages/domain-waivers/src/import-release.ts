@@ -10,7 +10,7 @@
  *
  * Only waiver email: the booking's own emails stay held for imported bookings.
  */
-import type { TenantContext, TenantTransaction } from "@tidegrid/database";
+import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import { sql } from "kysely";
 import { assignBookingWaivers } from "./assign.ts";
 import { sendWaiverRequest } from "./delivery.ts";
@@ -122,11 +122,13 @@ export async function releaseImportWaiverEmail(
       else notSent += 1;
     }
   }
-  return {
-    kind: "released",
-    releasedNow,
-    queued,
-    notSent,
-    remaining: Math.max(0, bookings.length - batch.length),
-  };
+  const remaining = Math.max(0, bookings.length - batch.length);
+  // Every call is on the record, counts only: who sent a batch's email, and how much.
+  await recordAudit(trx, ctx, {
+    action: "import.waiver_email.released",
+    subjectType: "import_run",
+    subjectId: run.id,
+    after: { releasedNow, queued, notSent, remaining },
+  });
+  return { kind: "released", releasedNow, queued, notSent, remaining };
 }

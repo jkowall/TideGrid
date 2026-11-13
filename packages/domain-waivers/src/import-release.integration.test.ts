@@ -230,6 +230,15 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     const [releases] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.import_email_releases where run_id = ${runId}`;
     expect(releases?.n).toBe(1);
+    // Each call is audited, counts only.
+    const audits = await admin<{ after_state: unknown }[]>`
+      select after_state from public.audit_events
+       where action = 'import.waiver_email.released' and subject_id = ${runId}
+       order by id`;
+    expect(audits.map((a) => a.after_state)).toEqual([
+      { releasedNow: true, queued: 1, notSent: 1, remaining: 0 },
+      { releasedNow: false, queued: 0, notSent: 1, remaining: 0 },
+    ]);
   });
 
   it("finds no other tenant's batch, and releases no batch that never held", async () => {
