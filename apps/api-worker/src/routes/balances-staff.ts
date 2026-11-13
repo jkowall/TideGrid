@@ -131,7 +131,9 @@ export function registerBalanceStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("Not signed in"),
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or booking (booking_not_found)"),
-      409: errorBody("Nothing is owed (nothing_owed), or email is off here (booking_email_off)"),
+      409: errorBody(
+        "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported from an earlier system (booking_imported)",
+      ),
       422: errorBody("idempotency_key_reused"),
       429: errorBody("Three links went out in the last hour (balance_link_rate_limited)"),
     },
@@ -171,6 +173,12 @@ export function registerBalanceStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
             throw notFound();
           case "nothing_owed":
             throw new ApiError(409, "nothing_owed", "Nothing is owed on this booking");
+          case "imported_booking":
+            throw new ApiError(
+              409,
+              "booking_imported",
+              "This booking was imported from an earlier system, and TideGrid does not email it yet",
+            );
           case "rate_limited":
             throw new ApiError(
               429,

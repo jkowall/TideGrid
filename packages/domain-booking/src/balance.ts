@@ -197,7 +197,9 @@ export type SendBalanceLinkResult =
   | { kind: "not_found" }
   /** Nothing is owed, or the booking was canceled or its trip has left. */
   | { kind: "nothing_owed" }
-  | { kind: "rate_limited"; limit: number };
+  | { kind: "rate_limited"; limit: number }
+  /** An imported booking: its email is held until the import releases it. */
+  | { kind: "imported_booking" };
 
 /**
  * Email the booker the balance link now, at staff's request: at most three an
@@ -232,8 +234,8 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
-  // An imported booking (W3-G2.13) carries no balance yet, so never gets here.
-  if (!done) throw new Error("an imported booking has no balance link");
+  // An imported booking's email is held (W3-G2.13).
+  if (!done) return { kind: "imported_booking" };
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
     subjectType: "booking",
@@ -264,13 +266,15 @@ export async function openBalancePayment(
   input: { bookingId: string; provider: PaymentProviderName; minimumAmount: number },
 ): Promise<OpenBalancePaymentResult> {
   if (!isUuid(input.bookingId)) return { kind: "not_found" };
-  const { rows } = await sql<{ state: string; departed: boolean }>`
-    select b.state, t.starts_at <= now() as departed from bookings b
+  const { rows } = await sql<{ state: string; departed: boolean; source: string }>`
+    select b.state, t.starts_at <= now() as departed, b.source from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${input.bookingId}
        for no key update of b`.execute(trx);
   const booking = rows[0];
-  if (!booking) return { kind: "not_found" };
+  // An imported booking's balance is paid to staff until the import's email
+  // release (W3-G2.13, part D); no guest card payment opens on it.
+  if (!booking || booking.source === "imported") return { kind: "not_found" };
   const balance = await getBookingBalance(trx, ctx.tenantId, input.bookingId);
   if (!balance || booking.state !== "confirmed" || booking.departed || balance.owed <= 0) {
     return { kind: "nothing_owed" };

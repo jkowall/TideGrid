@@ -550,10 +550,14 @@ async function writePlan(
       insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
         party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
         tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
-      values (${tenantId}, ${checkoutId}, null, ${trip.id}, ${trip.productId}, ${b.partySize},
-              ${policyVersion}, 'USD', ${amounts?.subtotal ?? 0}, ${amounts?.discount ?? 0},
-              ${amounts?.fee ?? 0}, ${amounts?.tax ?? 0}, ${amounts?.includedTax ?? 0},
-              ${amounts?.total ?? 0}, null, null)
+      select ${tenantId}, ${checkoutId}, null, t.id, ${trip.productId}, ${b.partySize},
+             ${policyVersion}, 'USD', ${amounts?.subtotal ?? 0}, ${amounts?.discount ?? 0},
+             ${amounts?.fee ?? 0}, ${amounts?.tax ?? 0}, ${amounts?.includedTax ?? 0},
+             ${amounts?.total ?? 0}, ${b.balance?.paidBefore ?? null}::int,
+             -- The last second of its local due date, as the dry run computed it.
+             ${b.balance ? new Date(b.balance.dueAtMs) : null}::timestamptz
+        from scheduled_trips t
+       where t.tenant_id = ${tenantId} and t.id = ${trip.id}
       returning id`.execute(trx);
     const orderId = orders[0]?.id;
     if (!orderId) throw new Error("an imported order insert returned no row");

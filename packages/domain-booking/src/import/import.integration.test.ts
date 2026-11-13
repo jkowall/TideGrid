@@ -26,6 +26,8 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
   let ownerB: string;
   let day: string;
   let exportedAt: string;
+  /** The day before the trips: the charter's balance falls due then. */
+  let dueDay: string;
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
     const id = randomUUID();
@@ -99,7 +101,7 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
         "source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,included_tax_cents,total_cents,balance_due_date,booked_at",
         `R-1,${day},T-AM,C-1,direct,,,${party},10000,0,0,0,0,10000,,`,
         `R-2,${day},T-PM,C-2,direct,,,2,10000,0,0,0,0,10000,,`,
-        `R-3,${day},T-CH,C-2,direct,,,3,10000,0,0,0,0,10000,${day},`,
+        `R-3,${day},T-CH,C-2,direct,,,3,10000,0,0,0,0,10000,${dueDay},`,
       ].join("\n"),
       "payments.csv": [
         "source_payment_id,source_booking_ref,trip_date,entry_kind,amount_cents,tender,reference,received_at",
@@ -131,11 +133,13 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
     ownerA = await member(A.id, "owner");
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
-    const [clock] = await admin<{ day: string; exported: string }[]>`
+    const [clock] = await admin<{ day: string; due: string; exported: string }[]>`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
+             ((now() at time zone 'UTC')::date + 2)::text as due,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
     exportedAt = clock?.exported ?? "";
+    dueDay = clock?.due ?? "";
   }, 180_000);
 
   afterAll(async () => {
@@ -151,10 +155,8 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
       runImportDryRun(trx, ctx, files),
     );
     if (result.kind !== "checked") throw new Error(JSON.stringify(result));
-    // The charter's balance is checked; saving it comes in a later part (a warning here).
-    expect(result.result.issues.map((i) => [i.code, i.severity])).toEqual([
-      ["import_not_supported_yet", "warning"],
-    ]);
+    // The charter's balance is part of the plan now (part B).
+    expect(result.result.issues).toEqual([]);
     expect(result.result.clean).toBe(true);
     expect(await counts(A.id)).toEqual(before);
 

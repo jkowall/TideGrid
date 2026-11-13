@@ -353,7 +353,9 @@ export const BookingBalance = z
       ),
     currency: z.literal("USD"),
     total: Cents.describe("The booking's total"),
-    deposit: Cents.describe("Charged at checkout"),
+    deposit: Cents.describe(
+      "Charged at checkout; on an imported charter, what came in before TideGrid (may be 0)",
+    ),
     paidIn: Cents.describe("Deposit paid, balance payments, and external payments staff recorded"),
     owed: Cents.describe("Left to pay; zero once paid or canceled"),
     overpaid: Cents.describe("Money in above the total, which staff return"),

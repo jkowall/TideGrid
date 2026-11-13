@@ -7,10 +7,14 @@
 import { randomUUID } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { sendBalanceLink } from "../balance.ts";
+import { getBookingBalance } from "../balance-read.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { inviteParticipant } from "../invitations.ts";
+import { recordExternalSettlement } from "../reconciliation.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
 import { runImportCommit } from "./commit.ts";
 import { runImportDryRun } from "./dry-run.ts";
@@ -19,7 +23,7 @@ type Sql = ReturnType<typeof postgres>;
 
 const env = inject("integrationDb");
 
-describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
+describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let A: CheckoutFixture;
@@ -29,6 +33,12 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
   let ownerB: string;
   let day: string;
   let exportedAt: string;
+  /** The day before the trips, when a charter's balance falls due. */
+  let dueDay: string;
+  let C: CheckoutFixture;
+  let D: CheckoutFixture;
+  let ownerC: string;
+  let ownerD: string;
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
     const id = randomUUID();
@@ -59,6 +69,12 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     renameC1?: string;
     /** A further cash payment on R-2. */
     extraPayment?: boolean;
+    /** What came in on the R-3 charter, when less than its total: it then owes a balance. */
+    charterPaid?: number;
+    /** A further check on the R-3 charter. */
+    charterExtra?: number;
+    /** A refund on the R-3 charter. */
+    charterRefund?: number;
   }
 
   /**
@@ -72,7 +88,10 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const bookings = [
       ["R-1", `R-1,${day},T-AM,C-1,direct,,,${party},10000,0,0,0,0,10000,,${exportedAt}`],
       ["R-2", `R-2,${day},T-PM,C-2,staff_assisted,phone,,2,8000,0,0,0,0,8000,,`],
-      ["R-3", `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,,`],
+      [
+        "R-3",
+        `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,${o.charterPaid === undefined ? "" : dueDay},`,
+      ],
     ].filter(([ref]) => !skip.has(ref as string));
     const participants = [
       ["R-1", `R-1,${day},1,Ima Sample,false,ima.sample@example.test,,`],
@@ -82,7 +101,20 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const payments = [
       ["R-1", `PAY-1,R-1,${day},payment,12500,cash,,${exportedAt}`],
       ["R-1", `PAY-2,R-1,${day},refund,2500,cash,,${exportedAt}`],
-      ["R-3", `PAY-3,R-3,${day},payment,50000,check,CHK-77,${exportedAt}`],
+      ...(o.charterPaid === 0
+        ? []
+        : [
+            [
+              "R-3",
+              `PAY-3,R-3,${day},payment,${o.charterPaid ?? 50000},check,CHK-77,${exportedAt}`,
+            ],
+          ]),
+      ...(o.charterExtra
+        ? [["R-3", `PAY-8,R-3,${day},payment,${o.charterExtra},check,CHK-78,${exportedAt}`]]
+        : []),
+      ...(o.charterRefund
+        ? [["R-3", `PAY-9,R-3,${day},refund,${o.charterRefund},check,CHK-79,${exportedAt}`]]
+        : []),
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
       ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
     ].filter(([ref]) => !skip.has(ref as string));
@@ -181,14 +213,22 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       createCheckoutFixture(admin, runtime.db, "imc-a", { days: 6 }),
       createCheckoutFixture(admin, runtime.db, "imc-b", { days: 6 }),
     ]);
+    [C, D] = await Promise.all([
+      createCheckoutFixture(admin, runtime.db, "imc-c", { days: 6 }),
+      createCheckoutFixture(admin, runtime.db, "imc-d", { days: 6 }),
+    ]);
+    ownerC = await member(C.id, "owner");
+    ownerD = await member(D.id, "owner");
     ownerA = await member(A.id, "owner");
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
-    const [clock] = await admin<{ day: string; exported: string }[]>`
+    const [clock] = await admin<{ day: string; due: string; exported: string }[]>`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
+             ((now() at time zone 'UTC')::date + 2)::text as due,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
     exportedAt = clock?.exported ?? "";
+    dueDay = clock?.due ?? "";
   }, 180_000);
 
   afterAll(async () => {
@@ -497,6 +537,17 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
           .execute(),
       ),
     ).rejects.toMatchObject({ code: "23514" });
+    // An order with no quote carries a balance only from an import commit.
+    await expect(
+      inTenantTransaction(runtime.db, ctx, async (trx) => {
+        await sql`
+          insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
+            party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
+            tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
+          values (${A.id}, ${randomUUID()}, null, ${trip.id}, ${A.products.charter}, 1, 1, 'USD',
+                  1000, 0, 0, 0, 0, 1000, 0, ${trip.starts_at})`.execute(trx);
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
     // The ledger is append-only.
     await expect(
       admin`update public.import_records set row_hash = ${"1".repeat(64)} where tenant_id = ${A.id}`,
@@ -540,5 +591,129 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
         inviteParticipant(trx, ctx, { bookingId: booking.id, position: 1 }),
       ),
     ).toEqual({ kind: "imported_booking" });
+  });
+
+  it("takes over a charter's balance: what came in, and what is owed by when", async () => {
+    for (const [t, owner, paid] of [
+      [C, ownerC, 20000],
+      [D, ownerD, 0],
+    ] as const) {
+      await dryRun(t, owner, { batchId: "BAL-1", charterPaid: paid });
+      const saved = await commit(t, owner, { batchId: "BAL-1", run: 2, charterPaid: paid });
+      if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+      expect(saved.counts.payments).toBe(paid === 0 ? 2 : 3);
+      const [row] = await admin<{ id: string; due: string }[]>`
+        select b.id, to_char(o.balance_due_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI') as due
+          from public.bookings b
+          join public.orders o on o.id = b.order_id
+          join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+          join public.import_records r on r.id = ib.record_id
+         where b.tenant_id = ${t.id} and r.external_id = 'R-3'`;
+      if (!row) throw new Error("no imported charter");
+      // Due at the end of its local due date (the batch's zone is UTC).
+      expect(row.due).toBe(`${dueDay}T23:59`);
+      const ctx = staffCtx(t.id, owner);
+      const balance = await inTenantTransaction(runtime.db, ctx, (trx) =>
+        getBookingBalance(trx, t.id, row.id),
+      );
+      expect(balance).toMatchObject({
+        state: "due",
+        total: 50000,
+        deposit: paid,
+        paidIn: paid,
+        owed: 50000 - paid,
+      });
+      // Its email is held: no balance link goes out.
+      expect(
+        await inTenantTransaction(runtime.db, ctx, (trx) => sendBalanceLink(trx, ctx, row.id)),
+      ).toEqual({ kind: "imported_booking" });
+    }
+    // Money staff record in TideGrid counts in a later batch: a check the
+    // legacy system also logged during cutover is not taken a second time.
+    const [charter] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${C.id} and r.external_id = 'R-3'`;
+    if (!charter) throw new Error("no imported charter");
+    const staff = staffCtx(C.id, ownerC);
+    await inTenantTransaction(runtime.db, staff, (trx) =>
+      recordExternalSettlement(trx, staff, {
+        bookingId: charter.id,
+        kind: "payment",
+        tender: "cash",
+        amount: 30000,
+        reason: "Balance paid at the dock",
+        idempotencyKey: `test-${randomUUID()}`,
+      }),
+    );
+    const again = await dryRun(C, ownerC, {
+      batchId: "BAL-2",
+      charterPaid: 20000,
+      charterExtra: 10000,
+    });
+    expect(again.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
+    );
+    // TideGrid reads a charter's balance from the money that came in, so a
+    // refund staff record on it does not lower it, and a later batch agrees:
+    // the same extra check is still too much.
+    await inTenantTransaction(runtime.db, staff, (trx) =>
+      recordExternalSettlement(trx, staff, {
+        bookingId: charter.id,
+        kind: "refund",
+        tender: "cash",
+        amount: 10000,
+        reason: "Returned part of the balance",
+        idempotencyKey: `test-${randomUUID()}`,
+      }),
+    );
+    const still = await dryRun(C, ownerC, {
+      batchId: "BAL-3",
+      charterPaid: 20000,
+      charterExtra: 10000,
+    });
+    expect(still.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
+    );
+    // Without it the batch is clean: the staff refund is not a refund the
+    // batch carries. (The fixture's declared outstanding total still counts
+    // the 30000 the batch alone leaves open, so only the manifest disagrees.)
+    const paidOff = await dryRun(C, ownerC, { batchId: "BAL-5", charterPaid: 20000 });
+    expect(paidOff.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
+    // On a booking paid in full, money staff record in TideGrid nets: a
+    // payment and its refund leave an unchanged batch clean.
+    const [shared] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${D.id} and r.external_id = 'R-1'`;
+    if (!shared) throw new Error("no imported booking");
+    const staffD = staffCtx(D.id, ownerD);
+    for (const kind of ["payment", "refund"] as const) {
+      await inTenantTransaction(runtime.db, staffD, (trx) =>
+        recordExternalSettlement(trx, staffD, {
+          bookingId: shared.id,
+          kind,
+          tender: "cash",
+          amount: 1000,
+          reason: "Card machine mix-up",
+          idempotencyKey: `test-${randomUUID()}`,
+        }),
+      );
+    }
+    const netted = await dryRun(D, ownerD, { batchId: "BAL-6", charterPaid: 0 });
+    expect(netted.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
+    // A charter imported with a balance takes no imported refund, even once a
+    // later batch pays it off.
+    const refunded = await dryRun(D, ownerD, {
+      batchId: "BAL-4",
+      charterPaid: 0,
+      charterExtra: 55000,
+      charterRefund: 5000,
+    });
+    expect(refunded.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "refund_with_balance" }),
+    );
   });
 });

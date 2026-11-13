@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### Saving a standard CSV import, part B, charter balances (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0045_import_charter_balances.sql`, on part A (pull request 160). Synthetic data only; no provider call, no deploy.
+
+- **Built.** An imported private charter that still owes is saved with what came in as its deposit (0 allowed) and its balance due at the end of its local due date, before the trip. The dry run refuses a due date on or after the trip (`balance_due_after_trip`) and a refund on a charter that owes (`refund_with_balance`). A staff balance link on an imported booking is refused (`booking_imported`).
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` (a charter paid 20000 of 50000 and one paid nothing: the due instant, the balance read, and the held link), `import.integration.test.ts` (a charter with a balance dry-runs clean); `validate.test.ts` (the planned balance, a late due date, a refund on a charter that owes).
+- **Still open.** Coordinator defaults D1 to D4 await the owner. Opening balances (part C) and legacy waiver status with the import's email release (part D).
+
 ### Saving a standard CSV import, part A (W3-G2.13), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0044_import_commit.sql`, after the owner approved the import draft and its twelve questions on 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.

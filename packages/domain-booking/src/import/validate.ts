@@ -82,6 +82,8 @@ export interface ImportLookup {
   imported?(keys: ReadonlyMap<DataFile, readonly string[]>): Promise<Map<string, ImportedRecord>>;
   /** Payments and refunds earlier commits imported for these bookings (by key). */
   importedPayments?(bookingKeys: readonly string[]): Promise<ImportedPayment[]>;
+  /** Bookings (by key) earlier commits imported as charters with a balance. Absent: none. */
+  balanceBookings?(bookingKeys: readonly string[]): Promise<Set<string>>;
   products(ids: readonly string[]): Promise<Map<string, ProductInfo>>;
   boats(ids: readonly string[]): Promise<Map<string, BoatInfo>>;
   /** Trips, canceled ones included, on these boats that end after `fromMs` and start before `toMs`. */
@@ -200,6 +202,13 @@ export interface ImportPlan {
       total: number;
     } | null;
     bookedAt: string | null;
+    /**
+     * A private charter's outstanding balance: what came in before TideGrid
+     * (its deposit, which may be 0) and the local date it falls due, before
+     * the trip, with its due instant: the last second of that date in the
+     * operator's zone. Null when it is paid in full.
+     */
+    balance: { paidBefore: number; dueDate: string; dueAtMs: number } | null;
   })[];
   participants: (PlannedRow & {
     bookingKey: string;
@@ -251,6 +260,7 @@ const MANIFEST_ITEMS = [
 ] as const;
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 /** The furthest ahead an import may place a trip: the dates the catalog accepts. */
 const LAST_YEAR = 2099;
 
@@ -724,6 +734,21 @@ function readManifest(
     },
     declared,
   };
+}
+
+/**
+ * The last second of a local date in a zone, as an instant: one second before
+ * the next day's first local midnight (or its first moment, when a clock change
+ * skips midnight).
+ */
+function endOfLocalDate(zone: string, date: string): number {
+  const next = new Date(Date.parse(`${date}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
+  for (const time of ["00:00", "00:30", "01:00", "02:00"]) {
+    const found = instantsFor(zone, next, time);
+    if (found.kind === "unique") return found.epochMs - 1000;
+    if (found.kind === "ambiguous") return (found.options[0]?.epochMs ?? 0) - 1000;
+  }
+  throw new Error(`no local midnight after ${date} in ${zone}`);
 }
 
 interface TripPlan {
@@ -1595,6 +1620,13 @@ export async function validateImport(
   }
   // Payments earlier commits imported for these bookings count too, once: a
   // row this batch repeats is counted from the batch.
+  // Charters an earlier commit saved with a balance. TideGrid reads their
+  // balance from the money that came in (0033), so a refund staff recorded on
+  // one does not lower it, and the dry run leaves it out to agree.
+  const withBalance =
+    lookup.balanceBookings && bookingPlans.size > 0
+      ? await lookup.balanceBookings([...bookingPlans.values()].map((p) => p.row.key))
+      : new Set<string>();
   const earlierPaid = new Map<BookingPlan, { in: number; out: number }>();
   if (lookup.importedPayments && bookingPlans.size > 0) {
     const inBatch = new Set(rowsOf("payments.csv").map((r) => r.key));
@@ -1603,6 +1635,9 @@ export async function validateImport(
       if (inBatch.has(p.paymentKey)) continue;
       const plan = byKey.get(p.bookingKey);
       if (!plan) continue;
+      if (p.refund && p.paymentKey.startsWith("tidegrid:") && withBalance.has(p.bookingKey)) {
+        continue;
+      }
       const sums = earlierPaid.get(plan) ?? { in: 0, out: 0 };
       if (p.refund) sums.out += p.amount;
       else sums.in += p.amount;
@@ -1684,10 +1719,24 @@ export async function validateImport(
   }
   let outstanding = 0;
   const owing = new Map<BookingPlan, number>();
+  /** A charter's balance, by its bookings.csv row: what came in, and the due date. */
+  const balances = new Map<Row, { paidBefore: number; dueDate: string; dueAtMs: number }>();
   for (const [, plan] of bookingPlans) {
     if (plan.ota || plan.row.refused) continue;
     const sums = paid.get(plan) ?? { in: 0, out: 0 };
     const left = plan.total - (sums.in - sums.out);
+    // A charter imported with a balance keeps taking its money as money in,
+    // so a later batch brings it no refund, even once it is paid off.
+    if (withBalance.has(plan.row.key) && (entries.get(plan) ?? []).some((e) => e.refund)) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "refund_with_balance",
+        "This charter was imported with a balance, so it takes no imported refund; record the refund in TideGrid instead.",
+      );
+      continue;
+    }
     if (left <= 0) continue;
     if (plan.trip.product.kind !== "private_charter") {
       report.add(
@@ -1710,16 +1759,34 @@ export async function validateImport(
       );
       continue;
     }
+    const dueDate = s(plan.row, "balance_due_date") as string;
+    const dueAtMs = endOfLocalDate(manifest.operatorTimeZone, dueDate);
+    if (dueDate >= plan.trip.localDate || dueAtMs >= plan.trip.startMs) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "balance_due_after_trip",
+        `A balance falls due before the trip; the trip is on ${plan.trip.localDate}.`,
+        dueDate,
+      );
+      continue;
+    }
+    // TideGrid reads a charter's balance from the money that came in, so a
+    // refund on a booking that still owes cannot be taken over as such. A
+    // refund staff recorded in TideGrid since is theirs, and only nets.
+    if ((entries.get(plan) ?? []).some((e) => e.refund)) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "refund_with_balance",
+        "A charter that still owes a balance has a refund; net the refund out of its payments in the export.",
+      );
+      continue;
+    }
     owing.set(plan, left);
-    report.add(
-      "bookings.csv",
-      plan.row,
-      "balance_due_date",
-      "import_not_supported_yet",
-      "A charter balance is checked, but saving it comes with a later part of the import.",
-      null,
-      notYet,
-    );
+    balances.set(plan.row, { paidBefore: sums.in - sums.out, dueDate, dueAtMs });
   }
 
   // Capacity, in file order: rows that would overbook are refused.
@@ -2145,6 +2212,7 @@ export async function validateImport(
                 total: n(row, "total_cents") as number,
               },
         bookedAt: opt(row, "booked_at"),
+        balance: balances.get(row) ?? null,
       };
     }),
     participants: accepted("participants.csv").map((row) => ({
