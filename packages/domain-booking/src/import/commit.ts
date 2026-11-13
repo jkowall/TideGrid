@@ -554,10 +554,8 @@ async function writePlan(
              ${policyVersion}, 'USD', ${amounts?.subtotal ?? 0}, ${amounts?.discount ?? 0},
              ${amounts?.fee ?? 0}, ${amounts?.tax ?? 0}, ${amounts?.includedTax ?? 0},
              ${amounts?.total ?? 0}, ${b.balance?.paidBefore ?? null}::int,
-             -- A balance falls due at the end of its local due date.
-             case when ${b.balance?.dueDate ?? null}::date is null then null
-                  else ((${b.balance?.dueDate ?? null}::date + 1)::timestamp
-                        at time zone t.time_zone) end
+             -- The last second of its local due date, as the dry run computed it.
+             ${b.balance ? new Date(b.balance.dueAtMs) : null}::timestamptz
         from scheduled_trips t
        where t.tenant_id = ${tenantId} and t.id = ${trip.id}
       returning id`.execute(trx);

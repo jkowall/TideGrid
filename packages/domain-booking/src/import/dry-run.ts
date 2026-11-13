@@ -71,7 +71,27 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
             on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
           join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
          where x.tenant_id = ${tenantId} and br.file = 'bookings.csv'
-           and br.dedupe_key = any(${wanted}::text[])`.execute(trx);
+           and br.dedupe_key = any(${wanted}::text[])
+        union all
+        -- Money staff recorded in TideGrid since: other external payments and
+        -- balance payments by card. It counts toward the balance, once.
+        select br.dedupe_key, 'tidegrid:' || x.id::text, x.amount, 'payment'
+          from external_settlements x
+          join bookings b on b.tenant_id = x.tenant_id and b.id = x.booking_id
+          join import_bookings ib
+            on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
+          join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
+         where x.tenant_id = ${tenantId} and x.import_record_id is null and x.kind = 'payment'
+           and br.file = 'bookings.csv' and br.dedupe_key = any(${wanted}::text[])
+        union all
+        select br.dedupe_key, 'tidegrid:' || bp.id::text, bp.amount, 'payment'
+          from balance_payments bp
+          join bookings b on b.tenant_id = bp.tenant_id and b.id = bp.booking_id
+          join import_bookings ib
+            on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
+          join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
+         where bp.tenant_id = ${tenantId} and bp.state = 'succeeded'
+           and br.file = 'bookings.csv' and br.dedupe_key = any(${wanted}::text[])`.execute(trx);
       return rows.map(
         (r): ImportedPayment => ({
           bookingKey: r.booking_key,

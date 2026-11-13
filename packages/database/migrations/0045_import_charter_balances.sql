@@ -11,6 +11,7 @@
 --    app.booking_balance counts the imported payments as money in.
 -- 2. Only an imported order (no quote, an import ledger row from this
 --    transaction) carries a deposit of 0.
+-- 3. The database refuses an imported refund on a charter that still owes.
 --
 -- Choices made here are coordinator defaults pending owner confirmation (the
 -- "W3-G2.13, part B" register entry). Tenancy follows
@@ -54,7 +55,7 @@ BEGIN
              ON t.tenant_id = p.tenant_id AND t.id = NEW.trip_id AND t.product_id = p.id
           WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.product_id
             AND p.kind = 'private_charter'
-            AND NEW.balance_due_at <= t.starts_at) THEN
+            AND NEW.balance_due_at < t.starts_at) THEN
       RAISE EXCEPTION 'imported order % carries a balance only as a charter''s, due before its trip', NEW.id
         USING ERRCODE = '23514', CONSTRAINT = 'orders_deposit';
     END IF;
@@ -72,3 +73,28 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+-- 3. No imported refund on a charter that still owes ------------------------------------
+
+-- TideGrid reads a balance from the money that came in (0033), so the import
+-- refuses a refund on a charter that owes (the dry run's refund_with_balance);
+-- this is the database's own check of it.
+CREATE FUNCTION app.check_import_refund_balance() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF NEW.import_record_id IS NOT NULL AND NEW.kind = 'refund' AND EXISTS (
+       SELECT 1 FROM public.bookings b
+         JOIN public.orders o ON o.tenant_id = b.tenant_id AND o.id = b.order_id
+        WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
+          AND o.deposit_amount IS NOT NULL) THEN
+    RAISE EXCEPTION 'an import records no refund on a charter that still owes a balance'
+      USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_import';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION app.check_import_refund_balance() FROM PUBLIC;
+CREATE TRIGGER external_settlements_import_refund BEFORE INSERT ON public.external_settlements
+  FOR EACH ROW EXECUTE FUNCTION app.check_import_refund_balance();

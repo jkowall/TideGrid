@@ -15,7 +15,7 @@ Part B of the commit step (part A is the entry below). An imported private chart
 - **D1: what came in becomes the deposit.** The order records the money paid before TideGrid as its deposit, which may be 0 when nothing came in; only an imported order may carry a deposit of 0. The balance then reads, moves, and is paid as any charter balance is (W3-G2.8): what is owed is the total less the imported payments and any money recorded later.
 - **D2: when it falls due.** A balance falls due at the end of its `balance_due_date` in the operator's zone, which must be before the trip's date (`balance_due_after_trip`). A due date already past is allowed and shows as overdue.
 - **D3: no refund on a charter that owes.** A charter with a balance and a legacy refund is refused (`refund_with_balance`), because TideGrid reads a balance from the money that came in; the export nets the refund out of the payments instead.
-- **D4: no balance email yet.** A staff request to send the balance link on an imported booking is refused (`booking_imported`), and balance reminders are held, until the import's email release (part D). Staff can still record cash or check toward the balance.
+- **D4: no balance email or guest payment yet.** A staff request to send the balance link on an imported booking is refused (`booking_imported`), balance reminders are held, and no guest card payment opens on it, until the import's email release (part D). Staff can still record cash or check toward the balance, and a later batch counts that money in its checks.
 
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part A (coordinator defaults pending owner confirmation)
 

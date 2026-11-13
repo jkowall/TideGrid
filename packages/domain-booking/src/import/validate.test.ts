@@ -317,7 +317,7 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
   it("plans a charter's balance, due before its trip and with no refund", async () => {
     let run = await validateImport(sample(), lookup(), NOW);
     const charter = run.plan?.bookings.find((b) => b.key.includes("LB-5003"));
-    expect(charter?.balance).toEqual({ paidBefore: 40000, dueDate: "2027-04-05" });
+    expect(charter?.balance).toMatchObject({ paidBefore: 40000, dueDate: "2027-04-05" });
     expect(run.plan?.bookings.filter((b) => b.balance !== null)).toHaveLength(1);
     const codes = (file: string) => run.issues.filter((i) => i.file === file).map((i) => i.code);
 

@@ -437,7 +437,7 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 
 ## Import charter balances (0045)
 
-W3-G2.13, part B of the commit step. An imported private charter may carry an outstanding balance: its order's `deposit_amount` is what came in before TideGrid (0 allowed only on an order with no quote, `orders_deposit_amount_check`), and `balance_due_at` falls at or before the trip's start. `app.check_order_deposit` takes such an order only for a private charter's trip, from an import commit in this transaction (`orders_deposit`). `app.booking_balance` (0033) then reads it unchanged: the imported payments count as money in.
+W3-G2.13, part B of the commit step. An imported private charter may carry an outstanding balance: its order's `deposit_amount` is what came in before TideGrid (0 allowed only on an order with no quote, `orders_deposit_amount_check`), and `balance_due_at` falls before the trip's start. `app.check_order_deposit` takes such an order only for a private charter's trip, from an import commit in this transaction (`orders_deposit`). `app.booking_balance` (0033) then reads it unchanged: the imported payments count as money in. An imported refund on a charter that still owes is refused (`external_settlements_import`, trigger `external_settlements_import_refund`), the database's own check of the dry run's `refund_with_balance`.
 
 ## Import commits (0044)
 

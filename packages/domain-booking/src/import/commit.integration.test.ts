@@ -7,12 +7,14 @@
 import { randomUUID } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { inviteParticipant } from "../invitations.ts";
+import { recordExternalSettlement } from "../reconciliation.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
 import { runImportCommit } from "./commit.ts";
 import { runImportDryRun } from "./dry-run.ts";
@@ -21,7 +23,7 @@ type Sql = ReturnType<typeof postgres>;
 
 const env = inject("integrationDb");
 
-describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
+describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let A: CheckoutFixture;
@@ -69,6 +71,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     extraPayment?: boolean;
     /** What came in on the R-3 charter, when less than its total: it then owes a balance. */
     charterPaid?: number;
+    /** A further check on the R-3 charter. */
+    charterExtra?: number;
   }
 
   /**
@@ -103,6 +107,9 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
               `PAY-3,R-3,${day},payment,${o.charterPaid ?? 50000},check,CHK-77,${exportedAt}`,
             ],
           ]),
+      ...(o.charterExtra
+        ? [["R-3", `PAY-8,R-3,${day},payment,${o.charterExtra},check,CHK-78,${exportedAt}`]]
+        : []),
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
       ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
     ].filter(([ref]) => !skip.has(ref as string));
@@ -525,6 +532,17 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
           .execute(),
       ),
     ).rejects.toMatchObject({ code: "23514" });
+    // An order with no quote carries a balance only from an import commit.
+    await expect(
+      inTenantTransaction(runtime.db, ctx, async (trx) => {
+        await sql`
+          insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
+            party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
+            tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
+          values (${A.id}, ${randomUUID()}, null, ${trip.id}, ${A.products.charter}, 1, 1, 'USD',
+                  1000, 0, 0, 0, 0, 1000, 0, ${trip.starts_at})`.execute(trx);
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
     // The ledger is append-only.
     await expect(
       admin`update public.import_records set row_hash = ${"1".repeat(64)} where tenant_id = ${A.id}`,
@@ -588,7 +606,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
          where b.tenant_id = ${t.id} and r.external_id = 'R-3'`;
       if (!row) throw new Error("no imported charter");
       // Due at the end of its local due date (the batch's zone is UTC).
-      expect(row.due).toBe(`${day}T00:00`);
+      expect(row.due).toBe(`${dueDay}T23:59`);
       const ctx = staffCtx(t.id, owner);
       const balance = await inTenantTransaction(runtime.db, ctx, (trx) =>
         getBookingBalance(trx, t.id, row.id),
@@ -605,5 +623,32 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
         await inTenantTransaction(runtime.db, ctx, (trx) => sendBalanceLink(trx, ctx, row.id)),
       ).toEqual({ kind: "imported_booking" });
     }
+    // Money staff record in TideGrid counts in a later batch: a check the
+    // legacy system also logged during cutover is not taken a second time.
+    const [charter] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${C.id} and r.external_id = 'R-3'`;
+    if (!charter) throw new Error("no imported charter");
+    const staff = staffCtx(C.id, ownerC);
+    await inTenantTransaction(runtime.db, staff, (trx) =>
+      recordExternalSettlement(trx, staff, {
+        bookingId: charter.id,
+        kind: "payment",
+        tender: "cash",
+        amount: 30000,
+        reason: "Balance paid at the dock",
+        idempotencyKey: `test-${randomUUID()}`,
+      }),
+    );
+    const again = await dryRun(C, ownerC, {
+      batchId: "BAL-2",
+      charterPaid: 20000,
+      charterExtra: 10000,
+    });
+    expect(again.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
+    );
   });
 });

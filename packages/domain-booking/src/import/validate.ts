@@ -203,9 +203,10 @@ export interface ImportPlan {
     /**
      * A private charter's outstanding balance: what came in before TideGrid
      * (its deposit, which may be 0) and the local date it falls due, before
-     * the trip. Null when it is paid in full.
+     * the trip, with its due instant: the last second of that date in the
+     * operator's zone. Null when it is paid in full.
      */
-    balance: { paidBefore: number; dueDate: string } | null;
+    balance: { paidBefore: number; dueDate: string; dueAtMs: number } | null;
   })[];
   participants: (PlannedRow & {
     bookingKey: string;
@@ -257,6 +258,7 @@ const MANIFEST_ITEMS = [
 ] as const;
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 /** The furthest ahead an import may place a trip: the dates the catalog accepts. */
 const LAST_YEAR = 2099;
 
@@ -730,6 +732,21 @@ function readManifest(
     },
     declared,
   };
+}
+
+/**
+ * The last second of a local date in a zone, as an instant: one second before
+ * the next day's first local midnight (or its first moment, when a clock change
+ * skips midnight).
+ */
+function endOfLocalDate(zone: string, date: string): number {
+  const next = new Date(Date.parse(`${date}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
+  for (const time of ["00:00", "00:30", "01:00", "02:00"]) {
+    const found = instantsFor(zone, next, time);
+    if (found.kind === "unique") return found.epochMs - 1000;
+    if (found.kind === "ambiguous") return (found.options[0]?.epochMs ?? 0) - 1000;
+  }
+  throw new Error(`no local midnight after ${date} in ${zone}`);
 }
 
 interface TripPlan {
@@ -1691,7 +1708,7 @@ export async function validateImport(
   let outstanding = 0;
   const owing = new Map<BookingPlan, number>();
   /** A charter's balance, by its bookings.csv row: what came in, and the due date. */
-  const balances = new Map<Row, { paidBefore: number; dueDate: string }>();
+  const balances = new Map<Row, { paidBefore: number; dueDate: string; dueAtMs: number }>();
   for (const [, plan] of bookingPlans) {
     if (plan.ota || plan.row.refused) continue;
     const sums = paid.get(plan) ?? { in: 0, out: 0 };
@@ -1719,7 +1736,8 @@ export async function validateImport(
       continue;
     }
     const dueDate = s(plan.row, "balance_due_date") as string;
-    if (dueDate >= plan.trip.localDate) {
+    const dueAtMs = endOfLocalDate(manifest.operatorTimeZone, dueDate);
+    if (dueDate >= plan.trip.localDate || dueAtMs >= plan.trip.startMs) {
       report.add(
         "bookings.csv",
         plan.row,
@@ -1743,7 +1761,7 @@ export async function validateImport(
       continue;
     }
     owing.set(plan, left);
-    balances.set(plan.row, { paidBefore: sums.in - sums.out, dueDate });
+    balances.set(plan.row, { paidBefore: sums.in - sums.out, dueDate, dueAtMs });
   }
 
   // Capacity, in file order: rows that would overbook are refused.
