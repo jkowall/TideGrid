@@ -48,7 +48,11 @@ export type ExternalSettlementRequest = z.infer<typeof ExternalSettlementRequest
 export const ExternalSettlement = z.object({
   id: Uuid,
   kind: z.enum(["payment", "refund"]),
-  tender: z.enum(["cash", "check", "other"]),
+  tender: z
+    .enum(["cash", "check", "other", "card_outside_tidegrid", "bank_transfer"])
+    .describe(
+      "card_outside_tidegrid and bank_transfer appear only on money imported from an earlier system",
+    ),
   amount: Cents,
   reason: z
     .string()

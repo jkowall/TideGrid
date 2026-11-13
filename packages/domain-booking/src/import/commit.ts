@@ -244,7 +244,14 @@ export async function runImportCommit(
   const missing = bookedProducts.filter((id) => !policies.has(id));
   if (missing.length > 0) return { kind: "product_missing_policy", batchId, productIds: missing };
 
-  const newRows = [plan.trips, plan.customers, plan.bookings, plan.participants, plan.payments]
+  const newRows = [
+    plan.products,
+    plan.trips,
+    plan.customers,
+    plan.bookings,
+    plan.participants,
+    plan.payments,
+  ]
     .flat()
     .filter((r) => !r.unchanged).length;
   if (newRows > MAX_COMMIT_ROWS) {

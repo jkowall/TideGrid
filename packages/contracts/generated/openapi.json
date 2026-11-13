@@ -40424,8 +40424,11 @@
                             "enum": [
                               "cash",
                               "check",
-                              "other"
-                            ]
+                              "other",
+                              "card_outside_tidegrid",
+                              "bank_transfer"
+                            ],
+                            "description": "card_outside_tidegrid and bank_transfer appear only on money imported from an earlier system"
                           },
                           "amount": {
                             "type": "integer",
@@ -40730,8 +40733,11 @@
                           "enum": [
                             "cash",
                             "check",
-                            "other"
-                          ]
+                            "other",
+                            "card_outside_tidegrid",
+                            "bank_transfer"
+                          ],
+                          "description": "card_outside_tidegrid and bank_transfer appear only on money imported from an earlier system"
                         },
                         "amount": {
                           "type": "integer",
