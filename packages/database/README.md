@@ -435,6 +435,10 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 - **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
 - **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
 
+## Import waiver status (0047)
+
+W3-G2.13, part D1. `import_records.file` takes `waivers.csv`. `import_waiver_statuses` holds what the legacy waiver tool said about an imported participant: `signed`, `unsigned`, or `unknown`, the signing date (only with `signed`), and the tool's name. One a participant (`import_waiver_statuses_participant`). The insert trigger requires its `waivers.csv` ledger row from this transaction's clean commit and a participant an import created (`import_waiver_statuses_record`, 23514). Information only: no waiver table reads it, and it holds no legacy document or signature. Append-only, forced row-level security, SELECT and INSERT only. A partial index on `import_records (tenant_id, participant_id)` serves the trigger.
+
 ## Import opening credit (0046)
 
 W3-G2.13, part C of the commit step. `import_records.file` takes `opening_balances.csv`. `credit_entries.kind` gains `import`: a booking credit carried over from the legacy system, positive, on no booking, naming its `opening_balances.csv` ledger row (`import_record_id`, once, `credit_entries_import_once`). `app.apply_credit_entry` takes it only from signed-in staff with that ledger row from this transaction's clean commit (`credit_entries_import`), then moves the balance as for any entry.

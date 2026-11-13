@@ -288,6 +288,7 @@ function WaiverList({
                 )}
                 {!signedBy && delivery && <p className="wv-item__line wv-muted">{delivery}</p>}
                 {reminder && <p className="wv-item__line wv-muted">{reminder}</p>}
+                {p.legacy && <p className="wv-item__line wv-muted">{legacyText(p.legacy)}</p>}
                 {p.request?.sharedAddress && (
                   <Notice tone="warning" title="Shared email address" announce="none">
                     The guardian email for {p.name} is also another guest's own email on this
@@ -718,4 +719,16 @@ function QrImage({ url, label }: { url: string; label: string }) {
       <path d={qrPath(code)} fill="#000" />
     </svg>
   );
+}
+
+/** What the earlier waiver tool said, labeled so nobody reads it as a TideGrid signature. */
+export function legacyText(legacy: NonNullable<ParticipantWaiver["legacy"]>): string {
+  const tool = legacy.system ? `Earlier system (${legacy.system})` : "Earlier system";
+  const said =
+    legacy.status === "signed"
+      ? `signed${legacy.signedOn ? ` on ${legacy.signedOn}` : ""}`
+      : legacy.status === "unsigned"
+        ? "not signed"
+        : "status unknown";
+  return `${tool}: ${said}. For reference only; it is not a TideGrid signature.`;
 }

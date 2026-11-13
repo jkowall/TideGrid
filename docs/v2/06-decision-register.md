@@ -8,6 +8,15 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.13, saving a standard CSV import, part D1, legacy waiver status (coordinator defaults pending owner confirmation)
+
+Part D, first half. What the legacy waiver tool said about each imported participant (`waivers.csv`) is saved for staff to read. Migration `0047` and the [database README](../../packages/database/README.md#import-waiver-status-0047). Coordinator defaults, pending owner confirmation:
+
+- **D1: information only.** A legacy status never marks a TideGrid waiver signed, creates evidence, skips a request, or changes a waiver status code, as the draft says. Each imported booking whose trip needs a waiver still gets the normal TideGrid requests.
+- **D2: staff see it, guests do not.** Owners and booking staff see it on the booking's Waivers card, under the TideGrid status, as "Earlier system (tool): signed on date. For reference only; it is not a TideGrid signature." The booker's and the signer's pages do not show it, and the dock lookup does not use it.
+- **D3: one status a participant, set once.** A later batch repeating the row is a no-op; a changed row is refused (`changed_since_import`), as for every imported record. A participant's status is never edited in TideGrid.
+- **D4: the date as given.** The legacy signing date is kept as a date with no time zone, and only with `signed`. No legacy document or signature is imported.
+
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part C, opening booking credit (coordinator defaults pending owner confirmation)
 
 Part C of the commit step. A customer's booking credit from the legacy system is carried over. Migration `0046` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Coordinator defaults, pending owner confirmation:

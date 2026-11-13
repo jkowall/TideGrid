@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### Saving a standard CSV import, part D1, legacy waiver status (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0047_import_waiver_status.sql`, on part C. Synthetic data only; no provider call, no deploy.
+
+- **Built.** A clean commit saves each `waivers.csv` row as the participant's legacy waiver status. Staff see it on the booking's Waivers card, labeled as reference only. It never marks a TideGrid waiver signed.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` (a status saved once with no evidence, a repeat is a no-op, a change is refused, and no other writer can add one; import integration 13 of 13); `packages/database` integration 72 of 72; `domain-waivers` integration 12 of 12; the console's `BookingWaivers.test.tsx` (the legacy line).
+- **Still open.** Coordinator defaults D1 to D4 await the owner. Releasing the email held for imported bookings (part D2).
+
 ### Saving a standard CSV import, part C, opening booking credit (W3-G2.13), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0046_import_opening_credit.sql`, on part B. Synthetic data only; no provider call, no deploy.

@@ -167,12 +167,6 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
         recordKey: "legacy-booker|LB-5002|2027-04-12|2",
       }),
       expect.objectContaining({
-        file: "waivers.csv",
-        line: null,
-        code: "import_not_supported_yet",
-        severity: "warning",
-      }),
-      expect.objectContaining({
         file: "opening_balances.csv",
         line: 2,
         code: "credit_never_expires",

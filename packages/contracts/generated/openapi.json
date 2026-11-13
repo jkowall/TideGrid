@@ -31093,6 +31093,42 @@
                                   "sharedAddress",
                                   "reminders"
                                 ]
+                              },
+                              "legacy": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "signed",
+                                      "unsigned",
+                                      "unknown"
+                                    ]
+                                  },
+                                  "signedOn": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "YYYY-MM-DD, only with signed"
+                                  },
+                                  "system": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "The legacy waiver tool's name"
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "signedOn",
+                                  "system"
+                                ],
+                                "description": "What the legacy waiver tool said about an imported participant: information only, never a TideGrid signature; null when the import brought none"
                               }
                             },
                             "required": [
@@ -31101,7 +31137,8 @@
                               "name",
                               "minor",
                               "status",
-                              "request"
+                              "request",
+                              "legacy"
                             ]
                           },
                           "description": "By place in the party"
@@ -31819,6 +31856,42 @@
                                     "sharedAddress",
                                     "reminders"
                                   ]
+                                },
+                                "legacy": {
+                                  "type": [
+                                    "object",
+                                    "null"
+                                  ],
+                                  "properties": {
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "signed",
+                                        "unsigned",
+                                        "unknown"
+                                      ]
+                                    },
+                                    "signedOn": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "YYYY-MM-DD, only with signed"
+                                    },
+                                    "system": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "The legacy waiver tool's name"
+                                    }
+                                  },
+                                  "required": [
+                                    "status",
+                                    "signedOn",
+                                    "system"
+                                  ],
+                                  "description": "What the legacy waiver tool said about an imported participant: information only, never a TideGrid signature; null when the import brought none"
                                 }
                               },
                               "required": [
@@ -31827,7 +31900,8 @@
                                 "name",
                                 "minor",
                                 "status",
-                                "request"
+                                "request",
+                                "legacy"
                               ]
                             },
                             "description": "By place in the party"
@@ -46826,6 +46900,10 @@
                           "type": "integer",
                           "description": "Opening booking credits carried over"
                         },
+                        "waivers": {
+                          "type": "integer",
+                          "description": "Legacy waiver statuses saved for staff to read"
+                        },
                         "unchanged": {
                           "type": "integer",
                           "description": "Rows imported before with the same values: nothing written for them"
@@ -46840,6 +46918,7 @@
                         "payments",
                         "refunds",
                         "credits",
+                        "waivers",
                         "unchanged"
                       ],
                       "description": "What the commit wrote"

@@ -114,6 +114,7 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
             },
           }
         : null,
+      legacy: p.legacy,
     })),
   };
 }

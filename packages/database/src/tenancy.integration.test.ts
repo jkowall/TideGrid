@@ -756,6 +756,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         import_bookings: ["INSERT", "SELECT"],
         import_customers: ["INSERT", "SELECT"],
         import_records: ["INSERT", "SELECT"],
+        // Legacy waiver status (0047), append-only.
+        import_waiver_statuses: ["INSERT", "SELECT"],
         // Important links (0041, W3-G2.14b-rest): edited in place, archived, never deleted.
         important_links: ["INSERT", "SELECT"],
       };

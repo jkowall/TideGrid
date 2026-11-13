@@ -1499,6 +1499,7 @@ export interface Database
   import_records: ImportRecordsTable;
   import_customers: ImportCustomersTable;
   import_bookings: ImportBookingsTable;
+  import_waiver_statuses: ImportWaiverStatusesTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1891,7 +1892,9 @@ export type ImportFileName =
   | "participants.csv"
   | "payments.csv"
   /** Opening booking credit (0046). */
-  | "opening_balances.csv";
+  | "opening_balances.csv"
+  /** Legacy waiver status (0047). */
+  | "waivers.csv";
 
 /** One imported record of a commit (0044). Append-only; unique by source system, file, key. */
 export interface ImportRecordsTable {
@@ -1920,6 +1923,17 @@ export interface ImportCustomersTable {
   full_name: Fixed<string>;
   email: FixedDefault<string | null>;
   phone: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+/** What the legacy waiver tool said about an imported participant (0047): information only. */
+export interface ImportWaiverStatusesTable {
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  participant_id: Fixed<string>;
+  legacy_status: Fixed<"signed" | "unsigned" | "unknown">;
+  legacy_signed_on: FixedDefault<string | null>;
+  legacy_system: FixedDefault<string | null>;
   created_at: Stamped;
 }
 

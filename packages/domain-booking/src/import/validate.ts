@@ -219,6 +219,13 @@ export interface ImportPlan {
     guardianName: string | null;
     guardianEmail: string | null;
   })[];
+  /** What the legacy waiver tool said about a participant, for staff only (part D1). */
+  waivers: (PlannedRow & {
+    participantKey: string;
+    status: "signed" | "unsigned" | "unknown";
+    signedOn: string | null;
+    system: string | null;
+  })[];
   /** Opening booking credit, on its customer's account (part C). */
   credits: (PlannedRow & { sourceCustomerId: string; amount: number })[];
   payments: (PlannedRow & {
@@ -778,9 +785,6 @@ export async function validateImport(
 ): Promise<ImportDryRun> {
   const report = new Report();
   const { manifest, declared } = readManifest(report, files["manifest.csv"], mode);
-  // What a commit cannot save yet (charter balances, opening balances, legacy
-  // waiver status) is a warning in a dry run and refuses the commit.
-  const notYet = mode === "commit" ? "error" : "warning";
   const present = IMPORT_FILES.filter(
     (f): f is DataFile => f !== "manifest.csv" && files[f] !== undefined,
   );
@@ -1913,17 +1917,6 @@ export async function validateImport(
   }
 
   // Opening balances -----------------------------------------------------------------
-  if (rowsOf("waivers.csv").length > 0) {
-    report.add(
-      "waivers.csv",
-      null,
-      null,
-      "import_not_supported_yet",
-      "Legacy waiver status is checked, but saving it comes with a later part of the import.",
-      null,
-      notYet,
-    );
-  }
   const today = localDateAt(manifest.operatorTimeZone, nowMs);
   for (const row of rowsOf("opening_balances.csv")) {
     if (row.refused) continue;
@@ -2260,6 +2253,17 @@ export async function validateImport(
       email: opt(row, "email"),
       guardianName: opt(row, "guardian_name"),
       guardianEmail: opt(row, "guardian_email"),
+    })),
+    waivers: accepted("waivers.csv").map((row) => ({
+      ...planned(
+        "waivers.csv",
+        row,
+        `${s(row, "source_booking_ref")}|${s(row, "trip_date")}|${n(row, "position")}`,
+      ),
+      participantKey: row.key,
+      status: s(row, "legacy_status") as "signed" | "unsigned" | "unknown",
+      signedOn: opt(row, "legacy_signed_on"),
+      system: opt(row, "legacy_system"),
     })),
     credits: accepted("opening_balances.csv").map((row) => ({
       ...planned("opening_balances.csv", row, s(row, "source_balance_id") as string),

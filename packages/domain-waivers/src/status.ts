@@ -110,6 +110,18 @@ export interface ParticipantWaiver {
     /** Reminder emails before departure (W1-G215-REMINDERS). */
     reminders: ParticipantWaiverReminders;
   };
+  /**
+   * What the legacy waiver tool said about an imported participant (W3-G2.13,
+   * part D1): information for staff only, never a TideGrid signature. Null
+   * when the import brought none.
+   */
+  legacy: null | {
+    status: "signed" | "unsigned" | "unknown";
+    /** YYYY-MM-DD, only with signed. */
+    signedOn: string | null;
+    /** The legacy tool's name. */
+    system: string | null;
+  };
 }
 
 export interface ParticipantWaiverReminders {
@@ -178,6 +190,9 @@ interface Row {
     | null;
   /** The state of a reminder sent after the latest invitation, the newest; null when none. */
   reminder_after_state: MessageState | null;
+  legacy_status: "signed" | "unsigned" | "unknown" | null;
+  legacy_signed_on: string | null;
+  legacy_system: string | null;
   now: Date;
 }
 
@@ -225,6 +240,8 @@ async function rows(
              where w.tenant_id = b.tenant_id and w.request_id = r.id
                and w.created_at > d.created_at and wm.state <> 'canceled'
              order by w.created_at desc limit 1) as reminder_after_state,
+           lw.legacy_status, to_char(lw.legacy_signed_on, 'YYYY-MM-DD') as legacy_signed_on,
+           lw.legacy_system,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -254,6 +271,7 @@ async function rows(
         select x.retry_after
           from app.waiver_send_refusal(b.tenant_id, b.id, p.id, cr.address, now()) x
          where r.state = 'pending' and cr.address is not null) f on true
+      left join import_waiver_statuses lw on lw.tenant_id = b.tenant_id and lw.participant_id = p.id
      where b.tenant_id = ${tenantId} and ${where}
      order by b.confirmed_at, b.id, p.position`.execute(trx);
   return found;
@@ -417,6 +435,13 @@ async function assemble(
               reminders: remindersOf(row, statusOf(row, booking.required)),
             }
           : null,
+      legacy: row.legacy_status
+        ? {
+            status: row.legacy_status,
+            signedOn: row.legacy_signed_on,
+            system: row.legacy_system,
+          }
+        : null,
     });
   }
   return [...bookings.values()];

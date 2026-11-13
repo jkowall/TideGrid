@@ -162,6 +162,8 @@ Pulled forward into the demo by the owner on 2026-11-08 ([decision register](../
 
 Each also carries the request (state, signer, version, when assigned), the evidence summary, the latest delivery (generation, masked address, the email's state), and when staff may resend. The trip view adds totals: signed, waiting, needing attention, and places nobody has been named for.
 
+**Legacy waiver status.** For a participant an import brought in with a `waivers.csv` row (W3-G2.13, part D1), the staff reads add `legacy`: what the earlier waiver tool said (`signed`, `unsigned`, or `unknown`, the signing date, the tool's name). It never changes `status`, and the guest reads leave it out.
+
 **The booker's view.** `listGuestBookingWaivers` gives the management page (lane 1's `/manage`, in its booking session) each named person's status, who signs, the signing day, and where the latest email went, masked. It leaves out ids, evidence, the text, the typed signature and the guardian's name, and the delivery history: the booker named the party but signs only for themselves. `applies` is false when no waiver applies or the booking is canceled, and the page then shows nothing.
 
 **Who sees what.** Waiver status names people, so the staff reads need `bookings.read` (owners and booking staff), as the roster does; finance is refused. Resending needs `waivers.manage` (owners and booking staff). The signed PDF is for owners and booking staff, and for the signer within their session; never for the booker. Audit rows and events carry ids, versions, and hashes only: never a name, an address, a signature, or the waiver's text.

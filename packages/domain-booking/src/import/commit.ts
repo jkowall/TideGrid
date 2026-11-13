@@ -31,6 +31,8 @@ export interface ImportCommitCounts {
   refunds: number;
   /** Opening booking credits (part C). */
   credits: number;
+  /** Legacy waiver statuses, for staff to read (part D1). */
+  waivers: number;
   /** Rows imported before, unchanged: nothing written for them. */
   unchanged: number;
 }
@@ -254,6 +256,7 @@ export async function runImportCommit(
     plan.participants,
     plan.payments,
     plan.credits,
+    plan.waivers,
   ]
     .flat()
     .filter((r) => !r.unchanged).length;
@@ -340,15 +343,29 @@ async function earlierRecords(
   trx: TenantTransaction,
   tenantId: string,
   keys: Map<string, string[]>,
-): Promise<Map<string, { id: string; tripId: string | null }>> {
-  const out = new Map<string, { id: string; tripId: string | null }>();
+): Promise<Map<string, { id: string; tripId: string | null; participantId: string | null }>> {
+  const out = new Map<
+    string,
+    { id: string; tripId: string | null; participantId: string | null }
+  >();
   for (const [file, list] of keys) {
     if (list.length === 0) continue;
-    const { rows } = await sql<{ id: string; dedupe_key: string; trip_id: string | null }>`
-      select id, dedupe_key, trip_id from import_records
+    const { rows } = await sql<{
+      id: string;
+      dedupe_key: string;
+      trip_id: string | null;
+      participant_id: string | null;
+    }>`
+      select id, dedupe_key, trip_id, participant_id from import_records
        where tenant_id = ${tenantId} and file = ${file}
          and dedupe_key = any(${list}::text[])`.execute(trx);
-    for (const r of rows) out.set(`${file}|${r.dedupe_key}`, { id: r.id, tripId: r.trip_id });
+    for (const r of rows) {
+      out.set(`${file}|${r.dedupe_key}`, {
+        id: r.id,
+        tripId: r.trip_id,
+        participantId: r.participant_id,
+      });
+    }
   }
   return out;
 }
@@ -369,6 +386,7 @@ async function writePlan(
     payments: 0,
     refunds: 0,
     credits: 0,
+    waivers: 0,
     unchanged: 0,
   };
   const src = plan.sourceSystem;
@@ -376,6 +394,7 @@ async function writePlan(
     ["trips.csv", plan.trips.filter((r) => r.unchanged).map((r) => r.key)],
     ["customers.csv", plan.customers.filter((r) => r.unchanged).map((r) => r.key)],
     ["bookings.csv", plan.bookings.filter((r) => r.unchanged).map((r) => r.key)],
+    ["participants.csv", plan.participants.filter((r) => r.unchanged).map((r) => r.key)],
   ]);
   const before = await earlierRecords(trx, tenantId, unchangedKeys);
   const earlierId = (file: string, key: string) => {
@@ -592,8 +611,13 @@ async function writePlan(
     counts.bookings += 1;
   }
 
+  // Participants, by their deduplication key, which waiver statuses name.
+  const participants = new Map<string, string>();
   for (const p of plan.participants) {
     if (p.unchanged) {
+      const participantId = earlierId("participants.csv", p.key).participantId;
+      if (!participantId) throw new Error("an unchanged imported participant has no participant");
+      participants.set(p.key, participantId);
       counts.unchanged += 1;
       continue;
     }
@@ -608,6 +632,7 @@ async function writePlan(
     const participantId = rows[0]?.id;
     if (!participantId) throw new Error("an imported participant insert returned no row");
     await record("participants.csv", p, { participant_id: participantId });
+    participants.set(p.key, participantId);
     counts.participants += 1;
   }
 
@@ -708,6 +733,30 @@ async function writePlan(
       values (${tenantId}, ${accountId}, 'import', ${credit.amount}, ${recordId},
               ${`import:${recordId}`})`.execute(trx);
     counts.credits += 1;
+  }
+
+  // What the legacy waiver tool said, for staff to read beside the TideGrid
+  // status. It never marks a waiver signed or skips a request.
+  for (const w of plan.waivers) {
+    if (w.unchanged) {
+      counts.unchanged += 1;
+      continue;
+    }
+    const participantId = participants.get(w.participantKey);
+    if (!participantId) throw new Error("a planned waiver status names a participant not planned");
+    const recordId = await record("waivers.csv", w);
+    await trx
+      .insertInto("import_waiver_statuses")
+      .values({
+        record_id: recordId,
+        tenant_id: tenantId,
+        participant_id: participantId,
+        legacy_status: w.status,
+        legacy_signed_on: w.signedOn,
+        legacy_system: w.system,
+      })
+      .execute();
+    counts.waivers += 1;
   }
   return counts;
 }
