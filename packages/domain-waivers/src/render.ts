@@ -52,7 +52,9 @@ export interface WaiverDocumentInput {
    */
   arrival:
     | { kind: "email_link"; recipientMasked: string }
-    | { kind: "staff_device" | "participant_qr"; staff: string };
+    | { kind: "staff_device" | "participant_qr"; staff: string }
+    /** The generic dock QR: the booking code and the booker's last name matched. */
+    | { kind: "dock_lookup" };
   sourceIp: string | null;
   userAgent: string | null;
 }
@@ -195,6 +197,8 @@ function arrivalText(arrival: WaiverDocumentInput["arrival"]): string {
       return "Staff-assisted on the operator's device, through a single-use 15-minute link; the staff member checked who signs, and the signer confirmed who they are and who they signed for";
     case "participant_qr":
       return "A single-use 15-minute QR code shown by the operator's staff, opened by an explicit request; the staff member checked who signs, and the signer confirmed who they are and who they signed for";
+    case "dock_lookup":
+      return "The operator's dock QR code, on the day of the trip: the booking code and the booker's last name matched, then a single-use 15-minute link opened by an explicit request; the signer confirmed who they are and who they signed for";
   }
 }
 
@@ -243,9 +247,9 @@ export function renderWaiverPdf(input: WaiverDocumentInput): Uint8Array {
     ["Waiver version", `${input.title}, version ${input.version}`],
     ["Content SHA-256", input.contentSha256],
     ["How it was reached", arrivalText(input.arrival)],
-    ...(input.arrival.kind === "email_link"
-      ? []
-      : ([["Assisted by", input.arrival.staff]] as const)),
+    ...(input.arrival.kind === "staff_device" || input.arrival.kind === "participant_qr"
+      ? ([["Assisted by", input.arrival.staff]] as const)
+      : []),
     ["Signed at (UTC)", input.signedAt.toISOString()],
     ["IP address", input.sourceIp ?? "Not recorded"],
     ["Device", input.userAgent ?? "Not recorded"],

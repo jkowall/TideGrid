@@ -201,6 +201,9 @@ describe("contract", () => {
         "/v1/public/trips/{tripId}/offer",
         "/v1/public/quotes",
         "/v1/public/quotes/{quoteId}",
+        // The dock QR lookup (W3-G2.15-rest).
+        "/v1/public/waiver-dock/lookups",
+        "/v1/public/waiver-dock/signings",
         "/v1/staff/tenants/{tenantId}/audit-events",
         "/v1/staff/tenants/{tenantId}/catalog",
         "/v1/staff/tenants/{tenantId}/members",
@@ -331,6 +334,8 @@ describe("contract", () => {
     expect(Object.keys(doc.components.securitySchemes).sort()).toEqual([
       "accessJwt",
       "checkoutSecret",
+      // A matched dock lookup (W3-G2.15-rest).
+      "dockLookup",
       "fakeClientSecret",
       // The guest's booking session (lane 1, G2.11c).
       "manageSession",

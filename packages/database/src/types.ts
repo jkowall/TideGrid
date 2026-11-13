@@ -1257,11 +1257,17 @@ export interface WaiverEvidenceTable {
   document_sha256: Fixed<string>;
 }
 
-/** How a signer reached the waiver: an emailed link, or a staff-assisted start (0020). */
-export type WaiverAccessMethod = "email_link" | "staff_device" | "participant_qr";
+/**
+ * How a signer reached the waiver: an emailed link, a staff-assisted start
+ * (0020), or the generic dock QR's booking code and last name (0043).
+ */
+export type WaiverAccessMethod = "email_link" | "staff_device" | "participant_qr" | "dock_lookup";
 export type WaiverAssistedMode = Exclude<WaiverAccessMethod, "email_link">;
-/** Who confirmed the signer: the signer alone, or a staff member who checked them too (0020). */
-export type WaiverMatchMethod = "signer_confirmed" | "staff_confirmed";
+/**
+ * Who confirmed the signer: the signer alone, a staff member who checked them
+ * too (0020), or a matched booking code and last name (0043).
+ */
+export type WaiverMatchMethod = "signer_confirmed" | "staff_confirmed" | "booking_lookup";
 
 /** A staff-assisted signing start (0020): append-only for every role. */
 export interface WaiverAssistedLinksTable {
@@ -1274,9 +1280,32 @@ export interface WaiverAssistedLinksTable {
   participant_id: Fixed<string>;
   mode: Fixed<WaiverAssistedMode>;
   identity_checked: Fixed<boolean>;
+  /** The matched dock lookup that started it; only for `dock_lookup` (0043). */
+  dock_lookup_id: FixedDefault<string | null>;
   created_at: Stamped;
-  actor_type: ColumnType<"staff", never, never>;
-  actor_id: ColumnType<string, never, never>;
+  /** Staff for the staff modes; the guest for `dock_lookup` (0043). */
+  actor_type: ColumnType<"staff" | "guest", never, never>;
+  /** The staff member; null for `dock_lookup` (0043). */
+  actor_id: ColumnType<string | null, never, never>;
+  api_request_id: ColumnType<string | null, never, never>;
+}
+
+/**
+ * One try at the generic dock QR's lookup (0043): the normalized booking code,
+ * the client address, and on a match the booking and a 15-minute secret's
+ * hash. Append-only; the database holds the try limits.
+ */
+export interface WaiverDockLookupsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  reference_key: Fixed<string>;
+  client_key: ColumnType<string, never, never>;
+  matched: Fixed<boolean>;
+  booking_id: FixedDefault<string | null>;
+  secret_hash: FixedDefault<string | null>;
+  expires_at: ColumnType<Date | null, never, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<"guest", never, never>;
   api_request_id: ColumnType<string | null, never, never>;
 }
 
@@ -1315,6 +1344,7 @@ interface WaiverTables {
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;
   waiver_assisted_links: WaiverAssistedLinksTable;
+  waiver_dock_lookups: WaiverDockLookupsTable;
   waiver_reminders: WaiverRemindersTable;
   waiver_send_resets: WaiverSendResetsTable;
 }

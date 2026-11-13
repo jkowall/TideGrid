@@ -4,6 +4,13 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### The dock QR lookup, part 1 (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0043`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)), defaults D1 to D5 pending. Synthetic data only; no provider call, no deploy.
+
+- **Built.** `waiver_dock_lookups` and its limits in the database; `lookUpAtDock` and `startDockSigning` in the waiver module; `POST /v1/public/waiver-dock/lookups` and `/signings` on the guest's host; the mode `dock_lookup` for a code a lookup starts, with its evidence and PDF wording. No pages yet (part 2).
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `dock-lookup.integration.test.ts` (12 cases: a match shows only first names and an initial; wrong name, another day, another operator, and an unknown code all answer the same; a signing opens, and its evidence and audit event record `dock_lookup` with `identity_checked` false; a newer code replaces the older; 20 misses hold an address, an IPv6 address counts by its /64, and 8 hold a code; 300 misses at an operator hold misses but not a right code and name; a live crew code or session is never ended from the dock and holds the dock's start; a lookup ends when its trip no longer departs today; the database refuses a match for another day or code, a writer that is not a guest, an update, and a staff-started dock row; a lapsed lookup starts nothing), `dock.test.ts` (code folding and last names), and `waiver-dock.integration.test.ts` through the API (one 404 for every miss, 429 past the limit, the session opens as `dock_lookup`). The waiver, database, API waiver, and console waiver suites pass unchanged.
+
 ### A moved booking keeps its waiver signatures only while the version is unchanged (W3-G2.15-rest), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0042`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.

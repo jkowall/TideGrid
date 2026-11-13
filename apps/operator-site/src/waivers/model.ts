@@ -176,6 +176,7 @@ export function resetFailureText(reason: string): string {
 export function methodText(method: string | undefined): string {
   if (method === "staff_device") return "with staff, on the operator's device";
   if (method === "participant_qr") return "with staff, by QR code";
+  if (method === "dock_lookup") return "at the dock, by booking code and last name";
   return "from the emailed link";
 }
 

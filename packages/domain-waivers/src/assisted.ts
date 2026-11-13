@@ -38,6 +38,9 @@ import type { WaiverDeps } from "./ports.ts";
 /** How long a staff-started link, and the session it opens, last (decision D1). */
 export const ASSISTED_LINK_TTL_MINUTES = 15;
 
+/** The modes a staff member starts; a dock lookup starts its own links (0043). */
+export type StaffAssistedMode = Exclude<WaiverAssistedMode, "dock_lookup">;
+
 export type AssistedStartResult =
   | {
       kind: "issued";
@@ -47,7 +50,7 @@ export type AssistedStartResult =
       /** The path and fragment the guest site opens: `/waiver#t=<token>`. */
       path: string;
       expiresAt: Date;
-      mode: WaiverAssistedMode;
+      mode: StaffAssistedMode;
     }
   | { kind: "not_found" }
   | { kind: "not_pending" }
@@ -71,7 +74,18 @@ export async function endAssistedAccess(
   tenantId: string,
   request: { id: string; booking_id: string; participant_id: string },
   sessionReason: "superseded" | "participant_changed",
+  /**
+   * Only the access a dock lookup started (0043). A guest at the dock may
+   * replace an earlier dock code, never a code or a session the crew started.
+   */
+  only?: "dock_lookup",
 ): Promise<void> {
+  const dockLinksOnly = only
+    ? sql`and exists (select 1 from waiver_assisted_links a
+                       where a.tenant_id = l.tenant_id and a.access_link_id = l.id
+                         and a.mode = 'dock_lookup')`
+    : sql``;
+  const dockSessionsOnly = only ? sql`and a.mode = 'dock_lookup'` : sql``;
   await sql`
     update guest_access_links l
        set revoked_at = now(), revoked_reason = 'superseded'
@@ -80,14 +94,16 @@ export async function endAssistedAccess(
        and l.participant_id = ${request.participant_id}
        and l.subject_ref = ${waiverSubject(request.id)}
        and l.message_id is null
-       and l.consumed_at is null and l.revoked_at is null`.execute(trx);
+       and l.consumed_at is null and l.revoked_at is null
+       ${dockLinksOnly}`.execute(trx);
   await sql`
     update waiver_signing_sessions s
        set revoked_at = now(), revoked_reason = ${sessionReason}
       from waiver_assisted_links a
      where s.tenant_id = ${tenantId} and s.request_id = ${request.id}
        and s.revoked_at is null
-       and a.tenant_id = s.tenant_id and a.access_link_id = s.access_link_id`.execute(trx);
+       and a.tenant_id = s.tenant_id and a.access_link_id = s.access_link_id
+       ${dockSessionsOnly}`.execute(trx);
 }
 
 /**
@@ -100,7 +116,7 @@ export async function startAssistedSigning(
   deps: WaiverDeps,
   input: {
     requestId: string;
-    mode: WaiverAssistedMode;
+    mode: StaffAssistedMode;
     identityChecked: boolean;
     /**
      * The participant's name as staff saw it when they checked. A booking
@@ -130,11 +146,53 @@ export async function startAssistedSigning(
   ) {
     return { kind: "participant_changed" };
   }
-  const subject = waiverSubject(request.id);
   // One working code per request: the earlier unused assisted link ends, and
   // so does a session an earlier code already opened, so one phone at most
   // holds it. A session from the emailed link stays open.
-  await endAssistedAccess(trx, ctx.tenantId, request, "superseded");
+  const link = await issueCodeLink(trx, ctx, request, {
+    mode: input.mode,
+    dockLookupId: null,
+  });
+  await recordAudit(trx, ctx, {
+    action: "waiver_access.assisted_started",
+    subjectType: "waiver_request",
+    subjectId: request.id,
+    after: { linkId: link.id, mode: input.mode, identityChecked: true },
+  });
+  return {
+    kind: "issued",
+    linkId: link.id,
+    token: link.token,
+    path: `${WAIVER_LINK_PATH}#t=${link.token}`,
+    expiresAt: link.expiresAt,
+    mode: input.mode,
+  };
+}
+
+/**
+ * Issue a waiver link that no email carries, for one pending request the
+ * caller holds locked, and record how it was started: by a staff member, or
+ * by a matched dock lookup (0043). The earlier unused code of the request,
+ * and a session an earlier code opened, end first, so one code at most works
+ * per request; a dock start ends only earlier dock codes, and its caller
+ * refuses while the crew's code or session is live. The raw token goes back
+ * once.
+ */
+export async function issueCodeLink(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  request: { id: string; booking_id: string; participant_id: string },
+  start: { mode: WaiverAssistedMode; dockLookupId: string | null },
+): Promise<{ id: string; token: string; expiresAt: Date }> {
+  const dock = start.mode === "dock_lookup";
+  await endAssistedAccess(
+    trx,
+    ctx.tenantId,
+    request,
+    "superseded",
+    dock ? "dock_lookup" : undefined,
+  );
+  const subject = waiverSubject(request.id);
   const token = newAccessToken();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into guest_access_links (tenant_id, booking_id, participant_id, purpose, subject_ref,
@@ -153,29 +211,43 @@ export async function startAssistedSigning(
       request_id: request.id,
       booking_id: request.booking_id,
       participant_id: request.participant_id,
-      mode: input.mode,
-      identity_checked: true,
+      mode: start.mode,
+      // Staff ticked that they checked who signs; at the dock nobody did.
+      identity_checked: !dock,
+      dock_lookup_id: start.dockLookupId,
     })
     .execute();
-  await recordAudit(trx, ctx, {
-    action: "waiver_access.assisted_started",
-    subjectType: "waiver_request",
-    subjectId: request.id,
-    after: { linkId: link.id, mode: input.mode, identityChecked: true },
-  });
-  return {
-    kind: "issued",
-    linkId: link.id,
-    token,
-    path: `${WAIVER_LINK_PATH}#t=${token}`,
-    expiresAt: new Date(link.expires_at),
-    mode: input.mode,
-  };
+  return { id: link.id, token, expiresAt: new Date(link.expires_at) };
 }
 
 export interface AssistedLinkFacts {
   mode: WaiverAssistedMode;
-  staffId: string;
+  /** The staff member; null for a dock lookup's link, which the guest started. */
+  staffId: string | null;
+}
+
+/**
+ * Whether the crew's own code (unused and in time) or a session one opened is
+ * live for a request: a dock start then waits for the crew (0043).
+ */
+export async function crewAccessLive(
+  trx: TenantTransaction,
+  tenantId: string,
+  requestId: string,
+): Promise<boolean> {
+  const { rows } = await sql<{ live: boolean }>`
+    select exists (
+      select 1
+        from waiver_assisted_links a
+        join guest_access_links l on l.tenant_id = a.tenant_id and l.id = a.access_link_id
+        left join waiver_signing_sessions s
+          on s.tenant_id = a.tenant_id and s.access_link_id = a.access_link_id
+       where a.tenant_id = ${tenantId} and a.request_id = ${requestId}
+         and a.mode <> 'dock_lookup'
+         and ((l.consumed_at is null and l.revoked_at is null and l.expires_at > now())
+           or (s.id is not null and s.revoked_at is null and s.expires_at > now()))
+    ) as live`.execute(trx);
+  return rows[0]?.live === true;
 }
 
 /**

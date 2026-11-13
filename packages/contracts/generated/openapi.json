@@ -42,6 +42,11 @@
         "type": "http",
         "scheme": "bearer",
         "description": "A waiver signing session's secret: 43 base64url characters, from POST /v1/public/waiver-sessions"
+      },
+      "dockLookup": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A matched dock lookup's secret: 43 base64url characters, from POST /v1/public/waiver-dock/lookups. It lasts 15 minutes"
       }
     },
     "schemas": {
@@ -27544,7 +27549,8 @@
                           "enum": [
                             "email_link",
                             "staff_device",
-                            "participant_qr"
+                            "participant_qr",
+                            "dock_lookup"
                           ],
                           "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
                         },
@@ -28138,7 +28144,8 @@
                           "enum": [
                             "email_link",
                             "staff_device",
-                            "participant_qr"
+                            "participant_qr",
+                            "dock_lookup"
                           ],
                           "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
                         },
@@ -28653,7 +28660,8 @@
                           "enum": [
                             "email_link",
                             "staff_device",
-                            "participant_qr"
+                            "participant_qr",
+                            "dock_lookup"
                           ],
                           "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
                         },
@@ -28869,7 +28877,8 @@
                           "enum": [
                             "email_link",
                             "staff_device",
-                            "participant_qr"
+                            "participant_qr",
+                            "dock_lookup"
                           ],
                           "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
                         },
@@ -29909,6 +29918,550 @@
         }
       }
     },
+    "/v1/public/waiver-dock/lookups": {
+      "post": {
+        "tags": [
+          "public",
+          "waivers"
+        ],
+        "summary": "Find today's booking at the dock by its code and the booker's last name",
+        "description": "Resolves the browser Origin as /v1/public/trips does. A match needs a confirmed booking at this operator with that code, whose trip departs today in its own time zone and has not ended, and the booker's last name (the last word or words of the name on the booking, ignoring case, accents, and punctuation).\n\nA match returns a 15-minute secret and the party: first names with an initial, each person's waiver status, and who signs. No address, id, or delivery detail. Every miss answers the same 404, whatever the reason. Tries are counted by the database, an IPv6 address by its /64: 20 misses from one address in 15 minutes or 8 misses for one booking code in 24 hours from anywhere hold further tries (429), as do 100 matches from one address in an hour; 300 misses at one operator in an hour hold further misses, never a right code and name. Also rate limited per client address and operator like other public commands.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bookingCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32,
+                    "description": "The booking code as the guest typed it. Case, spaces, and dashes do not matter, and O, I, and L read as 0, 1, and 1"
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "The booker's last name, as on the booking. Case and accents do not matter"
+                  }
+                },
+                "required": [
+                  "bookingCode",
+                  "lastName"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The booking's party",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lookupSecret": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "description": "Send it as Authorization: Bearer <secret> to start a signing. Keep it in memory only, never in a URL or storage"
+                    },
+                    "party": {
+                      "type": "object",
+                      "properties": {
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "when": {
+                              "type": "string",
+                              "description": "The departure, in the trip's own time zone"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "when"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The lookup works until this instant (15 minutes); then look up again"
+                        },
+                        "people": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "position": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "The person's place on the booking; send it to start their signing"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The first name and the last name's initial, as the booking has it"
+                              },
+                              "minor": {
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "signed",
+                                  "to_sign",
+                                  "not_needed",
+                                  "ask_crew"
+                                ],
+                                "description": "signed; to_sign, waiting for a signature that can start here; not_needed; ask_crew, nothing can be signed here yet, so the crew helps"
+                              },
+                              "signer": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "participant",
+                                  "guardian",
+                                  null
+                                ],
+                                "description": "Who signs while it waits: the person, or a minor's parent or guardian; null otherwise"
+                              }
+                            },
+                            "required": [
+                              "position",
+                              "name",
+                              "minor",
+                              "status",
+                              "signer"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "trip",
+                        "expiresAt",
+                        "people"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "lookupSecret",
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the code has characters a code never has (dock_code_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address, or no booking departing today matches (dock_lookup_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many tries (dock_lookup_limited), or too many requests from this address (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/waiver-dock/signings": {
+      "post": {
+        "tags": [
+          "public",
+          "waivers"
+        ],
+        "summary": "Start a signing at the dock for one person of a matched lookup's party",
+        "description": "Resolves the browser Origin and needs the lookup's secret as a bearer token. For a person whose waiver waits for a signature, issues a single-use 15-minute link with no email and returns the signing page's path with its token in the fragment; opening it is the usual explicit POST to /v1/public/waiver-sessions. A new start replaces the person's earlier dock code and its session; while a code or session the crew started for that person is live, the dock starts nothing. The evidence records the dock lookup. A lookup starts at most 30 signings.",
+        "security": [
+          {
+            "dockLookup": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "The person's position from the party"
+                  }
+                },
+                "required": [
+                  "position"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The signing page's path, for this phone only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "pattern": "^\\/waiver#t=[A-Za-z0-9_-]{43}$",
+                      "description": "The signing page with a single-use token in its fragment, on this site. Open it on this phone; it works once, for 15 minutes"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "expiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No lookup secret, or the lookup ended: it lapsed, or its booking or trip no longer allows it (dock_lookup_ended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No one at that position, or their waiver no longer waits for a signature (dock_not_pending); or the crew started a signing for that person that is still live (dock_crew_signing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "This lookup started as many signings as it may (dock_lookup_limited), or too many requests (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers": {
       "get": {
         "tags": [
@@ -30093,9 +30646,10 @@
                                         "enum": [
                                           "email_link",
                                           "staff_device",
-                                          "participant_qr"
+                                          "participant_qr",
+                                          "dock_lookup"
                                         ],
-                                        "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start"
+                                        "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer; dock_lookup, the operator's dock QR code, where the booking code and the booker's last name matched on the day of the trip. Staff check who signs before a staff_device or participant_qr start"
                                       }
                                     },
                                     "required": [
@@ -30630,9 +31184,10 @@
                                           "enum": [
                                             "email_link",
                                             "staff_device",
-                                            "participant_qr"
+                                            "participant_qr",
+                                            "dock_lookup"
                                           ],
-                                          "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start"
+                                          "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer; dock_lookup, the operator's dock QR code, where the booking code and the booker's last name matched on the day of the trip. Staff check who signs before a staff_device or participant_qr start"
                                         }
                                       },
                                       "required": [
