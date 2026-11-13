@@ -172,13 +172,11 @@ export const ImportWaiverEmailResponse = z.object({
     .describe(
       "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held",
     ),
-  queued: z.number().int().describe("Waiver emails this call queued"),
-  notSent: z
+  waitingBookings: z
     .number()
     .int()
     .describe(
-      "Waiver requests still without an email: the guest has no address yet, or a sending limit held it. Call again later to send them",
+      "The batch's confirmed bookings, trip not yet left, that the cron has still to email; it sends a few at a time",
     ),
-  remaining: z.number().int().describe("Bookings this call did not reach; call again to continue"),
 });
 export type ImportWaiverEmailResponse = z.infer<typeof ImportWaiverEmailResponse>;

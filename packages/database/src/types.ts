@@ -1364,7 +1364,8 @@ export type SweepName =
   | "hostname"
   | "outbox"
   | "waiver_reminder"
-  | "reconciliation";
+  | "reconciliation"
+  | "import_waiver_email";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
@@ -1501,6 +1502,7 @@ export interface Database
   import_bookings: ImportBookingsTable;
   import_waiver_statuses: ImportWaiverStatusesTable;
   import_email_releases: ImportEmailReleasesTable;
+  import_waiver_email_done: ImportWaiverEmailDoneTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1947,6 +1949,14 @@ export interface ImportEmailReleasesTable {
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
   request_id: ColumnType<string | null, never, never>;
+}
+
+/** A booking the import waiver sweep finished for a batch (0048). Append-only. */
+export interface ImportWaiverEmailDoneTable {
+  tenant_id: TenantColumn;
+  run_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  created_at: Stamped;
 }
 
 /** An imported booking's legacy terms (0044). */

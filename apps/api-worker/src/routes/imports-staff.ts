@@ -17,11 +17,9 @@ import {
   runImportDryRun,
 } from "@tidegrid/domain-booking";
 import { releaseImportWaiverEmail } from "@tidegrid/domain-waivers";
-import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
-import { waiverDeps } from "../waivers.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 export const importDryRunsPath = "/v1/staff/tenants/{tenantId}/import-dry-runs";
@@ -152,7 +150,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     tags: ["staff", "imports"],
     summary: "Save a standard CSV import batch",
     description: [
-      "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Private charters may carry a balance due before their trip; booking credit goes on the customer's credit account; legacy waiver status is kept for staff to read, as information only. No provider is called. Waiver email: a batch saved with waiver_notifications send_at_cutover emails its new guests their waiver requests as it is saved; one saved with hold_until_staff_release holds that email until an owner releases it (POST .../import-runs/{runId}/waiver-email). The booking's own emails are not sent for imported bookings.",
+      "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Private charters may carry a balance due before their trip; booking credit goes on the customer's credit account; legacy waiver status is kept for staff to read, as information only. Saving sends no email and calls no provider. Waiver email follows afterwards: the cron sends the batch's guests their waiver requests a few bookings at a time, under an hourly cap per operator, right away for a batch saved with waiver_notifications send_at_cutover, and once an owner releases it (POST .../import-runs/{runId}/waiver-email) for one saved with hold_until_staff_release. The booking's own emails are not sent for imported bookings.",
       "A commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
     ].join("\n\n"),
     security: staffSecurity,
@@ -201,12 +199,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           successStatus: 200,
         },
       },
-      async (trx, ctx) =>
-        plain(
-          commitResponse(
-            await runImportCommit(trx, ctx, input.files, bookingHooksFor(c.env, deps)),
-          ),
-        ),
+      async (trx, ctx) => plain(commitResponse(await runImportCommit(trx, ctx, input.files))),
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
     return c.json(body as ImportCommitResponse, 200);
@@ -216,9 +209,9 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     method: "post",
     path: importWaiverEmailPath,
     tags: ["staff", "imports", "waivers"],
-    summary: "Send a saved batch's waiver email",
+    summary: "Release a saved batch's waiver email",
     description: [
-      "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release created its guests' waiver requests but emailed none; the first call releases the batch, once, and emails them. A batch saved with send_at_cutover emailed them as it was saved. Either way, a call emails only the requests that never had an email (a guest with no address yet, or a sending limit held it), for confirmed bookings whose trip has not left, so it is safe to repeat. At most 200 bookings a call; `remaining` says when to call again.",
+      "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.",
       "Only waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
     ].join("\n\n"),
     security: staffSecurity,
@@ -229,7 +222,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     responses: {
       200: {
         content: { "application/json": { schema: ImportWaiverEmailResponse } },
-        description: "What this call released and queued",
+        description: "Whether this call released the batch, and what is still waiting",
       },
       400: errorBody("Request did not match the contract"),
       401: errorBody("Not signed in"),
@@ -249,7 +242,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
         tenantId,
         permission: "imports.run",
         idempotency: {
-          scope: "staff.import_waiver_email.send",
+          scope: "staff.import_waiver_email.release",
           key,
           route: importWaiverEmailPath,
           params: { runId },
@@ -261,16 +254,14 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
         if (!UUID.test(runId)) {
           throw new ApiError(404, "import_run_not_found", "No saved batch with this id");
         }
-        const done = await releaseImportWaiverEmail(trx, ctx, waiverDeps(deps), { runId });
+        const done = await releaseImportWaiverEmail(trx, ctx, { runId });
         if (done.kind === "not_found") {
           throw new ApiError(404, "import_run_not_found", "No saved batch with this id");
         }
         return {
           runId,
           releasedNow: done.releasedNow,
-          queued: done.queued,
-          notSent: done.notSent,
-          remaining: done.remaining,
+          waitingBookings: done.waitingBookings,
         } satisfies ImportWaiverEmailResponse;
       },
     );

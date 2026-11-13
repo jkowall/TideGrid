@@ -16,7 +16,6 @@
 import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import { sql } from "kysely";
 import { CORE_FEE_BP, feeReversalFor } from "../fee-ledger.ts";
-import type { BookingHooks } from "../hooks.ts";
 import { newBookingReference } from "../secrets.ts";
 import { importContentHash, importLookup } from "./dry-run.ts";
 import type { ImportFile } from "./spec.ts";
@@ -103,7 +102,6 @@ export async function runImportCommit(
   trx: TenantTransaction,
   ctx: TenantContext,
   files: Files,
-  hooks: BookingHooks = {},
 ): Promise<ImportCommitResult> {
   if (ctx.actorType !== "staff" || !ctx.actorId) {
     throw new TypeError("an import is run by a signed-in staff member");
@@ -282,36 +280,7 @@ export async function runImportCommit(
       })
       .returning("id")
       .executeTakeFirstOrThrow();
-    const { counts, touched } = await writePlan(trx, tenantId, run.id, plan, policies);
-    // Each booking given new guests gets its waiver requests, as any confirmed
-    // booking does. Whether they are emailed now is the batch's
-    // waiver_notifications (0048): held until an owner releases the batch, or
-    // sent at once. Inside the savepoint, so a refusal saves nothing.
-    if (hooks.bookingConfirmed && touched.length > 0) {
-      const { rows: confirmed } = await sql<{
-        id: string;
-        checkout_session_id: string;
-        trip_id: string;
-        product_id: string;
-        party_size: number;
-      }>`
-        select b.id, b.checkout_session_id, b.trip_id, o.product_id, b.party_size
-          from bookings b
-          join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-         where b.tenant_id = ${tenantId} and b.id = any(${touched}::uuid[])
-           and b.state = 'confirmed'
-         order by b.confirmed_at, b.id`.execute(trx);
-      for (const b of confirmed) {
-        await hooks.bookingConfirmed(trx, ctx, {
-          bookingId: b.id,
-          checkoutSessionId: b.checkout_session_id,
-          tripId: b.trip_id,
-          productId: b.product_id,
-          partySize: b.party_size,
-          reacquired: false,
-        });
-      }
-    }
+    const counts = await writePlan(trx, tenantId, run.id, plan, policies);
     await sql`release savepoint import_commit`.execute(trx);
     await recordAudit(trx, ctx, {
       action: "import.commit",
@@ -407,7 +376,7 @@ async function writePlan(
   runId: string,
   plan: ImportPlan,
   policies: Map<string, number>,
-): Promise<{ counts: ImportCommitCounts; touched: string[] }> {
+): Promise<ImportCommitCounts> {
   const counts: ImportCommitCounts = {
     trips: 0,
     tripsCreated: 0,
@@ -420,8 +389,6 @@ async function writePlan(
     waivers: 0,
     unchanged: 0,
   };
-  /** Bookings given new guests: new bookings, and new participants on earlier ones. */
-  const touched = new Set<string>();
   const src = plan.sourceSystem;
   const unchangedKeys = new Map<string, string[]>([
     ["trips.csv", plan.trips.filter((r) => r.unchanged).map((r) => r.key)],
@@ -641,7 +608,6 @@ async function writePlan(
       trx,
     );
     bookings.set(b.key, booking.id);
-    touched.add(booking.id);
     counts.bookings += 1;
   }
 
@@ -667,7 +633,6 @@ async function writePlan(
     if (!participantId) throw new Error("an imported participant insert returned no row");
     await record("participants.csv", p, { participant_id: participantId });
     participants.set(p.key, participantId);
-    touched.add(bookingId);
     counts.participants += 1;
   }
 
@@ -793,5 +758,5 @@ async function writePlan(
       .execute();
     counts.waivers += 1;
   }
-  return { counts, touched: [...touched] };
+  return counts;
 }

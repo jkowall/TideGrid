@@ -197,7 +197,7 @@ export async function sendWaiverRequest(
   // An imported booking whose batch holds its waiver email until an owner
   // releases it (W3-G2.13, part D2).
   const { rows: heldRows } = await sql<{ held: boolean }>`
-    select app.import_waiver_email_held(${ctx.tenantId}, ${request.booking_id}) as held`.execute(
+    select app.import_waiver_email_held(${ctx.tenantId}, ${request.booking_id}, ${request.participant_id}) as held`.execute(
     trx,
   );
   if (heldRows[0]?.held === true) return { kind: "imported_booking" };

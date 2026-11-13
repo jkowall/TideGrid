@@ -121,6 +121,20 @@ vi.mock("@tidegrid/domain-waivers", async (importOriginal) => ({
       stampFailures: 54,
     };
   }),
+  sweepImportWaiverEmail: vi.fn(async (_db, options) => {
+    options.onStampError?.("import-tenant", new Error("stamp"));
+    return {
+      tenants: 1,
+      bookings: 3,
+      queued: 4,
+      failedTenants: 0,
+      complete: true,
+      turns: 71,
+      passes: 72,
+      deferredTenants: 73,
+      stampFailures: 74,
+    };
+  }),
 }));
 // Retention (W3-G2.2b) runs last and touches no network here.
 vi.mock("@tidegrid/domain-identity", async (importOriginal) => ({
@@ -187,6 +201,7 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       ["hostname", "hostname-tenant"],
       ["waiver_reminder", "reminder-tenant"],
       ["reconciliation", "reconciliation-tenant"],
+      ["import_waiver_email", "import-tenant"],
     ]) {
       expect(line(logged, `${job}_sweep_stamp_failed`)).toMatchObject({
         level: "error",
@@ -235,6 +250,14 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       "tidegrid.waiver_reminder_sweep.pass_count": 52,
       "tidegrid.waiver_reminder_sweep.deferred_tenant_count": 53,
       "tidegrid.waiver_reminder_sweep.stamp_failure_count": 54,
+    });
+    expect(line(logged, "import_waiver_email_sweep")).toMatchObject({
+      "tidegrid.import_waiver_email_sweep.booking_count": 3,
+      "tidegrid.import_waiver_email_sweep.queued_count": 4,
+      "tidegrid.import_waiver_email_sweep.turn_count": 71,
+      "tidegrid.import_waiver_email_sweep.pass_count": 72,
+      "tidegrid.import_waiver_email_sweep.deferred_tenant_count": 73,
+      "tidegrid.import_waiver_email_sweep.stamp_failure_count": 74,
     });
     expect(line(logged, "hostname_sweep")).toMatchObject({
       "tidegrid.hostname_sweep.turn_count": 41,

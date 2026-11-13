@@ -32311,7 +32311,7 @@
             }
           },
           "409": {
-            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the guest was imported in a batch whose waiver email is held until an owner releases it (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
             "content": {
               "application/json": {
                 "schema": {
@@ -46494,7 +46494,7 @@
           "imports"
         ],
         "summary": "Save a standard CSV import batch",
-        "description": "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Private charters may carry a balance due before their trip; booking credit goes on the customer's credit account; legacy waiver status is kept for staff to read, as information only. No provider is called. Waiver email: a batch saved with waiver_notifications send_at_cutover emails its new guests their waiver requests as it is saved; one saved with hold_until_staff_release holds that email until an owner releases it (POST .../import-runs/{runId}/waiver-email). The booking's own emails are not sent for imported bookings.\n\nA commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
+        "description": "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Private charters may carry a balance due before their trip; booking credit goes on the customer's credit account; legacy waiver status is kept for staff to read, as information only. Saving sends no email and calls no provider. Waiver email follows afterwards: the cron sends the batch's guests their waiver requests a few bookings at a time, under an hourly cap per operator, right away for a batch saved with waiver_notifications send_at_cutover, and once an owner releases it (POST .../import-runs/{runId}/waiver-email) for one saved with hold_until_staff_release. The booking's own emails are not sent for imported bookings.\n\nA commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
         "security": [
           {
             "accessJwt": []
@@ -47184,8 +47184,8 @@
           "imports",
           "waivers"
         ],
-        "summary": "Send a saved batch's waiver email",
-        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release created its guests' waiver requests but emailed none; the first call releases the batch, once, and emails them. A batch saved with send_at_cutover emailed them as it was saved. Either way, a call emails only the requests that never had an email (a guest with no address yet, or a sending limit held it), for confirmed bookings whose trip has not left, so it is safe to repeat. At most 200 bookings a call; `remaining` says when to call again.\n\nOnly waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+        "summary": "Release a saved batch's waiver email",
+        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.\n\nOnly waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
         "security": [
           {
             "accessJwt": []
@@ -47229,7 +47229,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What this call released and queued",
+            "description": "Whether this call released the batch, and what is still waiting",
             "content": {
               "application/json": {
                 "schema": {
@@ -47243,25 +47243,15 @@
                       "type": "boolean",
                       "description": "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held"
                     },
-                    "queued": {
+                    "waitingBookings": {
                       "type": "integer",
-                      "description": "Waiver emails this call queued"
-                    },
-                    "notSent": {
-                      "type": "integer",
-                      "description": "Waiver requests still without an email: the guest has no address yet, or a sending limit held it. Call again later to send them"
-                    },
-                    "remaining": {
-                      "type": "integer",
-                      "description": "Bookings this call did not reach; call again to continue"
+                      "description": "The batch's confirmed bookings, trip not yet left, that the cron has still to email; it sends a few at a time"
                     }
                   },
                   "required": [
                     "runId",
                     "releasedNow",
-                    "queued",
-                    "notSent",
-                    "remaining"
+                    "waitingBookings"
                   ]
                 }
               }

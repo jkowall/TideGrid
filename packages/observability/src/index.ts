@@ -140,6 +140,16 @@ export interface RequestAttributes {
   "tidegrid.waiver_reminder_sweep.pass_count"?: number;
   "tidegrid.waiver_reminder_sweep.deferred_tenant_count"?: number;
   "tidegrid.waiver_reminder_sweep.stamp_failure_count"?: number;
+  /** Import waiver email sweep (W3-G2.13, part D2). Counts only. */
+  "tidegrid.import_waiver_email_sweep.tenant_count"?: number;
+  "tidegrid.import_waiver_email_sweep.booking_count"?: number;
+  "tidegrid.import_waiver_email_sweep.queued_count"?: number;
+  "tidegrid.import_waiver_email_sweep.failed_tenant_count"?: number;
+  "tidegrid.import_waiver_email_sweep.complete"?: boolean;
+  "tidegrid.import_waiver_email_sweep.turn_count"?: number;
+  "tidegrid.import_waiver_email_sweep.pass_count"?: number;
+  "tidegrid.import_waiver_email_sweep.deferred_tenant_count"?: number;
+  "tidegrid.import_waiver_email_sweep.stamp_failure_count"?: number;
   /** Reconciliation sweep (W3-G2.10). Counts only. */
   "tidegrid.reconciliation_sweep.tenant_count"?: number;
   "tidegrid.reconciliation_sweep.assessed_count"?: number;
@@ -280,6 +290,16 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.waiver_reminder_sweep.pass_count",
   "tidegrid.waiver_reminder_sweep.deferred_tenant_count",
   "tidegrid.waiver_reminder_sweep.stamp_failure_count",
+  // Import waiver email sweep (W3-G2.13, part D2).
+  "tidegrid.import_waiver_email_sweep.tenant_count",
+  "tidegrid.import_waiver_email_sweep.booking_count",
+  "tidegrid.import_waiver_email_sweep.queued_count",
+  "tidegrid.import_waiver_email_sweep.failed_tenant_count",
+  "tidegrid.import_waiver_email_sweep.complete",
+  "tidegrid.import_waiver_email_sweep.turn_count",
+  "tidegrid.import_waiver_email_sweep.pass_count",
+  "tidegrid.import_waiver_email_sweep.deferred_tenant_count",
+  "tidegrid.import_waiver_email_sweep.stamp_failure_count",
   // Reconciliation sweep (W3-G2.10).
   "tidegrid.reconciliation_sweep.tenant_count",
   "tidegrid.reconciliation_sweep.assessed_count",
