@@ -5,6 +5,8 @@ import {
   ImportCommitResponse,
   ImportDryRunRequest,
   ImportDryRunResponse,
+  ImportRunParams,
+  ImportWaiverEmailResponse,
   MAX_IMPORT_ISSUES_LISTED,
   StaffTenantParams,
 } from "@tidegrid/contracts";
@@ -14,13 +16,18 @@ import {
   runImportCommit,
   runImportDryRun,
 } from "@tidegrid/domain-booking";
+import { releaseImportWaiverEmail } from "@tidegrid/domain-waivers";
+import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
+import { waiverDeps } from "../waivers.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 export const importDryRunsPath = "/v1/staff/tenants/{tenantId}/import-dry-runs";
 export const importCommitsPath = "/v1/staff/tenants/{tenantId}/import-commits";
+export const importWaiverEmailPath =
+  "/v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email";
 
 /** JSON-safe copy: the result holds only strings, numbers, booleans, and nulls. */
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -35,6 +42,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
   for (const path of [
     "/v1/staff/tenants/:tenantId/import-dry-runs",
     "/v1/staff/tenants/:tenantId/import-commits",
+    "/v1/staff/tenants/:tenantId/import-runs/:runId/waiver-email",
   ]) {
     app.use(path, async (c, next) => {
       c.header("Cache-Control", "no-store");
@@ -193,12 +201,85 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           successStatus: 200,
         },
       },
-      async (trx, ctx) => plain(commitResponse(await runImportCommit(trx, ctx, input.files))),
+      async (trx, ctx) =>
+        plain(
+          commitResponse(
+            await runImportCommit(trx, ctx, input.files, bookingHooksFor(c.env, deps)),
+          ),
+        ),
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
     return c.json(body as ImportCommitResponse, 200);
   });
+
+  const waiverEmailRoute = createRoute({
+    method: "post",
+    path: importWaiverEmailPath,
+    tags: ["staff", "imports", "waivers"],
+    summary: "Send a saved batch's waiver email",
+    description: [
+      "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release created its guests' waiver requests but emailed none; the first call releases the batch, once, and emails them. A batch saved with send_at_cutover emailed them as it was saved. Either way, a call emails only the requests that never had an email (a guest with no address yet, or a sending limit held it), for confirmed bookings whose trip has not left, so it is safe to repeat. At most 200 bookings a call; `remaining` says when to call again.",
+      "Only waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: ImportRunParams,
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: ImportWaiverEmailResponse } },
+        description: "What this call released and queued",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant, or no saved batch with this id (import_run_not_found)"),
+      422: errorBody("idempotency_key_reused"),
+    },
+  });
+
+  app.openapi(waiverEmailRoute, async (c) => {
+    const { tenantId, runId } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const { body, replayed } = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "imports.run",
+        idempotency: {
+          scope: "staff.import_waiver_email.send",
+          key,
+          route: importWaiverEmailPath,
+          params: { runId },
+          body: {},
+          successStatus: 200,
+        },
+      },
+      async (trx, ctx) => {
+        if (!UUID.test(runId)) {
+          throw new ApiError(404, "import_run_not_found", "No saved batch with this id");
+        }
+        const done = await releaseImportWaiverEmail(trx, ctx, waiverDeps(deps), { runId });
+        if (done.kind === "not_found") {
+          throw new ApiError(404, "import_run_not_found", "No saved batch with this id");
+        }
+        return {
+          runId,
+          releasedNow: done.releasedNow,
+          queued: done.queued,
+          notSent: done.notSent,
+          remaining: done.remaining,
+        } satisfies ImportWaiverEmailResponse;
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    return c.json(body as ImportWaiverEmailResponse, 200);
+  });
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function commitResponse(done: ImportCommitResult): ImportCommitResponse {
   switch (done.kind) {

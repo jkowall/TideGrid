@@ -74,6 +74,11 @@ export {
   onParticipantUpdated,
 } from "./hooks.ts";
 export {
+  type ImportWaiverReleaseResult,
+  RELEASE_BOOKINGS_PER_CALL,
+  releaseImportWaiverEmail,
+} from "./import-release.ts";
+export {
   closeRequestAccess,
   requestIdOf,
   WAIVER_LINK_PATH,

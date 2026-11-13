@@ -116,8 +116,8 @@ export type SendResult =
   /** The email could not be built from the booking's details; nothing was queued. */
   | { kind: "email_invalid" }
   /**
-   * An imported booking: its waiver email is held until the import's release
-   * step (W3-G2.13, part D). The request stays pending, with no email.
+   * An imported booking whose batch holds its waiver email until an owner
+   * releases it (W3-G2.13, part D2). The request stays pending, with no email.
    */
   | { kind: "imported_booking" };
 
@@ -194,10 +194,13 @@ export async function sendWaiverRequest(
   if (!request) throw new Error("waiver request not found in this tenant");
   if (request.state !== "pending") return { kind: "not_pending", state: request.state };
   if (input.kind === "resend" && !input.reason) throw new TypeError("a resend needs a reason");
-  const { rows: sourceRows } = await sql<{ source: string }>`
-    select source from bookings
-     where tenant_id = ${ctx.tenantId} and id = ${request.booking_id}`.execute(trx);
-  if (sourceRows[0]?.source === "imported") return { kind: "imported_booking" };
+  // An imported booking whose batch holds its waiver email until an owner
+  // releases it (W3-G2.13, part D2).
+  const { rows: heldRows } = await sql<{ held: boolean }>`
+    select app.import_waiver_email_held(${ctx.tenantId}, ${request.booking_id}) as held`.execute(
+    trx,
+  );
+  if (heldRows[0]?.held === true) return { kind: "imported_booking" };
 
   const booking =
     input.booking ?? (await loadBookingContext(trx, ctx.tenantId, request.booking_id));

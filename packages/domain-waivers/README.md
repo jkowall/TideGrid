@@ -162,6 +162,8 @@ Pulled forward into the demo by the owner on 2026-11-08 ([decision register](../
 
 Each also carries the request (state, signer, version, when assigned), the evidence summary, the latest delivery (generation, masked address, the email's state), and when staff may resend. The trip view adds totals: signed, waiting, needing attention, and places nobody has been named for.
 
+**Imported bookings (W3-G2.13, part D2).** An import commit runs the `bookingConfirmed` hook for each booking given new guests, so they get requests as any confirmed booking does. `sendWaiverRequest` answers `imported_booking` while the batch that saved the booking holds its waiver email (`app.import_waiver_email_held`, 0048). `releaseImportWaiverEmail` records an owner's release of a held batch, once, and emails the batch's requests that never had an email, at most 200 bookings a call; repeating it sends nothing twice.
+
 **Legacy waiver status.** For a participant an import brought in with a `waivers.csv` row (W3-G2.13, part D1), the staff reads add `legacy`: what the earlier waiver tool said (`signed`, `unsigned`, or `unknown`, the signing date, the tool's name). It never changes `status`, and the guest reads leave it out.
 
 **The booker's view.** `listGuestBookingWaivers` gives the management page (lane 1's `/manage`, in its booking session) each named person's status, who signs, the signing day, and where the latest email went, masked. It leaves out ids, evidence, the text, the typed signature and the guardian's name, and the delivery history: the booker named the party but signs only for themselves. `applies` is false when no waiver applies or the booking is canceled, and the page then shows nothing.

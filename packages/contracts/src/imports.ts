@@ -157,3 +157,28 @@ export const ImportCommitResponse = ImportDryRunResponse.extend({
   counts: ImportCommitCounts.nullable(),
 });
 export type ImportCommitResponse = z.infer<typeof ImportCommitResponse>;
+
+export const ImportRunParams = z.object({
+  tenantId: z.string().describe("Tenant UUID; anything else answers 404"),
+  runId: z
+    .string()
+    .describe("A saved batch's run UUID (the commit's run.id); anything else answers 404"),
+});
+
+export const ImportWaiverEmailResponse = z.object({
+  runId: z.uuid(),
+  releasedNow: z
+    .boolean()
+    .describe(
+      "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held",
+    ),
+  queued: z.number().int().describe("Waiver emails this call queued"),
+  notSent: z
+    .number()
+    .int()
+    .describe(
+      "Waiver requests still without an email: the guest has no address yet, or a sending limit held it. Call again later to send them",
+    ),
+  remaining: z.number().int().describe("Bookings this call did not reach; call again to continue"),
+});
+export type ImportWaiverEmailResponse = z.infer<typeof ImportWaiverEmailResponse>;

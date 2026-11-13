@@ -47177,6 +47177,269 @@
         }
       }
     },
+    "/v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email": {
+      "post": {
+        "tags": [
+          "staff",
+          "imports",
+          "waivers"
+        ],
+        "summary": "Send a saved batch's waiver email",
+        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release created its guests' waiver requests but emailed none; the first call releases the batch, once, and emails them. A batch saved with send_at_cutover emailed them as it was saved. Either way, a call emails only the requests that never had an email (a guest with no address yet, or a sending limit held it), for confirmed bookings whose trip has not left, so it is safe to repeat. At most 200 bookings a call; `remaining` says when to call again.\n\nOnly waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A saved batch's run UUID (the commit's run.id); anything else answers 404"
+            },
+            "required": true,
+            "description": "A saved batch's run UUID (the commit's run.id); anything else answers 404",
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What this call released and queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "releasedNow": {
+                      "type": "boolean",
+                      "description": "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held"
+                    },
+                    "queued": {
+                      "type": "integer",
+                      "description": "Waiver emails this call queued"
+                    },
+                    "notSent": {
+                      "type": "integer",
+                      "description": "Waiver requests still without an email: the guest has no address yet, or a sending limit held it. Call again later to send them"
+                    },
+                    "remaining": {
+                      "type": "integer",
+                      "description": "Bookings this call did not reach; call again to continue"
+                    }
+                  },
+                  "required": [
+                    "runId",
+                    "releasedNow",
+                    "queued",
+                    "notSent",
+                    "remaining"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no saved batch with this id (import_run_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/important-links": {
       "get": {
         "tags": [

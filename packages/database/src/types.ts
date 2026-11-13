@@ -1500,6 +1500,7 @@ export interface Database
   import_customers: ImportCustomersTable;
   import_bookings: ImportBookingsTable;
   import_waiver_statuses: ImportWaiverStatusesTable;
+  import_email_releases: ImportEmailReleasesTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1935,6 +1936,17 @@ export interface ImportWaiverStatusesTable {
   legacy_signed_on: FixedDefault<string | null>;
   legacy_system: FixedDefault<string | null>;
   created_at: Stamped;
+}
+
+/** An owner's release of a batch's held waiver email (0048). Append-only, once a batch. */
+export interface ImportEmailReleasesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  run_id: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
 }
 
 /** An imported booking's legacy terms (0044). */

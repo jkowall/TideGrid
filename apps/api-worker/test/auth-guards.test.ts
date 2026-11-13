@@ -55,6 +55,7 @@ describe("the public entry hides staff and sign-in routes", () => {
     // The standard CSV import's dry run (W3-G2.13).
     ["POST", `/v1/staff/tenants/${tenant}/import-dry-runs`],
     ["POST", `/v1/staff/tenants/${tenant}/import-commits`],
+    ["POST", `/v1/staff/tenants/${tenant}/import-runs/${tenant}/waiver-email`],
     // Important links (W3-G2.14b-rest).
     ["GET", `/v1/staff/tenants/${tenant}/important-links`],
     ["POST", `/v1/staff/tenants/${tenant}/important-links`],
@@ -328,6 +329,7 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/fee-invoices",
         // The standard CSV import's dry run (W3-G2.13).
         "/v1/staff/tenants/{tenantId}/import-dry-runs",
+        "/v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email",
         "/v1/staff/tenants/{tenantId}/import-commits",
         "/v1/staff/tenants/{tenantId}/important-links",
         "/v1/staff/tenants/{tenantId}/important-links/{linkId}",

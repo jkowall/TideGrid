@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### Saving a standard CSV import, part D2, waiver email for imported guests (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0048_import_waiver_email.sql`, on part D1. Synthetic data only; no provider call, no deploy.
+
+- **Built.** Saving a batch creates its guests' waiver requests. A `send_at_cutover` batch emails them at once; a `hold_until_staff_release` batch waits until an owner calls the new release endpoint, once, which emails the requests that never had an email. The booking's own emails stay held.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `import-release.integration.test.ts` in `domain-waivers` (sent at cutover; held, refused to staff, refused to booking staff as a release, released once by an owner with nothing sent twice; another tenant's batch not found; a batch that never held cannot be released); `domain-waivers` integration 102 of 102; import integration 13 of 13; `api-worker` unit 297 of 297.
+- **Still open.** Coordinator defaults D1 to D4 await the owner. The booking's own emails for imported bookings, and a guest paying an imported charter's balance.
+
 ### Saving a standard CSV import, part D1, legacy waiver status (W3-G2.13), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0047_import_waiver_status.sql`, on part C. Synthetic data only; no provider call, no deploy.

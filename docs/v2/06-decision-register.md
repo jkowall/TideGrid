@@ -8,6 +8,15 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.13, saving a standard CSV import, part D2, waiver email for imported guests (coordinator defaults pending owner confirmation)
+
+Part D, second half, under the owner's answer to the draft's question 9 (waiver email for imported bookings is on by default, set once per batch). Migration `0048` and the [database README](../../packages/database/README.md#import-waiver-email-0048); API `POST /v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email`. Coordinator defaults, pending owner confirmation:
+
+- **D1: requests at the save.** Saving a batch gives each booking with new guests its waiver requests, as any confirmed booking gets them. With `send_at_cutover` they are emailed at once; with `hold_until_staff_release` they wait, and staff "send again" answers `waiver_imported_booking` until the batch is released.
+- **D2: an owner releases, once.** Releasing a held batch is owners only, as importing is, and recorded once a batch. The same call, on any saved batch, emails the requests that never had an email (a guest with no address then, or a sending limit held it), so it can be repeated safely; nothing already sent goes twice. At most 200 bookings a call, for confirmed bookings whose trip has not left.
+- **D3: only waiver email.** The booking's own emails (confirmation, management link, reminders, balance, cancellation, move notices) and participant invitations stay held for every imported booking, as part A's D4 and D11 say; they need wording for a booking paid before TideGrid, which is a later step. Guests do not pay an imported charter's balance through TideGrid yet.
+- **D4: sending limits apply.** Imported waiver email counts against the usual limits (including 1,000 an hour for the operator), so a large batch may need more than one call, an hour apart.
+
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part D1, legacy waiver status (coordinator defaults pending owner confirmation)
 
 Part D, first half. What the legacy waiver tool said about each imported participant (`waivers.csv`) is saved for staff to read. Migration `0047` and the [database README](../../packages/database/README.md#import-waiver-status-0047). Coordinator defaults, pending owner confirmation:

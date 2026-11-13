@@ -435,6 +435,10 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 - **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
 - **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
 
+## Import waiver email (0048)
+
+W3-G2.13, part D2. `import_email_releases` records an owner's release of a saved batch whose manifest said `hold_until_staff_release`: once a batch (`import_email_releases_once`); the trigger requires a staff actor who is an active owner (`import_email_releases_owner`, 42501) and a clean commit run that held its email (`import_email_releases_run`, 23514), and stamps the actor. Append-only, forced row-level security, SELECT and INSERT only. `app.import_waiver_email_held(tenant, booking)` is true for an imported booking whose saving batch held its waiver email and has no release; the waiver delivery path reads it before any send.
+
 ## Import waiver status (0047)
 
 W3-G2.13, part D1. `import_records.file` takes `waivers.csv`. `import_waiver_statuses` holds what the legacy waiver tool said about an imported participant: `signed`, `unsigned`, or `unknown`, the signing date (only with `signed`), and the tool's name. One a participant (`import_waiver_statuses_participant`). The insert trigger requires its `waivers.csv` ledger row from this transaction's clean commit and the participant that the `participants.csv` record with the same source system and key created (`import_waiver_statuses_record`, 23514). Information only: no waiver table reads it, and it holds no legacy document or signature. Append-only, forced row-level security, SELECT and INSERT only.
