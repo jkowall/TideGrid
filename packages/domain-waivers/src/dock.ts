@@ -148,13 +148,27 @@ export function lastNameMatches(bookerName: string, typed: string): boolean {
 
 /** How the dock shows a person: the first name and the last name's initial. */
 export function dockDisplayName(name: string): string {
-  const words = cleanLine(name)
-    .split(" ")
-    .filter((w) => w.length > 0);
-  if (words.length <= 1) return words[0] ?? "";
-  const lastWord = words[words.length - 1] ?? "";
-  const initial = Array.from(lastWord)[0] ?? "";
-  return `${words[0]} ${initial}.`;
+  const clean = cleanLine(name);
+  const split = (text: string) => text.split(/[\s,]+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
+  const isSuffix = (w: string) => NAME_SUFFIXES.has(bare(w.toLocaleLowerCase("en-US")));
+  let first: string | undefined;
+  let last: string[];
+  const comma = clean.indexOf(",");
+  const afterComma = comma > 0 ? split(clean.slice(comma + 1)) : [];
+  if (comma > 0 && !afterComma.every(isSuffix)) {
+    // "Smith, John": the first name is after the comma, never the surname.
+    first = afterComma.find((w) => !isSuffix(w));
+    last = split(clean.slice(0, comma));
+  } else {
+    const words = split(comma > 0 ? clean.slice(0, comma) : clean);
+    while (words.length > 2 && isSuffix(words[words.length - 1] ?? "")) words.pop();
+    first = words[0];
+    last = words.slice(1);
+  }
+  if (!first) return "";
+  const lastWord = last[last.length - 1];
+  const initial = lastWord ? Array.from(lastWord)[0] : undefined;
+  return initial ? `${first} ${initial}.` : first;
 }
 
 export type DockPersonStatus = "signed" | "to_sign" | "not_needed" | "ask_crew";
@@ -350,6 +364,8 @@ export async function startDockSigning(
   const requestId = person?.request?.state === "pending" ? person.request.id : null;
   if (!person || !requestId) return { kind: "not_pending" };
   const request = await lockRequest(trx, ctx.tenantId, requestId);
+  // A move or cancellation may have committed while this waited for the lock.
+  if (!(await loadDockLookup(trx, ctx.tenantId, input.secret))) return { kind: "lookup_ended" };
   if (
     request?.state !== "pending" ||
     request.booking_id !== lookup.bookingId ||

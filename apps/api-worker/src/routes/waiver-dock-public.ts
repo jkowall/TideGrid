@@ -41,6 +41,12 @@ const lookupEnded = () =>
     "This lookup has ended. Enter your booking code and last name again",
   );
 
+/** A database check, by its constraint name, or null. */
+function dbCheck(err: unknown): string | null {
+  const db = err as { code?: unknown; constraint_name?: unknown } | null;
+  return db?.code === "23514" && typeof db.constraint_name === "string" ? db.constraint_name : null;
+}
+
 /** The matched lookup's secret, from `Authorization: Bearer <secret>`. Never in a URL. */
 function lookupSecret(c: Context<AppEnv>): string {
   const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(c.req.header("authorization") ?? "");
@@ -110,14 +116,24 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
   app.openapi(lookupRoute, async (c) => {
     const input = c.req.valid("json");
     // A miss is recorded and committed, so it counts, then answered.
-    const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
-      const found = await lookUpAtDock(trx, ctx, input);
-      if (found.kind !== "matched") return { kind: found.kind } as JsonObject;
-      return {
-        kind: "matched",
-        response: { lookupSecret: found.secret, party: partyJson(found.party) },
-      } as JsonObject;
-    });
+    let body: JsonObject;
+    try {
+      ({ body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
+        const found = await lookUpAtDock(trx, ctx, input);
+        if (found.kind !== "matched") return { kind: found.kind } as JsonObject;
+        return {
+          kind: "matched",
+          response: { lookupSecret: found.secret, party: partyJson(found.party) },
+        } as JsonObject;
+      }));
+    } catch (err) {
+      // The database's own checks, met only in a race: the booking changed
+      // between the read and the record, or another try took the last place.
+      const check = dbCheck(err);
+      if (check === "waiver_dock_lookups_booking") throw notFound();
+      if (check === "waiver_dock_lookups_limit") throw limited();
+      throw err;
+    }
     switch (body.kind) {
       case "invalid":
         throw new ApiError(400, "dock_code_invalid", "A booking code has only letters and digits");
@@ -164,7 +180,13 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
     const { position } = c.req.valid("json");
     const wdeps = waiverDeps(deps);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
-      const started = await startDockSigning(trx, ctx, wdeps, { secret, position });
+      const started = await startDockSigning(trx, ctx, wdeps, { secret, position }).catch(
+        (err: unknown) => {
+          // The database's own recheck of the lookup, met only in a race.
+          if (dbCheck(err) === "waiver_assisted_links_dock") throw lookupEnded();
+          throw err;
+        },
+      );
       switch (started.kind) {
         case "lookup_ended":
           throw lookupEnded();

@@ -68,5 +68,9 @@ describe("the dock lookup's comparisons", () => {
     expect(dockDisplayName("Ana María Muñoz")).toBe("Ana M.");
     expect(dockDisplayName("  Kid   Ögren ")).toBe("Kid Ö.");
     expect(dockDisplayName("Cher")).toBe("Cher");
+    expect(dockDisplayName("Smith, John")).toBe("John S.");
+    expect(dockDisplayName("John Smith Jr.")).toBe("John S.");
+    expect(dockDisplayName("John Smith, Jr.")).toBe("John S.");
+    expect(dockDisplayName("John Smith III")).toBe("John S.");
   });
 });
