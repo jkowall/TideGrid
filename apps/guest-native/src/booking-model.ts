@@ -2,6 +2,7 @@ import {
   type AvailableTrip,
   BookerDetails,
   type CheckoutSession,
+  type FakePaymentControlResponse,
   type GuestParticipantWaiver,
   type PolicyOutcome,
   type PolicyTerms,
@@ -20,8 +21,8 @@ import {
   inZone,
   todayIn,
 } from "@tidegrid/design-system/format";
-import type { QuoteBody } from "./booking-api.ts";
-import type { Failure } from "./http.ts";
+import type { QuoteBody, TestPaymentOutcome } from "./booking-api.ts";
+import { type Failure, outcomeUnknown, type Result } from "./http.ts";
 
 /**
  * The booking journey's rules and words, apart from React. A port of the
@@ -335,6 +336,69 @@ const pollDelaysMs = [500, 1_000, 1_500, 2_000, 3_000, 5_000];
 export function pollDelay(attempt: number): number {
   return pollDelaysMs[Math.min(attempt, pollDelaysMs.length - 1)] ?? 5_000;
 }
+
+/**
+ * Where a test payment's event stands, as the screen knows it. The demo's fake
+ * provider never retries a delivery on its own: the only way a settled
+ * payment's event reaches the booking again is the guest sending the same
+ * settle, which redelivers the stored event and can't charge twice. Until the
+ * screen knows the event arrived, that path has to stay open, past the hold's
+ * end, and the checkout must not be canceled under it: a cancel would close
+ * the checkout with nothing left to deliver the event, so a settled payment
+ * would get neither a booking nor a refund.
+ *
+ * - `none`: no test payment sent for this checkout.
+ * - `delivered`: the provider's event reached the webhook.
+ * - `undelivered`: the payment settled, but the webhook didn't accept its
+ *   event (a refusal, an error, a 200 that rejected it, or no delivery made),
+ *   so it reached no booking.
+ * - `unknown`: no readable answer, so the payment may have settled with its
+ *   event undelivered.
+ */
+export type PaymentDelivery = "none" | "delivered" | "undelivered" | "unknown";
+
+/** Outcomes the webhook answers 200 with but doesn't process the event for. */
+const rejectedOutcomes: ReadonlySet<string> = new Set(["unknown_account", "payload_mismatch"]);
+
+/** What one settle's answer says about the event, given what was known before it. */
+export function afterSettle(
+  before: PaymentDelivery,
+  r: Result<Pick<FakePaymentControlResponse, "delivery">>,
+): PaymentDelivery {
+  if (r.kind === "ok") {
+    // Only the webhook's 2xx records the event: a 4xx refuses it before recording.
+    // A 200 can still reject it: an unknown account or a mismatched payload is
+    // answered 200 without processing this event, so it reached no booking.
+    const delivery = r.value.delivery;
+    const accepted =
+      delivery !== null &&
+      delivery.status >= 200 &&
+      delivery.status < 300 &&
+      !(delivery.outcome !== null && rejectedOutcomes.has(delivery.outcome));
+    return accepted ? "delivered" : "undelivered";
+  }
+  // A lost answer may hide a settled payment whose delivery failed. It can't
+  // undo a delivery already made, nor confirm one that failed.
+  if (outcomeUnknown(r)) return before === "none" ? "unknown" : before;
+  // A definite refusal settled nothing new: what was known still holds.
+  return before;
+}
+
+/** The same settle must be sent again before anything else ends the checkout. */
+export const mustResend = (delivery: PaymentDelivery) =>
+  delivery === "undelivered" || delivery === "unknown";
+
+/**
+ * Whether this outcome may be sent now. While the event is owed, only the
+ * outcome already sent: a lost first request means nothing settled, so the
+ * other outcome would settle as the guest's new choice, while an arrived one
+ * replays its first outcome, and the guest can't tell which happened.
+ */
+export const maySend = (
+  delivery: PaymentDelivery,
+  sent: TestPaymentOutcome | null,
+  outcome: TestPaymentOutcome,
+) => !mustResend(delivery) || sent === null || sent === outcome;
 
 /** A checkout's short reference for support, from its id: "3BA66E4F". */
 export function shortReference(sessionId: string): string {

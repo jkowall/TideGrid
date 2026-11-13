@@ -15,10 +15,13 @@ import {
   settleTestPayment,
 } from "./booking-api.ts";
 import {
+  afterSettle,
   bookerProblems,
   checkoutTrouble,
   initialSelection,
   linkTokenFrom,
+  maySend,
+  mustResend,
   partyLimits,
   partyProblem,
   quoteBody,
@@ -335,6 +338,113 @@ describe("the journey's states", () => {
     expect(linkTokenFrom(`  ${token} `)).toBe(token);
     expect(linkTokenFrom("https://demo-harbor.book.tidegrid.us/manage")).toBeNull();
     expect(linkTokenFrom(`${token}x`)).toBeNull();
+  });
+});
+
+describe("a test payment's event", () => {
+  const settled = (status: number, outcome: string | null = "confirmed") => ({
+    kind: "ok" as const,
+    value: { delivery: { status, outcome, duplicate: null } },
+  });
+  const network = { kind: "network" as const };
+  const refused = (status: number, code = "refused") => ({
+    kind: "refused" as const,
+    status,
+    code,
+    message: "",
+  });
+
+  it("keeps resending open after a lost answer, which may hide a failed delivery", () => {
+    // The gap: the settle went through and its webhook delivery failed, but
+    // the answer never arrived. The provider never retries on its own, so
+    // unless the app may send the same settle again past the hold's end, the
+    // payment stays settled with no booking and no refund.
+    expect(afterSettle("none", network)).toBe("unknown");
+    expect(afterSettle("none", { kind: "unreadable" })).toBe("unknown");
+    expect(afterSettle("none", refused(502, "upstream"))).toBe("unknown");
+    expect(mustResend(afterSettle("none", network))).toBe(true);
+  });
+
+  it("counts only a delivery the webhook accepted", () => {
+    // The webhook refuses a bad signature, source, or size before recording the event.
+    for (const status of [400, 403, 404, 413, 500, 503]) {
+      expect(afterSettle("none", settled(status))).toBe("undelivered");
+    }
+    // Null means the delivery was held back, so nothing was recorded either.
+    expect(afterSettle("none", { kind: "ok", value: { delivery: null } })).toBe("undelivered");
+    expect(afterSettle("undelivered", settled(200))).toBe("delivered");
+  });
+
+  it("keeps the event owed when the webhook answers 200 but rejects it", () => {
+    // An unknown account or a mismatched payload answers 200 without
+    // processing the event, so no booking got it: cancel must stay closed.
+    for (const outcome of ["unknown_account", "payload_mismatch"]) {
+      const d = afterSettle("none", settled(200, outcome));
+      expect(d).toBe("undelivered");
+      expect(mustResend(d)).toBe(true);
+    }
+    expect(afterSettle("none", settled(200, "received"))).toBe("delivered");
+  });
+
+  it("keeps a failed delivery owed through retries that settle nothing", () => {
+    let d = afterSettle("none", settled(503));
+    expect(d).toBe("undelivered");
+    // A retry rate limited, refused, or lost leaves the event undelivered,
+    // so the checkout still must not be canceled under it.
+    for (const r of [refused(429, "rate_limited"), refused(404, "payment_not_found"), network]) {
+      d = afterSettle(d, r);
+      expect(d).toBe("undelivered");
+      expect(mustResend(d)).toBe(true);
+    }
+    // Only a delivery the webhook accepted ends it.
+    d = afterSettle(d, settled(200));
+    expect(d).toBe("delivered");
+    expect(mustResend(d)).toBe(false);
+  });
+
+  it("allows only the outcome already sent while its event is owed", () => {
+    // A decline whose request was lost before it reached the provider: nothing
+    // settled. Sending success now would settle a payment the guest can't
+    // tell apart from a replayed decline, so only the decline may follow.
+    const d = afterSettle("none", network);
+    expect(maySend(d, "fail", "fail")).toBe(true);
+    expect(maySend(d, "fail", "succeed")).toBe(false);
+    expect(maySend("undelivered", "succeed", "fail")).toBe(false);
+    // Once nothing is owed, either outcome may be chosen.
+    expect(maySend("none", null, "succeed")).toBe(true);
+    expect(maySend("delivered", "fail", "succeed")).toBe(true);
+  });
+
+  it("lets a definite refusal or a delivered event end the checkout as usual", () => {
+    expect(afterSettle("none", refused(429, "rate_limited"))).toBe("none");
+    expect(afterSettle("none", settled(200))).toBe("delivered");
+    // A lost answer to a later send can't undo a delivery already made.
+    expect(afterSettle("delivered", network)).toBe("delivered");
+    expect(mustResend("none")).toBe(false);
+  });
+
+  it("checks for an owed event before canceling, from the button and from Back", () => {
+    const source = readFileSync(join(import.meta.dirname, "BookScreen.tsx"), "utf8");
+    const cancel = source.slice(
+      source.indexOf("const cancel = "),
+      source.indexOf("cancelCheckout(endpoint, session.id, secret);\n      if (!still())"),
+    );
+    expect(cancel).toContain("if (mustResend(delivery.current))");
+    const back = source.slice(source.indexOf("const back = "), source.indexOf("Alert.alert("));
+    expect(back).toContain("if (mustResend(delivery.current))");
+    expect(source).toContain("disabled={working || left <= 0 || resend}");
+    // An owed or unknown event frees the pay buttons at once, rather than waiting on a read.
+    const pay = source.slice(
+      source.indexOf("const pay = "),
+      source.indexOf("const resendFirst = "),
+    );
+    const owed = pay.indexOf("if (!definiteRefusal && mustResend(delivery.current))");
+    expect(owed).toBeGreaterThan(-1);
+    expect(owed).toBeLessThan(pay.indexOf("watch("));
+    expect(pay.slice(owed, pay.indexOf("return;", owed))).toContain("setWaiting(null)");
+    // A read started by the hold's end or by Check again leaves the pay buttons free while it is owed.
+    const watch = source.slice(source.indexOf("const watch = "), source.indexOf("const hold = "));
+    expect(watch).toContain("setWaiting(mustResend(delivery.current) ? null : label)");
   });
 });
 

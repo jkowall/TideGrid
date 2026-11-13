@@ -23,6 +23,7 @@ import {
 import {
   addOnHint,
   addOnLimit,
+  afterSettle,
   bookerProblems,
   checkoutTrouble,
   deadlineText,
@@ -32,8 +33,11 @@ import {
   guests,
   initialSelection,
   isCharter,
+  maySend,
+  mustResend,
   outcomeText,
   type PartyLimits,
+  type PaymentDelivery,
   partyLimits,
   partyProblem,
   partySize,
@@ -128,9 +132,19 @@ export function BookScreen({
   const [waiting, setWaiting] = useState<string | null>(null);
   /** The server's clock as the app estimates it: holds and prices expire on its time. */
   const clock = useRef(serverClock);
-  /** A settled test payment whose event didn't reach the booking: it must be sent again, even after the hold's end. */
-  const undelivered = useRef(false);
-  const [mustResend, setMustResend] = useState(false);
+  /**
+   * Whether the test payment's event reached the booking. While it may not
+   * have, the same payment must be sent again, even after the hold's end, and
+   * the checkout is not canceled under it (see `PaymentDelivery`).
+   */
+  const delivery = useRef<PaymentDelivery>("none");
+  const [resend, setResend] = useState(false);
+  /** The outcome last sent for this checkout: while its event is owed, only it may be sent again. */
+  const sent = useRef<TestPaymentOutcome | null>(null);
+  const setDelivery = (next: PaymentDelivery) => {
+    delivery.current = next;
+    setResend(mustResend(next));
+  };
   const [now, setNow] = useState(Date.now());
   const quoteKey = useRef(new CommandKey());
   const attempt = useRef(new CheckoutAttempt());
@@ -263,7 +277,9 @@ export function BookScreen({
     const mine = polls.current;
     const still = () => alive.current && epoch.current === step && polls.current === mine;
     setStalled(false);
-    setWaiting(label);
+    // While the payment's event is owed, reading never holds the pay buttons:
+    // only sending it again can move the checkout, and the hold's end may not have reached the server yet.
+    setWaiting(mustResend(delivery.current) ? null : label);
     void (async () => {
       let lateUntil: number | null = null;
       for (let i = 0; ; i++) {
@@ -273,7 +289,7 @@ export function BookScreen({
         if (!still()) return;
         if (r.kind === "ok" && finalStates.has(r.value.state)) {
           // A payment whose event never arrived can still book or refund once resent: keep the page.
-          if (r.value.state === "expired" && undelivered.current) {
+          if (r.value.state === "expired" && mustResend(delivery.current)) {
             // Stop reading and free the pay buttons, so the payment can be sent again.
             setWaiting(null);
             setStalled(true);
@@ -341,8 +357,8 @@ export function BookScreen({
       doubtedFields.current = null;
       setInDoubt(false);
       paymentSent.current = false;
-      undelivered.current = false;
-      setMustResend(false);
+      setDelivery("none");
+      sent.current = null;
       const { session, payment } = r.value;
       if (payment && payment.provider !== "fake" && session.state === "open") {
         // The demo app pays only with the demo's test provider; give the seats back at once.
@@ -374,9 +390,34 @@ export function BookScreen({
     exclusive(outcome, async (still) => {
       setNotice(null);
       // Before sending: a lost or late answer may still have settled the payment.
+      if (!maySend(delivery.current, sent.current, outcome)) return;
       paymentSent.current = true;
+      sent.current = outcome;
       const r = await settleTestPayment(endpoint, payment, outcome);
       if (!still()) return;
+      // A lost answer keeps resending open past the hold's end, as a failed delivery does.
+      setDelivery(afterSettle(delivery.current, r));
+      const definiteRefusal = r.kind === "refused" && !outcomeUnknown(r);
+      if (!definiteRefusal && mustResend(delivery.current)) {
+        // Settled with its event not recorded, or maybe: only the same settle can tell.
+        // Stop any read started when the hold ran out, and free the pay buttons.
+        polls.current += 1;
+        setWaiting(null);
+        setNotice(
+          r.kind === "network"
+            ? {
+                kind: "notice",
+                title: "We couldn't reach the booking service",
+                body: "Check your connection, then press the same button again. It can't charge twice.",
+              }
+            : {
+                kind: "notice",
+                title: "The test payment hasn't reached your booking yet",
+                body: "Press the same button again. It can't charge twice.",
+              },
+        );
+        return;
+      }
       if (r.kind === "network") {
         setNotice({
           kind: "notice",
@@ -406,27 +447,23 @@ export function BookScreen({
         });
         return;
       }
-      const failedDelivery =
-        r.kind === "ok" && r.value.delivery !== null && r.value.delivery.status >= 500;
-      undelivered.current = failedDelivery;
-      setMustResend(failedDelivery);
-      if (failedDelivery) {
-        // Settled, but its event didn't reach the booking: sending again redelivers it.
-        // Stop any read started when the hold ran out, and free the pay buttons.
-        polls.current += 1;
-        setWaiting(null);
-        setNotice({
-          kind: "notice",
-          title: "The test payment hasn't reached your booking yet",
-          body: "Press the same button again. It can't charge twice.",
-        });
-        return;
-      }
       watch(offer, session, secret, outcome);
+    });
+
+  /** Canceling now would close the checkout with its payment's event still to deliver. */
+  const resendFirst = () =>
+    setNotice({
+      kind: "notice",
+      title: "Send the test payment again first",
+      body: "It may not have reached your booking yet. Press the same payment button again. It can't charge twice.",
     });
 
   const cancel = (offer: TripOffer, session: CheckoutSession, secret: string) =>
     exclusive("cancel", async (still) => {
+      if (mustResend(delivery.current)) {
+        resendFirst();
+        return;
+      }
       setNotice(null);
       const r = await cancelCheckout(endpoint, session.id, secret);
       if (!still()) return;
@@ -495,6 +532,10 @@ export function BookScreen({
     }
     if (phase.kind === "pay") {
       if (!phase.payment) return;
+      if (mustResend(delivery.current)) {
+        resendFirst();
+        return;
+      }
       Alert.alert("Leave checkout?", "Canceling releases your hold at once.", [
         { text: "Stay", style: "cancel" },
         {
@@ -748,7 +789,11 @@ export function BookScreen({
             }}
             color={color}
             busy={busy === "succeed" || waiting === "succeed"}
-            disabled={working || (left <= 0 && !mustResend)}
+            disabled={
+              working ||
+              (left <= 0 && !resend) ||
+              !maySend(delivery.current, sent.current, "succeed")
+            }
           />
           <Button
             action={{
@@ -758,7 +803,9 @@ export function BookScreen({
             color={color}
             kind="secondary"
             busy={busy === "fail" || waiting === "fail"}
-            disabled={working || (left <= 0 && !mustResend)}
+            disabled={
+              working || (left <= 0 && !resend) || !maySend(delivery.current, sent.current, "fail")
+            }
           />
           <Button
             action={{
@@ -768,7 +815,7 @@ export function BookScreen({
             color={color}
             kind="secondary"
             busy={busy === "cancel"}
-            disabled={working || left <= 0}
+            disabled={working || left <= 0 || resend}
           />
           <Body muted>
             Canceling releases {isCharter(offer) ? "the boat" : "your seats"} at once. You can
