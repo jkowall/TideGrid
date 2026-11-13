@@ -18,7 +18,7 @@
     "@tidegrid/contracts": "workspace:*",
     "@tidegrid/database": "workspace:*",
     "@tidegrid/observability": "workspace:*",
-    "hono": "^4.13.11",
+    "hono": "^4.13.16",
     "zod": "^4.6.6",
     "@tidegrid/domain-catalog": "workspace:*",
     "@tidegrid/domain-identity": "workspace:*",
