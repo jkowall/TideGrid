@@ -122,14 +122,50 @@ describe("the dock page", () => {
     );
   });
 
-  it("comes back to the party from the signed page, without typing again", async () => {
-    stubApi(() => json(201, { lookupSecret: secret, party: party() }));
+  it("comes back to the party from the signed page, without typing again, and reads it fresh", async () => {
+    const signedNow = party({
+      people: party().people.map((p) =>
+        p.position === 3 ? { ...p, status: "signed", signer: null } : p,
+      ),
+    });
+    const calls = stubApi((call) =>
+      call.path === "/v1/public/waiver-dock/party"
+        ? json(200, { party: signedNow })
+        : json(201, { lookupSecret: secret, party: party() }),
+    );
     renderPage();
     await findBooking();
     await screen.findByRole("heading", { name: "Who's signing?" });
     cleanup();
     renderPage();
     expect(screen.getByRole("heading", { name: "Who's signing?" })).toBeTruthy();
+    // The person who just signed shows as signed, with no button.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Sign for Lee B." })).toBeNull(),
+    );
+    const read = calls.find((c) => c.path === "/v1/public/waiver-dock/party");
+    expect(read?.method).toBe("GET");
+    expect(read?.authorization).toBe(`Bearer ${secret}`);
+    expect(read?.url).not.toContain(secret);
+  });
+
+  it("reads the party again when a waiver no longer waits, and an ended read goes back to the form", async () => {
+    let read = json(200, { party: party({ people: party().people.slice(0, 2) }) });
+    stubApi((call) => {
+      if (call.path === "/v1/public/waiver-dock/lookups")
+        return json(201, { lookupSecret: secret, party: party() });
+      if (call.path === "/v1/public/waiver-dock/party") return read;
+      return refusal(409, "dock_not_pending");
+    });
+    renderPage();
+    await findBooking();
+    fireEvent.click(await screen.findByRole("button", { name: "Sign for Lee B." }));
+    expect(await screen.findByText("That waiver can't be signed here now")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Lee B.")).toBeNull());
+    read = refusal(401, "dock_lookup_ended");
+    cleanup();
+    renderPage();
+    expect(await screen.findByText("Your lookup ended")).toBeTruthy();
   });
 
   it("says the same for every miss, and sends a held guest to the crew", async () => {

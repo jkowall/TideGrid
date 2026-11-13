@@ -2,6 +2,7 @@ import {
   type DockLookupRequest,
   DockLookupResponse,
   type DockParty,
+  DockPartyResponse,
   DockSigningResponse,
 } from "@tidegrid/contracts";
 import { call, type Result } from "../waiver/api.ts";
@@ -39,4 +40,13 @@ export async function startSigning(
     bearer: secret,
   });
   return result.kind === "ok" ? { ...result, value: { path: result.value.path } } : result;
+}
+
+/** Read the matched lookup's party again, as it stands now. */
+export async function readParty(secret: string): Promise<Result<DockParty>> {
+  const result = await call("/v1/public/waiver-dock/party", DockPartyResponse, {
+    method: "GET",
+    bearer: secret,
+  });
+  return result.kind === "ok" ? { ...result, value: result.value.party } : result;
 }

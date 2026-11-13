@@ -30195,6 +30195,221 @@
         }
       }
     },
+    "/v1/public/waiver-dock/party": {
+      "get": {
+        "tags": [
+          "public",
+          "waivers"
+        ],
+        "summary": "Read a matched dock lookup's party again, as it stands now",
+        "description": "Resolves the browser Origin and needs the lookup's secret as a bearer token. The same party a match returns, read fresh, so a guest who just signed for one person sees it. Changes nothing.",
+        "security": [
+          {
+            "dockLookup": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking's party",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "party": {
+                      "type": "object",
+                      "properties": {
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "when": {
+                              "type": "string",
+                              "description": "The departure, in the trip's own time zone"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "when"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The lookup works until this instant (15 minutes); then look up again"
+                        },
+                        "people": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "position": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "The person's place on the booking; send it to start their signing"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "The first name and the last name's initial, as the booking has it"
+                              },
+                              "minor": {
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "signed",
+                                  "to_sign",
+                                  "not_needed",
+                                  "ask_crew"
+                                ],
+                                "description": "signed; to_sign, waiting for a signature that can start here; not_needed; ask_crew, nothing can be signed here yet, so the crew helps"
+                              },
+                              "signer": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "participant",
+                                  "guardian",
+                                  null
+                                ],
+                                "description": "Who signs while it waits: the person, or a minor's parent or guardian; null otherwise"
+                              }
+                            },
+                            "required": [
+                              "position",
+                              "name",
+                              "minor",
+                              "status",
+                              "signer"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "trip",
+                        "expiresAt",
+                        "people"
+                      ],
+                      "description": "The matched lookup's party as it stands now"
+                    }
+                  },
+                  "required": [
+                    "party"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No lookup secret, or the lookup ended: it lapsed, or its booking or trip no longer allows it (dock_lookup_ended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/public/waiver-dock/signings": {
       "post": {
         "tags": [

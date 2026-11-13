@@ -531,6 +531,11 @@ export const DockLookupResponse = z.object({
 });
 export type DockLookupResponse = z.infer<typeof DockLookupResponse>;
 
+export const DockPartyResponse = z.object({
+  party: DockParty.describe("The matched lookup's party as it stands now"),
+});
+export type DockPartyResponse = z.infer<typeof DockPartyResponse>;
+
 export const DockSigningRequest = z.object({
   position: z.number().int().min(1).max(500).describe("The person's position from the party"),
 });

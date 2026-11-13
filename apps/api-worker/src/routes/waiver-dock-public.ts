@@ -3,11 +3,18 @@ import {
   DockLookupRequest,
   DockLookupResponse,
   type DockParty as DockPartyJson,
+  DockPartyResponse,
   DockSigningRequest,
   DockSigningResponse,
 } from "@tidegrid/contracts";
 import type { JsonObject } from "@tidegrid/database";
-import { type DockParty, lookUpAtDock, startDockSigning } from "@tidegrid/domain-waivers";
+import {
+  type DockParty,
+  dockParty,
+  loadDockLookup,
+  lookUpAtDock,
+  startDockSigning,
+} from "@tidegrid/domain-waivers";
 import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
@@ -17,6 +24,7 @@ import { errorBody } from "./responses.ts";
 
 const lookupsPath = "/v1/public/waiver-dock/lookups";
 const signingsPath = "/v1/public/waiver-dock/signings";
+const partyPath = "/v1/public/waiver-dock/party";
 
 const lookupSecurity = [{ dockLookup: [] }];
 
@@ -69,7 +77,7 @@ function partyJson(party: DockParty): DockPartyJson {
  * and starts a signing on the guest's own phone.
  */
 export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  for (const path of [lookupsPath, signingsPath]) {
+  for (const path of [lookupsPath, signingsPath, partyPath]) {
     app.use(path, async (c, next) => {
       await next();
       c.header("Cache-Control", "no-store");
@@ -143,6 +151,38 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
         throw notFound();
     }
     return c.json(body.response as DockLookupResponse, 201);
+  });
+
+  const partyRoute = createRoute({
+    method: "get",
+    path: partyPath,
+    tags: ["public", "waivers"],
+    summary: "Read a matched dock lookup's party again, as it stands now",
+    description:
+      "Resolves the browser Origin and needs the lookup's secret as a bearer token. The same party a match returns, read fresh, so a guest who just signed for one person sees it. Changes nothing.",
+    security: lookupSecurity,
+    responses: {
+      200: {
+        content: { "application/json": { schema: DockPartyResponse } },
+        description: "The booking's party",
+      },
+      401: errorBody(
+        "No lookup secret, or the lookup ended: it lapsed, or its booking or trip no longer allows it (dock_lookup_ended)",
+      ),
+      404: errorBody("No operator at this address"),
+      429: errorBody("Too many requests from this address (rate_limited)"),
+    },
+  });
+
+  app.openapi(partyRoute, async (c) => {
+    const secret = lookupSecret(c);
+    const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
+      const lookup = await loadDockLookup(trx, ctx.tenantId, secret);
+      const party = lookup ? await dockParty(trx, ctx.tenantId, lookup) : null;
+      if (!party) throw lookupEnded();
+      return { party: partyJson(party) } as JsonObject;
+    });
+    return c.json(body as DockPartyResponse, 200);
   });
 
   const signingRoute = createRoute({

@@ -12,7 +12,7 @@ import { type FormEvent, type Ref, useEffect, useRef, useState } from "react";
 import { useNavigate } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
 import type { Result } from "../waiver/api.ts";
-import { type Found, lookUp, startSigning } from "./api.ts";
+import { type Found, lookUp, readParty, startSigning } from "./api.ts";
 import { forgetLookup, recallLookup, rememberLookup } from "./memory.ts";
 import "../waiver/waiver.css";
 
@@ -308,6 +308,28 @@ export function DockPage({
   });
   const moved = useRef(false);
 
+  // Read the party again: someone may have just signed, on this phone or another.
+  const refresh = async (found: Found, trouble: Trouble | null) => {
+    const result = await readParty(found.secret);
+    if (result.kind === "ok") {
+      const fresh = { secret: found.secret, party: result.value };
+      rememberLookup(fresh);
+      setPhase((was) =>
+        was.kind === "party" && was.found.secret === found.secret && was.starting === null
+          ? { kind: "party", found: fresh, starting: null, trouble }
+          : was,
+      );
+    } else if (troubleOf(result) === "ended") {
+      forgetLookup();
+      setPhase({ kind: "form", busy: false, trouble: "ended" });
+    }
+  };
+
+  // Coming back from a signing, the remembered party is from before it.
+  useEffect(() => {
+    if (phase.kind === "party") void refresh(phase.found, null);
+  }, []);
+
   // Focus the heading whenever the page changes what it shows, after the first.
   const shownKey = phase.kind;
   useEffect(() => {
@@ -342,6 +364,7 @@ export function DockPage({
       setPhase({ kind: "form", busy: false, trouble });
     } else {
       setPhase({ kind: "party", found, starting: null, trouble });
+      if (trouble === "not_pending") void refresh(found, trouble);
     }
   };
 
