@@ -321,6 +321,8 @@ export async function buildMoneyReport(
              c.created_at, c.booking_id, null, null, 0, 0, c.amount, 0
         from credit_entries c, bounds
        where c.tenant_id = ${tenantId} and c.created_at >= bounds.f and c.created_at < bounds.u
+         -- Credit carried over by an import (0046) is not money TideGrid moved.
+         and c.kind <> 'import'
       union all
       select a.id, 'fee_assessed', a.created_at, a.booking_id, null, null, 0, 0, 0, a.fee_amount
         from fee_assessments a, bounds

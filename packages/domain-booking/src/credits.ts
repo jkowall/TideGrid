@@ -235,7 +235,7 @@ export async function appendCreditEntry(
       cancellationId: view.cancellationId,
       reinstatesEntryId: view.reinstatesEntryId,
     },
-    topic: `credit.${entry.kind === "issue" ? "issued" : entry.kind === "redeem" ? "redeemed" : entry.kind === "reinstate" ? "reinstated" : "adjusted"}`,
+    topic: `credit.${entry.kind === "issue" ? "issued" : entry.kind === "redeem" ? "redeemed" : entry.kind === "reinstate" ? "reinstated" : entry.kind === "import" ? "imported" : "adjusted"}`,
     payload: { accountId: entry.accountId, entryId: view.id },
   });
   return { kind: "applied", entry: view, duplicate: false };

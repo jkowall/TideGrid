@@ -29,6 +29,8 @@ export interface ImportCommitCounts {
   participants: number;
   payments: number;
   refunds: number;
+  /** Opening booking credits (part C). */
+  credits: number;
   /** Rows imported before, unchanged: nothing written for them. */
   unchanged: number;
 }
@@ -251,6 +253,7 @@ export async function runImportCommit(
     plan.bookings,
     plan.participants,
     plan.payments,
+    plan.credits,
   ]
     .flat()
     .filter((r) => !r.unchanged).length;
@@ -365,6 +368,7 @@ async function writePlan(
     participants: 0,
     payments: 0,
     refunds: 0,
+    credits: 0,
     unchanged: 0,
   };
   const src = plan.sourceSystem;
@@ -665,6 +669,32 @@ async function writePlan(
       .execute();
     if (pay.refund) counts.refunds += 1;
     else counts.payments += 1;
+  }
+
+  // Opening booking credit, on the account of the email its customer books
+  // with; the database takes it only from this commit's ledger row.
+  for (const credit of plan.credits) {
+    if (credit.unchanged) {
+      counts.unchanged += 1;
+      continue;
+    }
+    const email = customers.get(credit.sourceCustomerId)?.email?.trim().toLowerCase();
+    if (!email) throw new Error("a planned credit's customer has no email");
+    const recordId = await record("opening_balances.csv", credit);
+    await sql`
+      insert into credit_accounts (tenant_id, customer_email) values (${tenantId}, ${email})
+      on conflict (tenant_id, customer_email) do nothing`.execute(trx);
+    const { rows: accounts } = await sql<{ id: string }>`
+      select id from credit_accounts
+       where tenant_id = ${tenantId} and customer_email = ${email}`.execute(trx);
+    const accountId = accounts[0]?.id;
+    if (!accountId) throw new Error("a credit account was not found after its insert");
+    await sql`
+      insert into credit_entries (tenant_id, account_id, kind, amount, import_record_id,
+        idempotency_key)
+      values (${tenantId}, ${accountId}, 'import', ${credit.amount}, ${recordId},
+              ${`import:${recordId}`})`.execute(trx);
+    counts.credits += 1;
   }
   return counts;
 }
