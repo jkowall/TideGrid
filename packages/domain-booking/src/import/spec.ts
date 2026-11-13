@@ -79,7 +79,6 @@ export const IMPORT_ISSUE_CODES = [
   "control_total_mismatch",
   // The commit step (W3-G2.13 part A, 2026-11-13).
   "changed_since_import",
-  "import_not_supported_yet",
 ] as const;
 export type ImportIssueCode = (typeof IMPORT_ISSUE_CODES)[number];
 

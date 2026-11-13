@@ -23,10 +23,6 @@ ALTER TABLE public.import_records
     'products.csv', 'trips.csv', 'customers.csv', 'bookings.csv', 'participants.csv',
     'payments.csv', 'opening_balances.csv', 'waivers.csv'));
 
--- The participants an import created, found by the status check below.
-CREATE INDEX import_records_participant_idx ON public.import_records (tenant_id, participant_id)
-  WHERE participant_id IS NOT NULL;
-
 -- 2. Legacy waiver status -------------------------------------------------------------
 
 CREATE TABLE public.import_waiver_statuses (
@@ -48,17 +44,22 @@ CREATE TABLE public.import_waiver_statuses (
 );
 
 -- A status names its waivers.csv ledger row from this transaction's clean
--- commit, and a participant that an import created.
+-- commit, and the participant its own participants.csv record created.
 CREATE FUNCTION app.check_import_waiver_status() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
   NEW.created_at := now();
+  -- The participant is the one the participants.csv record with the same
+  -- source system and key became.
   IF NOT app.import_record_live(NEW.tenant_id, NEW.record_id, 'waivers.csv')
      OR NOT EXISTS (
-       SELECT 1 FROM public.import_records p
-        WHERE p.tenant_id = NEW.tenant_id AND p.file = 'participants.csv'
+       SELECT 1 FROM public.import_records w
+         JOIN public.import_records p
+           ON p.tenant_id = w.tenant_id AND p.file = 'participants.csv'
+          AND p.source_system = w.source_system AND p.dedupe_key = w.dedupe_key
+        WHERE w.tenant_id = NEW.tenant_id AND w.id = NEW.record_id
           AND p.participant_id = NEW.participant_id) THEN
     RAISE EXCEPTION 'a legacy waiver status names its waivers.csv record from this commit and an imported participant'
       USING ERRCODE = '23514', CONSTRAINT = 'import_waiver_statuses_record';

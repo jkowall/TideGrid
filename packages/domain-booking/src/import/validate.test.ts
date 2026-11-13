@@ -155,9 +155,8 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
       computed: 88400,
       matches: true,
     });
-    // An adult without an email is a warning, not a refusal; so is what a
-    // commit cannot save yet (waivers), and a credit's legacy expiry, which
-    // TideGrid credit does not keep.
+    // An adult without an email is a warning, not a refusal; so is a
+    // credit's legacy expiry, which TideGrid credit does not keep.
     expect(run.issues).toEqual([
       expect.objectContaining({
         file: "participants.csv",

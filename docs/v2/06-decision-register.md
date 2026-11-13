@@ -17,6 +17,8 @@ Part D, first half. What the legacy waiver tool said about each imported partici
 - **D3: one status a participant, set once.** A later batch repeating the row is a no-op; a changed row is refused (`changed_since_import`), as for every imported record. A participant's status is never edited in TideGrid.
 - **D4: the date as given.** The legacy signing date is kept as a date with no time zone, and only with `signed`. No legacy document or signature is imported.
 
+With parts B to D1 built, part A's D8 no longer applies: nothing is refused as not supported yet, and the code `import_not_supported_yet` is retired. A later batch adds no waiver status to an imported booking canceled in TideGrid since (`booking_closed`), as part A's D10 says for participants and payments.
+
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part C, opening booking credit (coordinator defaults pending owner confirmation)
 
 Part C of the commit step. A customer's booking credit from the legacy system is carried over. Migration `0046` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Coordinator defaults, pending owner confirmation:

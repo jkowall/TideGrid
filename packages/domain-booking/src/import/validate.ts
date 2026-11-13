@@ -2045,6 +2045,17 @@ export async function validateImport(
       parentRejected("waivers.csv", row, "position", "participant");
       continue;
     }
+    const closedOn = bookingPlans.get(`${s(row, "source_booking_ref")}|${s(row, "trip_date")}`);
+    if (!row.unchanged && closedOn && closedBookings.has(closedOn.row.key)) {
+      report.add(
+        "waivers.csv",
+        row,
+        "source_booking_ref",
+        "booking_closed",
+        "The booking this row adds to was canceled in TideGrid since it was imported.",
+      );
+      continue;
+    }
     const signedOn = s(row, "legacy_signed_on");
     if (signedOn && s(row, "legacy_status") !== "signed") {
       report.add(

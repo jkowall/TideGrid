@@ -437,7 +437,7 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 
 ## Import waiver status (0047)
 
-W3-G2.13, part D1. `import_records.file` takes `waivers.csv`. `import_waiver_statuses` holds what the legacy waiver tool said about an imported participant: `signed`, `unsigned`, or `unknown`, the signing date (only with `signed`), and the tool's name. One a participant (`import_waiver_statuses_participant`). The insert trigger requires its `waivers.csv` ledger row from this transaction's clean commit and a participant an import created (`import_waiver_statuses_record`, 23514). Information only: no waiver table reads it, and it holds no legacy document or signature. Append-only, forced row-level security, SELECT and INSERT only. A partial index on `import_records (tenant_id, participant_id)` serves the trigger.
+W3-G2.13, part D1. `import_records.file` takes `waivers.csv`. `import_waiver_statuses` holds what the legacy waiver tool said about an imported participant: `signed`, `unsigned`, or `unknown`, the signing date (only with `signed`), and the tool's name. One a participant (`import_waiver_statuses_participant`). The insert trigger requires its `waivers.csv` ledger row from this transaction's clean commit and the participant that the `participants.csv` record with the same source system and key created (`import_waiver_statuses_record`, 23514). Information only: no waiver table reads it, and it holds no legacy document or signature. Append-only, forced row-level security, SELECT and INSERT only.
 
 ## Import opening credit (0046)
 
