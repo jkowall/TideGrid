@@ -115,9 +115,9 @@ export type StaffCancelResponse = z.infer<typeof StaffCancelResponse>;
 export const CreditEntry = z.object({
   id: Uuid,
   kind: z
-    .enum(["issue", "redeem", "reinstate", "adjust"])
+    .enum(["issue", "redeem", "reinstate", "adjust", "import"])
     .describe(
-      "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction",
+      "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction. import: carried over from an earlier system by an import",
     ),
   amount: Cents.describe("Positive adds to the balance, negative takes from it"),
   balanceAfter: Cents,

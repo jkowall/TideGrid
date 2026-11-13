@@ -129,6 +129,7 @@ export const ImportCommitCounts = z
     participants: z.number().int(),
     payments: z.number().int(),
     refunds: z.number().int(),
+    credits: z.number().int().describe("Opening booking credits carried over"),
     unchanged: z
       .number()
       .int()

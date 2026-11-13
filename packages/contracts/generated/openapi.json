@@ -38735,9 +38735,10 @@
                                   "issue",
                                   "redeem",
                                   "reinstate",
-                                  "adjust"
+                                  "adjust",
+                                  "import"
                                 ],
-                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction"
+                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction. import: carried over from an earlier system by an import"
                               },
                               "amount": {
                                 "type": "integer",
@@ -39030,9 +39031,10 @@
                                   "issue",
                                   "redeem",
                                   "reinstate",
-                                  "adjust"
+                                  "adjust",
+                                  "import"
                                 ],
-                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction"
+                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction. import: carried over from an earlier system by an import"
                               },
                               "amount": {
                                 "type": "integer",
@@ -46820,6 +46822,10 @@
                         "refunds": {
                           "type": "integer"
                         },
+                        "credits": {
+                          "type": "integer",
+                          "description": "Opening booking credits carried over"
+                        },
                         "unchanged": {
                           "type": "integer",
                           "description": "Rows imported before with the same values: nothing written for them"
@@ -46833,6 +46839,7 @@
                         "participants",
                         "payments",
                         "refunds",
+                        "credits",
                         "unchanged"
                       ],
                       "description": "What the commit wrote"

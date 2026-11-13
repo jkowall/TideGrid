@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### Saving a standard CSV import, part C, opening booking credit (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0046_import_opening_credit.sql`, on part B. Synthetic data only; no provider call, no deploy.
+
+- **Built.** A legacy booking credit is saved as an `import` entry on its customer's credit account. The dry run refuses a customer with no email (`credit_needs_email`) and a credit limited to some products (`credit_restriction_unsupported`), and warns that a legacy expiry is dropped (`credit_never_expires`). Trip and dollar cards stay refused.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` (a credit saved once, a repeat is a no-op, and no other writer can add imported credit; import integration 12 of 12); `validate.test.ts` (the planned credit, no email, a product limit, and a repeat after its dropped expiry passes; import unit 17 of 17); `packages/database` integration suites (72 of 72).
+- **Still open.** Coordinator defaults D1 to D5 await the owner. Legacy waiver status with the import's email release (part D).
+
 ### Saving a standard CSV import, part B, charter balances (W3-G2.13), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0045_import_charter_balances.sql`, on part A (pull request 160). Synthetic data only; no provider call, no deploy.

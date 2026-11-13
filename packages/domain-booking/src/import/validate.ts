@@ -219,6 +219,8 @@ export interface ImportPlan {
     guardianName: string | null;
     guardianEmail: string | null;
   })[];
+  /** Opening booking credit, on its customer's account (part C). */
+  credits: (PlannedRow & { sourceCustomerId: string; amount: number })[];
   payments: (PlannedRow & {
     bookingKey: string;
     refund: boolean;
@@ -1911,20 +1913,16 @@ export async function validateImport(
   }
 
   // Opening balances -----------------------------------------------------------------
-  for (const file of ["opening_balances.csv", "waivers.csv"] as const) {
-    if (rowsOf(file).length > 0) {
-      report.add(
-        file,
-        null,
-        null,
-        "import_not_supported_yet",
-        file === "waivers.csv"
-          ? "Legacy waiver status is checked, but saving it comes with a later part of the import."
-          : "Opening balances are checked, but saving them comes with a later part of the import.",
-        null,
-        notYet,
-      );
-    }
+  if (rowsOf("waivers.csv").length > 0) {
+    report.add(
+      "waivers.csv",
+      null,
+      null,
+      "import_not_supported_yet",
+      "Legacy waiver status is checked, but saving it comes with a later part of the import.",
+      null,
+      notYet,
+    );
   }
   const today = localDateAt(manifest.operatorTimeZone, nowMs);
   for (const row of rowsOf("opening_balances.csv")) {
@@ -1959,6 +1957,17 @@ export async function validateImport(
         "A booking credit has an amount.",
       );
     }
+    // TideGrid keeps a customer's credit under the email they book with.
+    const holder = customerRows.get(s(row, "source_customer_id") as string);
+    if (holder && !s(holder, "email")) {
+      report.add(
+        "opening_balances.csv",
+        row,
+        "source_customer_id",
+        "credit_needs_email",
+        "A booking credit belongs to the email its customer books with, and this customer has none.",
+      );
+    }
     for (const c of ["lot_kind", "units"]) {
       if ((row.raw.get(c) ?? "") !== "") {
         report.add(
@@ -1986,8 +1995,21 @@ export async function validateImport(
           break;
         }
       }
+      // TideGrid credit applies to any of the operator's trips, so a lot
+      // limited to some products cannot be carried over as it was sold.
+      if (!row.refused) {
+        report.add(
+          "opening_balances.csv",
+          row,
+          "eligible_source_product_ids",
+          "credit_restriction_unsupported",
+          "TideGrid booking credit applies to every trip; a credit limited to some products is not carried over.",
+        );
+      }
     }
-    const expires = s(row, "expires_on");
+    // A credit imported before is a no-op, so its dropped legacy date no
+    // longer matters once it passes.
+    const expires = row.unchanged ? null : s(row, "expires_on");
     if (expires && expires < today) {
       report.add(
         "opening_balances.csv",
@@ -1996,6 +2018,16 @@ export async function validateImport(
         "balance_expired",
         `The balance expired before today (${today}).`,
         expires,
+      );
+    } else if (expires) {
+      report.add(
+        "opening_balances.csv",
+        row,
+        "expires_on",
+        "credit_never_expires",
+        "TideGrid booking credit never expires, so this credit will not expire on its legacy date.",
+        expires,
+        "warning",
       );
     }
   }
@@ -2228,6 +2260,11 @@ export async function validateImport(
       email: opt(row, "email"),
       guardianName: opt(row, "guardian_name"),
       guardianEmail: opt(row, "guardian_email"),
+    })),
+    credits: accepted("opening_balances.csv").map((row) => ({
+      ...planned("opening_balances.csv", row, s(row, "source_balance_id") as string),
+      sourceCustomerId: s(row, "source_customer_id") as string,
+      amount: n(row, "amount_cents") as number,
     })),
     payments: accepted("payments.csv").map((row) => ({
       ...planned("payments.csv", row, s(row, "source_payment_id") as string),

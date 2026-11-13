@@ -156,7 +156,8 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
       matches: true,
     });
     // An adult without an email is a warning, not a refusal; so is what a
-    // commit cannot save yet (a charter balance, opening balances, waivers).
+    // commit cannot save yet (waivers), and a credit's legacy expiry, which
+    // TideGrid credit does not keep.
     expect(run.issues).toEqual([
       expect.objectContaining({
         file: "participants.csv",
@@ -166,15 +167,15 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
         recordKey: "legacy-booker|LB-5002|2027-04-12|2",
       }),
       expect.objectContaining({
-        file: "opening_balances.csv",
+        file: "waivers.csv",
         line: null,
         code: "import_not_supported_yet",
         severity: "warning",
       }),
       expect.objectContaining({
-        file: "waivers.csv",
-        line: null,
-        code: "import_not_supported_yet",
+        file: "opening_balances.csv",
+        line: 2,
+        code: "credit_never_expires",
         severity: "warning",
       }),
     ]);
@@ -334,6 +335,37 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
       `${refunded["payments.csv"]}PAY-9005,LB-5003,2027-04-12,refund,1000,check,,2027-02-11T09:05:00-05:00\n`;
     run = await validateImport(refunded, lookup(), NOW);
     expect(codes("bookings.csv")).toContain("refund_with_balance");
+  });
+
+  it("plans booking credit on its customer's email, unrestricted and with no expiry", async () => {
+    let run = await validateImport(sample(), lookup(), NOW);
+    expect(run.plan?.credits).toEqual([
+      expect.objectContaining({ sourceCustomerId: "C-1001", amount: 5000, unchanged: false }),
+    ]);
+    const files = sample();
+    files["opening_balances.csv"] =
+      `${files["opening_balances.csv"]}OB-0002,C-1003,booking_credit,,2500,,,,\nOB-0003,C-1002,booking_credit,,1500,,P-REEF2,,\n`;
+    run = await validateImport(files, lookup(), NOW);
+    const at = (line: number) =>
+      run.issues
+        .filter((i) => i.file === "opening_balances.csv" && i.line === line)
+        .map((i) => i.code);
+    expect(at(3)).toEqual(["credit_needs_email"]);
+    expect(at(4)).toEqual(["credit_restriction_unsupported"]);
+  });
+
+  it("lets a credit imported before stand once its dropped legacy expiry passes", async () => {
+    const first = await validateImport(sample(), lookup(), NOW);
+    const credit = first.plan?.credits[0];
+    if (!credit) throw new Error("no planned credit");
+    const again: ImportLookup = {
+      ...lookup(),
+      async imported() {
+        return new Map([[`opening_balances.csv|${credit.key}`, { rowHash: credit.rowHash }]]);
+      },
+    };
+    const later = await validateImport(sample(), again, Date.parse("2028-01-05T12:00:00Z"));
+    expect(later.issues.filter((i) => i.file === "opening_balances.csv")).toEqual([]);
   });
 
   it("refuses a trip the database's zone data reads differently, with its bookings", async () => {

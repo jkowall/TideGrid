@@ -1547,7 +1547,8 @@ export interface CreditAccountsTable {
   updated_at: Stamped;
 }
 
-export type CreditEntryKind = "issue" | "redeem" | "reinstate" | "adjust";
+/** "import": opening booking credit carried over by an import commit (0046). */
+export type CreditEntryKind = "issue" | "redeem" | "reinstate" | "adjust" | "import";
 
 /** One change to a credit balance (0029). Append-only; the trigger keeps the balance. */
 export interface CreditEntriesTable {
@@ -1563,6 +1564,8 @@ export interface CreditEntriesTable {
   booking_id: FixedDefault<string | null>;
   cancellation_id: FixedDefault<string | null>;
   reinstates_entry_id: FixedDefault<string | null>;
+  /** An imported credit's opening_balances.csv ledger row (0046). */
+  import_record_id: FixedDefault<string | null>;
   expires_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   reason: FixedDefault<string | null>;
   idempotency_key: Fixed<string>;
@@ -1886,7 +1889,9 @@ export type ImportFileName =
   | "customers.csv"
   | "bookings.csv"
   | "participants.csv"
-  | "payments.csv";
+  | "payments.csv"
+  /** Opening booking credit (0046). */
+  | "opening_balances.csv";
 
 /** One imported record of a commit (0044). Append-only; unique by source system, file, key. */
 export interface ImportRecordsTable {
