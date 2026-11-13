@@ -435,6 +435,15 @@ export async function rescheduleBooking(
   for (const message of reminders) {
     await cancelMessage(trx, ctx, message.id, { code: "booking_moved", revokeLinks: false });
   }
+  // For the same reason, every other message of this booking still to go out
+  // is locked now: the hooks below may cancel some (a waiver request replaced
+  // by the move), after the booking's row is taken.
+  await sql`
+    select id from email_messages
+     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+       and state in ('queued', 'sending')
+     order by id
+       for update`.execute(trx);
   const { rows: inserted } = await sql<{
     created_at: Date | string;
     before_cutoff: boolean;
