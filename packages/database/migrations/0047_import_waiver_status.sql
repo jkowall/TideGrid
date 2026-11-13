@@ -64,6 +64,19 @@ BEGIN
     RAISE EXCEPTION 'a legacy waiver status names its waivers.csv record from this commit and an imported participant'
       USING ERRCODE = '23514', CONSTRAINT = 'import_waiver_statuses_record';
   END IF;
+  -- The participant's booking is still confirmed, read under a share lock so
+  -- a cancellation racing the commit either finishes first (and this refuses)
+  -- or waits for the commit.
+  PERFORM 1
+     FROM public.booking_participants p
+     JOIN public.bookings b ON b.tenant_id = p.tenant_id AND b.id = p.booking_id
+    WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.participant_id
+      AND b.state = 'confirmed'
+      FOR SHARE OF b;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'a legacy waiver status is saved only on a confirmed booking'
+      USING ERRCODE = '23514', CONSTRAINT = 'import_waiver_statuses_booking_closed';
+  END IF;
   RETURN NEW;
 END;
 $$;

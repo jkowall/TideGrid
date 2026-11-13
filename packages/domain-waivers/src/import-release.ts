@@ -229,6 +229,8 @@ export async function sweepImportWaiverEmail(
   const tenantLimit = options.tenantLimit ?? 100;
   const report = { bookings: 0, queued: 0, failedBookings: 0 };
   const capped = new Set<string>();
+  // Bookings left for a later run: a sending limit held an email, or it failed.
+  let unfinished = 0;
   const contextOf = (tenantId: string): TenantContext => ({
     tenantId,
     actorType: "system",
@@ -282,10 +284,12 @@ export async function sweepImportWaiverEmail(
         } catch (error) {
           // One booking that fails never holds up the operator's others.
           report.failedBookings += 1;
+          unfinished += 1;
           options.onBookingError?.(tenantId, error);
           continue;
         }
         report.queued += result.queued;
+        if (!result.finished) unfinished += 1;
         spent.set(tenantId, (spent.get(tenantId) ?? 0) + result.queued);
         if (result.operatorLimited) {
           // The operator's own sending limit: nothing more goes out this run.
@@ -316,7 +320,8 @@ export async function sweepImportWaiverEmail(
     passes: fair.passes,
     deferredTenants: fair.deferredTenants,
     stampFailures: fair.stampFailures,
-    // Not complete while an operator still has bookings waiting.
-    complete: fair.complete && capped.size === 0,
+    // Not complete while a booking is still waiting: an operator stopped at
+    // its cap or limit, or a booking a sending limit held or that failed.
+    complete: fair.complete && capped.size === 0 && unfinished === 0,
   };
 }

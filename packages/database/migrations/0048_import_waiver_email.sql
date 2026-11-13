@@ -112,6 +112,11 @@ CREATE TRIGGER import_waiver_email_done_no_truncate BEFORE TRUNCATE ON public.im
 
 -- 3. Whether a guest's waiver email is held ---------------------------------------------
 
+-- The participant's own import record, read before every waiver send.
+-- import_records is an import ledger, not one of rule R4's held-back tables.
+CREATE INDEX import_records_participant_idx ON public.import_records (tenant_id, participant_id)
+  WHERE file = 'participants.csv';
+
 -- The batch that imported the participant decides; a participant added in
 -- TideGrid to an imported booking follows the batch that imported the
 -- booking. Held while that batch was saved with hold_until_staff_release and
