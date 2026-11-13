@@ -655,30 +655,55 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     expect(again.result.issues).toContainEqual(
       expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
     );
-    // A refund staff record in TideGrid counts as well: with 5000 returned,
-    // the same batch nets to the total.
+    // TideGrid reads a charter's balance from the money that came in, so a
+    // refund staff record on it does not lower it, and a later batch agrees:
+    // the same extra check is still too much.
     await inTenantTransaction(runtime.db, staff, (trx) =>
       recordExternalSettlement(trx, staff, {
         bookingId: charter.id,
         kind: "refund",
         tender: "cash",
         amount: 10000,
-        reason: "Returned the double payment",
+        reason: "Returned part of the balance",
         idempotencyKey: `test-${randomUUID()}`,
       }),
     );
-    const netted = await dryRun(C, ownerC, {
+    const still = await dryRun(C, ownerC, {
       batchId: "BAL-3",
       charterPaid: 20000,
       charterExtra: 10000,
     });
-    // (The fixture's declared outstanding total still counts the 20000 the
-    // batch alone leaves open, so only the manifest disagrees.)
+    expect(still.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
+    );
+    // Without it the batch is clean: the staff refund is not a refund the
+    // batch carries. (The fixture's declared outstanding total still counts
+    // the 30000 the batch alone leaves open, so only the manifest disagrees.)
+    const paidOff = await dryRun(C, ownerC, { batchId: "BAL-5", charterPaid: 20000 });
+    expect(paidOff.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
+    // On a booking paid in full, money staff record in TideGrid nets: a
+    // payment and its refund leave an unchanged batch clean.
+    const [shared] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${D.id} and r.external_id = 'R-1'`;
+    if (!shared) throw new Error("no imported booking");
+    const staffD = staffCtx(D.id, ownerD);
+    for (const kind of ["payment", "refund"] as const) {
+      await inTenantTransaction(runtime.db, staffD, (trx) =>
+        recordExternalSettlement(trx, staffD, {
+          bookingId: shared.id,
+          kind,
+          tender: "cash",
+          amount: 1000,
+          reason: "Card machine mix-up",
+          idempotencyKey: `test-${randomUUID()}`,
+        }),
+      );
+    }
+    const netted = await dryRun(D, ownerD, { batchId: "BAL-6", charterPaid: 0 });
     expect(netted.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
-    // With less than the total in, the staff refund only nets: the charter
-    // still owes, and the batch is not refused for a refund it does not carry.
-    const owing = await dryRun(C, ownerC, { batchId: "BAL-5", charterPaid: 20000 });
-    expect(owing.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
     // A charter imported with a balance takes no imported refund, even once a
     // later batch pays it off.
     const refunded = await dryRun(D, ownerD, {

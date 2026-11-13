@@ -1620,6 +1620,13 @@ export async function validateImport(
   }
   // Payments earlier commits imported for these bookings count too, once: a
   // row this batch repeats is counted from the batch.
+  // Charters an earlier commit saved with a balance. TideGrid reads their
+  // balance from the money that came in (0033), so a refund staff recorded on
+  // one does not lower it, and the dry run leaves it out to agree.
+  const withBalance =
+    lookup.balanceBookings && bookingPlans.size > 0
+      ? await lookup.balanceBookings([...bookingPlans.values()].map((p) => p.row.key))
+      : new Set<string>();
   const earlierPaid = new Map<BookingPlan, { in: number; out: number }>();
   if (lookup.importedPayments && bookingPlans.size > 0) {
     const inBatch = new Set(rowsOf("payments.csv").map((r) => r.key));
@@ -1628,6 +1635,9 @@ export async function validateImport(
       if (inBatch.has(p.paymentKey)) continue;
       const plan = byKey.get(p.bookingKey);
       if (!plan) continue;
+      if (p.refund && p.paymentKey.startsWith("tidegrid:") && withBalance.has(p.bookingKey)) {
+        continue;
+      }
       const sums = earlierPaid.get(plan) ?? { in: 0, out: 0 };
       if (p.refund) sums.out += p.amount;
       else sums.in += p.amount;
@@ -1707,10 +1717,6 @@ export async function validateImport(
     }
     paid.set(booking, { in: sumIn, out: sumOut });
   }
-  const withBalance =
-    lookup.balanceBookings && bookingPlans.size > 0
-      ? await lookup.balanceBookings([...bookingPlans.values()].map((p) => p.row.key))
-      : new Set<string>();
   let outstanding = 0;
   const owing = new Map<BookingPlan, number>();
   /** A charter's balance, by its bookings.csv row: what came in, and the due date. */
