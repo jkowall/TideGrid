@@ -675,6 +675,10 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     // (The fixture's declared outstanding total still counts the 20000 the
     // batch alone leaves open, so only the manifest disagrees.)
     expect(netted.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
+    // With less than the total in, the staff refund only nets: the charter
+    // still owes, and the batch is not refused for a refund it does not carry.
+    const owing = await dryRun(C, ownerC, { batchId: "BAL-5", charterPaid: 20000 });
+    expect(owing.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
     // A charter imported with a balance takes no imported refund, even once a
     // later batch pays it off.
     const refunded = await dryRun(D, ownerD, {

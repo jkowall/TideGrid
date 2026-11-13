@@ -1767,8 +1767,9 @@ export async function validateImport(
       continue;
     }
     // TideGrid reads a charter's balance from the money that came in, so a
-    // refund on a booking that still owes cannot be taken over as such.
-    if (sums.out > 0) {
+    // refund on a booking that still owes cannot be taken over as such. A
+    // refund staff recorded in TideGrid since is theirs, and only nets.
+    if ((entries.get(plan) ?? []).some((e) => e.refund)) {
       report.add(
         "bookings.csv",
         plan.row,
