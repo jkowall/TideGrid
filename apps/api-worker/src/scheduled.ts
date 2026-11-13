@@ -285,9 +285,11 @@ export async function runScheduled(
               "tidegrid.tenant_id": tenantId,
               ...errorAttributes(error),
             }),
-          onBookingError: (tenantId, error) =>
+          onBookingError: (tenantId, booking, error) =>
             importLog.error("import_waiver_email_sweep_booking_failed", {
               "tidegrid.tenant_id": tenantId,
+              "tidegrid.import_waiver_email_sweep.run_id": booking.runId,
+              "tidegrid.import_waiver_email_sweep.booking_id": booking.bookingId,
               ...errorAttributes(error),
             }),
           onStampError: (tenantId, error) =>

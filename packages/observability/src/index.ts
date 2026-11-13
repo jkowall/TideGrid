@@ -144,6 +144,9 @@ export interface RequestAttributes {
   "tidegrid.import_waiver_email_sweep.tenant_count"?: number;
   "tidegrid.import_waiver_email_sweep.booking_count"?: number;
   "tidegrid.import_waiver_email_sweep.queued_count"?: number;
+  /** The import run and booking a failed sweep step was on (UUIDs). */
+  "tidegrid.import_waiver_email_sweep.run_id"?: string;
+  "tidegrid.import_waiver_email_sweep.booking_id"?: string;
   "tidegrid.import_waiver_email_sweep.failed_booking_count"?: number;
   "tidegrid.import_waiver_email_sweep.capped_tenant_count"?: number;
   "tidegrid.import_waiver_email_sweep.failed_tenant_count"?: number;
@@ -296,6 +299,8 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.import_waiver_email_sweep.tenant_count",
   "tidegrid.import_waiver_email_sweep.booking_count",
   "tidegrid.import_waiver_email_sweep.queued_count",
+  "tidegrid.import_waiver_email_sweep.run_id",
+  "tidegrid.import_waiver_email_sweep.booking_id",
   "tidegrid.import_waiver_email_sweep.failed_booking_count",
   "tidegrid.import_waiver_email_sweep.capped_tenant_count",
   "tidegrid.import_waiver_email_sweep.failed_tenant_count",

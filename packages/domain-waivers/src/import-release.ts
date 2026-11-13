@@ -197,7 +197,11 @@ export interface ImportWaiverSweepOptions {
   onTenantError?: (tenantId: string, error: unknown) => void;
   onStampError?: (tenantId: string, error: unknown) => void;
   /** One booking failed; the sweep goes on with the next. */
-  onBookingError?: (tenantId: string, error: unknown) => void;
+  onBookingError?: (
+    tenantId: string,
+    booking: { runId: string; bookingId: string },
+    error: unknown,
+  ) => void;
 }
 
 export interface ImportWaiverSweepReport {
@@ -285,7 +289,7 @@ export async function sweepImportWaiverEmail(
           // One booking that fails never holds up the operator's others.
           report.failedBookings += 1;
           unfinished += 1;
-          options.onBookingError?.(tenantId, error);
+          options.onBookingError?.(tenantId, { runId, bookingId }, error);
           continue;
         }
         report.queued += result.queued;
