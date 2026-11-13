@@ -169,7 +169,11 @@ export async function onBookingRescheduled(
   const participantIds = rows.filter((r) => r.state === "signed").map((r) => r.participant_id);
   if (participantIds.length > 0) {
     await revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds });
-    await assignBookingWaivers(trx, ctx, deps, { bookingId: event.bookingId, participantIds });
+    await assignBookingWaivers(trx, ctx, deps, {
+      bookingId: event.bookingId,
+      participantIds,
+      version,
+    });
     resigned += participantIds.length;
   }
   return { resigned };
