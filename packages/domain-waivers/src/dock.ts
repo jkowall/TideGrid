@@ -84,9 +84,10 @@ function foldName(name: string, german: boolean): string {
  * obrien, Smith-Jones is smithjones), and trailing suffixes (Jr, III, PhD)
  * left off. `parts` is the last word's hyphenated parts.
  */
+const bare = (w: string) => w.replace(/[^\p{L}\p{N}]+/gu, "");
+
 function nameWords(folded: string): { words: string[]; parts: string[] } {
   const raw = folded.split(/[\s,]+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
-  const bare = (w: string) => w.replace(/[^\p{L}\p{N}]+/gu, "");
   while (raw.length > 1 && NAME_SUFFIXES.has(bare(raw[raw.length - 1] ?? ""))) raw.pop();
   const last = raw[raw.length - 1] ?? "";
   const parts = last.includes("-")
@@ -101,15 +102,28 @@ function nameWords(folded: string): { words: string[]; parts: string[] } {
 /**
  * What counts as the booker's last name: the last word, or the last words
  * run together, never the whole name; either part of a hyphenated last name;
- * and for a name written "Last, First", the part before the comma.
+ * and for a name written "Last, First", the part before the comma, under the
+ * same rules (any of its last words, either half of a hyphen). A comma
+ * followed only by a suffix ("John Smith, Jr.") is not that form.
  */
 function lastNameKeys(bookerName: string, german: boolean): string[] {
-  const folded = foldName(bookerName, german);
+  let folded = foldName(bookerName, german);
   const comma = folded.indexOf(",");
   if (comma > 0) {
-    const before = nameWords(folded.slice(0, comma)).words;
-    const after = nameWords(folded.slice(comma + 1)).words;
-    return after.length > 0 && before.length > 0 ? [before.join("")] : [];
+    const before = folded.slice(0, comma);
+    const after = folded
+      .slice(comma + 1)
+      .split(/[\s,]+/)
+      .map(bare)
+      .filter((w) => w.length > 0);
+    if (!after.every((w) => NAME_SUFFIXES.has(w))) {
+      const { words, parts } = nameWords(before);
+      const keys: string[] = [];
+      for (let k = 1; k <= words.length; k++) keys.push(words.slice(words.length - k).join(""));
+      if (parts.length > 1) keys.push(...parts);
+      return keys;
+    }
+    folded = before;
   }
   const { words, parts } = nameWords(folded);
   if (words.length < 2) return [];
@@ -294,7 +308,7 @@ export async function dockParty(
       const status: DockPersonStatus =
         p.status === "signed"
           ? "signed"
-          : p.status === "not_needed"
+          : p.status === "not_needed" || p.status === "not_required"
             ? "not_needed"
             : pending
               ? "to_sign"
