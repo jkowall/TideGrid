@@ -42,6 +42,7 @@ describe("the dock lookup's comparisons", () => {
       ["Smith-Jones, Mary", "Smith"],
       ["Smith-Jones, Mary", "SmithJones"],
       ["de la Cruz, Juan", "Cruz"],
+      ["Smith Jr., John", "Smith"],
       ["Hans Müller", "Mueller"],
       ["Hans Müller", "Muller"],
       ["Hans Mueller", "Müller"],
@@ -69,6 +70,7 @@ describe("the dock lookup's comparisons", () => {
     expect(dockDisplayName("  Kid   Ögren ")).toBe("Kid Ö.");
     expect(dockDisplayName("Cher")).toBe("Cher");
     expect(dockDisplayName("Smith, John")).toBe("John S.");
+    expect(dockDisplayName("Smith Jr., John")).toBe("John S.");
     expect(dockDisplayName("John Smith Jr.")).toBe("John S.");
     expect(dockDisplayName("John Smith, Jr.")).toBe("John S.");
     expect(dockDisplayName("John Smith III")).toBe("John S.");

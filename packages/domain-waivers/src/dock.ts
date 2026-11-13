@@ -159,6 +159,7 @@ export function dockDisplayName(name: string): string {
     // "Smith, John": the first name is after the comma, never the surname.
     first = afterComma.find((w) => !isSuffix(w));
     last = split(clean.slice(0, comma));
+    while (last.length > 1 && isSuffix(last[last.length - 1] ?? "")) last.pop();
   } else {
     const words = split(comma > 0 ? clean.slice(0, comma) : clean);
     while (words.length > 2 && isSuffix(words[words.length - 1] ?? "")) words.pop();
