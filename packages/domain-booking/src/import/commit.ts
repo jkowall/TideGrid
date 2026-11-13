@@ -672,13 +672,20 @@ async function writePlan(
   }
 
   // Opening booking credit, on the account of the email its customer books
-  // with; the database takes it only from this commit's ledger row.
-  for (const credit of plan.credits) {
+  // with; the database takes it only from this commit's ledger row. In email
+  // order, so two batches lock the same accounts in the same order.
+  const emailOf = (id: string) => customers.get(id)?.email?.trim().toLowerCase() ?? "";
+  const credits = [...plan.credits].sort((a, b) => {
+    const x = emailOf(a.sourceCustomerId);
+    const y = emailOf(b.sourceCustomerId);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  for (const credit of credits) {
     if (credit.unchanged) {
       counts.unchanged += 1;
       continue;
     }
-    const email = customers.get(credit.sourceCustomerId)?.email?.trim().toLowerCase();
+    const email = emailOf(credit.sourceCustomerId);
     if (!email) throw new Error("a planned credit's customer has no email");
     const recordId = await record("opening_balances.csv", credit);
     await sql`

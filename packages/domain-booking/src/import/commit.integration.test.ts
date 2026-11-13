@@ -13,7 +13,9 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
+import { adjustCredit } from "../credits.ts";
 import { inviteParticipant } from "../invitations.ts";
+import { buildMoneyReport } from "../money-report.ts";
 import { recordExternalSettlement } from "../reconciliation.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
 import { runImportCommit } from "./commit.ts";
@@ -752,6 +754,35 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
         join public.credit_accounts a on a.id = e.account_id
        where a.tenant_id = ${D.id} and a.customer_email = 'ima.sample@example.test'`;
     expect(entries).toEqual([{ kind: "import", amount: 7500, balance: 7500 }]);
+    // The money report leaves imported credit out and keeps staff's own.
+    const ctxD = staffCtx(D.id, ownerD);
+    const [acct] = await admin<{ id: string }[]>`
+      select id from public.credit_accounts
+       where tenant_id = ${D.id} and customer_email = 'ima.sample@example.test'`;
+    const adjusted = await inTenantTransaction(runtime.db, ctxD, (trx) =>
+      adjustCredit(trx, ctxD, {
+        accountId: acct?.id ?? "",
+        amount: 1200,
+        reason: "Goodwill for a late start",
+        idempotencyKey: `test-${randomUUID()}`,
+      }),
+    );
+    expect(adjusted.kind).toBe("applied");
+    const [range] = await admin<{ from: string; to: string }[]>`
+      select (now() - interval '1 day')::date::text as from,
+             (now() + interval '1 day')::date::text as to`;
+    const report = await inTenantTransaction(runtime.db, ctxD, (trx) =>
+      buildMoneyReport(trx, D.id, {
+        from: range?.from ?? "",
+        to: range?.to ?? "",
+        typedReferences: true,
+        maskProviderReferences: false,
+      }),
+    );
+    if (report.kind !== "ok") throw new Error(report.kind);
+    const creditRows = report.report.entries.filter((e) => e.credit !== 0);
+    expect(creditRows.map((e) => [e.kind, e.credit])).toEqual([["credit_adjusted", 1200]]);
+    expect(report.report.controlTotalsMatch).toBe(true);
     // The same row again is a no-op.
     await dryRun(D, ownerD, { batchId: "CRED-2", charterPaid: 0, credit: 7500 });
     const again = await commit(D, ownerD, {
