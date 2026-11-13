@@ -421,6 +421,9 @@ export async function rescheduleBooking(
     throw new Error(`a move's new hold did not confirm: ${confirmed.kind}`);
   }
 
+  const hooks = input.hooks ?? noBookingHooks;
+  await hooks.bookingRescheduling?.(trx, ctx, { bookingId: input.bookingId });
+
   // The reminder waiting for the old trip's day, and an earlier move's notice
   // not yet sent, would name a time the booking no longer has. Canceled now,
   // once the move is sure, and before the booking's hold changes: that update
@@ -506,7 +509,7 @@ export async function rescheduleBooking(
     rescheduleId,
     fromStartsAt: iso(row.starts_at),
   });
-  await (input.hooks ?? noBookingHooks).bookingRescheduled?.(trx, ctx, {
+  await hooks.bookingRescheduled?.(trx, ctx, {
     bookingId: input.bookingId,
     rescheduleId,
     fromTripId: row.trip_id,

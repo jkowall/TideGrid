@@ -6,6 +6,7 @@
 import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { type BookingHooks, rescheduleBooking } from "@tidegrid/domain-booking";
+import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
   listBookingWaivers,
@@ -105,7 +106,7 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
     world = openWorld(env, 8);
     deps = fixtureDeps();
     hooks = fixtureHooks();
-    A = await createWaiverFixture(world.admin, world.db, "wvmv", { days: 16 });
+    A = await createWaiverFixture(world.admin, world.db, "wvmv", { days: 20 });
     nextTrip = trips(A);
   });
 
@@ -189,6 +190,44 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
       select count(*)::int as n from public.waiver_deliveries
        where request_id in ${world.admin(live.map((r) => r.id))}`;
     expect(queued?.n).toBe(2);
+  });
+
+  it("a move waits for a signer holding the request, in signing's lock order, without deadlock", async () => {
+    const from = nextTrip();
+    const to = nextTrip();
+    const booked = await book(world, A, from, 1, hooks);
+    const pid = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("racing.signer", "racing.signer@example.test"),
+      hooks,
+    );
+    const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    await publishRevision();
+    const ctx = staff(A.id);
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    // As signing does: the request first, then its messages.
+    const signer = inTenantTransaction(world.db, ctx, async (trx) => {
+      await sql`select id from waiver_requests where tenant_id = ${A.id} and id = ${req} for no key update`.execute(
+        trx,
+      );
+      held();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await sql`select id from email_messages where tenant_id = ${A.id} and booking_id = ${booked.bookingId}
+                  and state in ('queued', 'sending') order by id for update`.execute(trx);
+    });
+    await holding;
+    const moved = move(booked.bookingId, from, to);
+    await signer;
+    expect((await moved).kind).toBe("moved");
+    expect((await requests(booked.bookingId)).find((r) => r.id === req)).toMatchObject({
+      state: "superseded",
+    });
   });
 
   it("moves without the waiver hooks leave signatures alone, and nothing ends one without a move", async () => {

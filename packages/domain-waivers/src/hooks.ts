@@ -179,6 +179,24 @@ export async function onBookingRescheduled(
   return { resigned };
 }
 
+/**
+ * Before a move writes: the booking's live requests are locked ahead of its
+ * messages, the order signing takes them (request, then its messages), so a
+ * signature in flight and the move never wait on each other in a cycle.
+ */
+export async function onBookingRescheduling(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+): Promise<void> {
+  await sql`
+    select id from waiver_requests
+     where tenant_id = ${ctx.tenantId} and booking_id = ${bookingId}
+       and state in ('pending', 'signed')
+     order by id
+       for no key update`.execute(trx);
+}
+
 /** The hooks the API passes on every path that confirms a booking or changes its party. */
 export function createWaiverHooks(deps: WaiverDeps): BookingHooks {
   return {
@@ -203,6 +221,9 @@ export function createWaiverHooks(deps: WaiverDeps): BookingHooks {
     },
     async bookingCanceled(trx, ctx, event) {
       await revokeBookingWaivers(trx, ctx, { bookingId: event.bookingId });
+    },
+    async bookingRescheduling(trx, ctx, event) {
+      await onBookingRescheduling(trx, ctx, event.bookingId);
     },
     async bookingRescheduled(trx, ctx, event) {
       await onBookingRescheduled(trx, ctx, deps, event);
