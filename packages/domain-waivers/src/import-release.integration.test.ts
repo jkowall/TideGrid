@@ -34,7 +34,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   let deskA: string;
   let ownerB: string;
   let day = "";
-  let laterDays: string[] = [];
+  let laterDays: [string, string] = ["", ""];
   let exportedAt = "";
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
