@@ -74,14 +74,14 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
            and br.dedupe_key = any(${wanted}::text[])
         union all
         -- Money staff recorded in TideGrid since: other external payments and
-        -- balance payments by card. It counts toward the balance, once.
-        select br.dedupe_key, 'tidegrid:' || x.id::text, x.amount, 'payment'
+        -- refunds, and balance payments by card. It counts once.
+        select br.dedupe_key, 'tidegrid:' || x.id::text, x.amount, x.kind
           from external_settlements x
           join bookings b on b.tenant_id = x.tenant_id and b.id = x.booking_id
           join import_bookings ib
             on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
           join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
-         where x.tenant_id = ${tenantId} and x.import_record_id is null and x.kind = 'payment'
+         where x.tenant_id = ${tenantId} and x.import_record_id is null
            and br.file = 'bookings.csv' and br.dedupe_key = any(${wanted}::text[])
         union all
         select br.dedupe_key, 'tidegrid:' || bp.id::text, bp.amount, 'payment'
@@ -100,6 +100,21 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
           refund: r.kind === "refund",
         }),
       );
+    },
+    // Bookings earlier commits imported as charters with a balance.
+    async balanceBookings(bookingKeys) {
+      const wanted = [...new Set(bookingKeys)];
+      if (wanted.length === 0) return new Set<string>();
+      const { rows } = await sql<{ booking_key: string }>`
+        select br.dedupe_key as booking_key
+          from bookings b
+          join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
+          join import_bookings ib
+            on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
+          join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
+         where b.tenant_id = ${tenantId} and o.deposit_amount is not null
+           and br.file = 'bookings.csv' and br.dedupe_key = any(${wanted}::text[])`.execute(trx);
+      return new Set(rows.map((r) => r.booking_key));
     },
     async products(ids) {
       const wanted = [...new Set(ids.filter((id) => UUID.test(id)))];

@@ -82,6 +82,8 @@ export interface ImportLookup {
   imported?(keys: ReadonlyMap<DataFile, readonly string[]>): Promise<Map<string, ImportedRecord>>;
   /** Payments and refunds earlier commits imported for these bookings (by key). */
   importedPayments?(bookingKeys: readonly string[]): Promise<ImportedPayment[]>;
+  /** Bookings (by key) earlier commits imported as charters with a balance. Absent: none. */
+  balanceBookings?(bookingKeys: readonly string[]): Promise<Set<string>>;
   products(ids: readonly string[]): Promise<Map<string, ProductInfo>>;
   boats(ids: readonly string[]): Promise<Map<string, BoatInfo>>;
   /** Trips, canceled ones included, on these boats that end after `fromMs` and start before `toMs`. */
@@ -1705,6 +1707,10 @@ export async function validateImport(
     }
     paid.set(booking, { in: sumIn, out: sumOut });
   }
+  const withBalance =
+    lookup.balanceBookings && bookingPlans.size > 0
+      ? await lookup.balanceBookings([...bookingPlans.values()].map((p) => p.row.key))
+      : new Set<string>();
   let outstanding = 0;
   const owing = new Map<BookingPlan, number>();
   /** A charter's balance, by its bookings.csv row: what came in, and the due date. */
@@ -1713,6 +1719,18 @@ export async function validateImport(
     if (plan.ota || plan.row.refused) continue;
     const sums = paid.get(plan) ?? { in: 0, out: 0 };
     const left = plan.total - (sums.in - sums.out);
+    // A charter imported with a balance keeps taking its money as money in,
+    // so a later batch brings it no refund, even once it is paid off.
+    if (withBalance.has(plan.row.key) && (entries.get(plan) ?? []).some((e) => e.refund)) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "refund_with_balance",
+        "This charter was imported with a balance, so it takes no imported refund; record the refund in TideGrid instead.",
+      );
+      continue;
+    }
     if (left <= 0) continue;
     if (plan.trip.product.kind !== "private_charter") {
       report.add(

@@ -73,6 +73,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     charterPaid?: number;
     /** A further check on the R-3 charter. */
     charterExtra?: number;
+    /** A refund on the R-3 charter. */
+    charterRefund?: number;
   }
 
   /**
@@ -109,6 +111,9 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
           ]),
       ...(o.charterExtra
         ? [["R-3", `PAY-8,R-3,${day},payment,${o.charterExtra},check,CHK-78,${exportedAt}`]]
+        : []),
+      ...(o.charterRefund
+        ? [["R-3", `PAY-9,R-3,${day},refund,${o.charterRefund},check,CHK-79,${exportedAt}`]]
         : []),
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
       ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
@@ -649,6 +654,37 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     });
     expect(again.result.issues).toContainEqual(
       expect.objectContaining({ file: "bookings.csv", code: "overpaid" }),
+    );
+    // A refund staff record in TideGrid counts as well: with 5000 returned,
+    // the same batch nets to the total.
+    await inTenantTransaction(runtime.db, staff, (trx) =>
+      recordExternalSettlement(trx, staff, {
+        bookingId: charter.id,
+        kind: "refund",
+        tender: "cash",
+        amount: 10000,
+        reason: "Returned the double payment",
+        idempotencyKey: `test-${randomUUID()}`,
+      }),
+    );
+    const netted = await dryRun(C, ownerC, {
+      batchId: "BAL-3",
+      charterPaid: 20000,
+      charterExtra: 10000,
+    });
+    // (The fixture's declared outstanding total still counts the 20000 the
+    // batch alone leaves open, so only the manifest disagrees.)
+    expect(netted.result.issues.filter((i) => i.file !== "manifest.csv")).toEqual([]);
+    // A charter imported with a balance takes no imported refund, even once a
+    // later batch pays it off.
+    const refunded = await dryRun(D, ownerD, {
+      batchId: "BAL-4",
+      charterPaid: 0,
+      charterExtra: 55000,
+      charterRefund: 5000,
+    });
+    expect(refunded.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "refund_with_balance" }),
     );
   });
 });
