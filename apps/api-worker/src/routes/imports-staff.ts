@@ -258,7 +258,8 @@ function commitResponse(done: ImportCommitResult): ImportCommitResponse {
       contentHash: done.contentHash,
       checkedAt,
       clean,
-      errorCount: r.errorCount,
+      // The run the database refused was recorded with one error.
+      errorCount: done.kind === "write_refused" ? 1 : r.errorCount,
       warningCount: r.warningCount,
       files: r.files,
       controls: r.controls,

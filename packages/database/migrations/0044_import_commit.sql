@@ -1340,7 +1340,7 @@ BEGIN
     RAISE EXCEPTION 'only an imported settlement carries when its money moved, never later than now'
       USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_import';
   END IF;
-  SELECT x.id, x.payment_id, o.total_amount,
+  SELECT x.id, x.payment_id, x.state, o.total_amount,
          o.total_amount - o.tax_amount - o.included_tax_amount AS eligible_total
     INTO b
     FROM public.bookings x
@@ -1350,6 +1350,11 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'no booking % to record against', NEW.booking_id
       USING ERRCODE = '23503', CONSTRAINT = 'external_settlements_booking';
+  END IF;
+  -- Read under the booking's lock: a cancel that won the race is seen here.
+  IF NEW.import_record_id IS NOT NULL AND b.state <> 'confirmed' THEN
+    RAISE EXCEPTION 'an import adds no money to a booking canceled since'
+      USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_import';
   END IF;
   IF NEW.kind = 'payment' THEN
     NEW.order_total := NULL;
