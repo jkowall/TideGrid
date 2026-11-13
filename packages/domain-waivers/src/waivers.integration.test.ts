@@ -548,6 +548,33 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     expect((await redeem(A.id, second.token)).kind).toBe("opened");
   });
 
+  it("holds waiver email for an imported booking, staff sends included", async () => {
+    const booked = await book(A, 1);
+    // Stands in for an imported booking (W3-G2.13): the owner relabels it,
+    // with the triggers off for that statement only.
+    await admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`update public.bookings set source = 'imported', payment_id = null where id = ${booked.bookingId}`;
+    });
+    const ivy = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("Ivy Imported"),
+      hooks,
+    );
+    const requestId = await liveRequest(booked.bookingId, ivy.participant.id);
+    expect(await messagesOf(requestId)).toEqual([]);
+    const ctx = staffContext(A.id, "staff-imported");
+    expect(
+      await inTenantTransaction(runtime.db, ctx, (trx) =>
+        sendWaiverRequest(trx, ctx, deps, { requestId, kind: "resend", reason: "Guest asked" }),
+      ),
+    ).toEqual({ kind: "imported_booking" });
+    expect(await messagesOf(requestId)).toEqual([]);
+  });
+
   it("ends every request when the booking is canceled, links, sessions, and queued email with them", async () => {
     const booked = await book(A, 2);
     const cy = await nameParticipant(

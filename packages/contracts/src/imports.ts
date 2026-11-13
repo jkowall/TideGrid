@@ -114,3 +114,44 @@ export const ImportDryRunResponse = z.object({
     .describe("errors.csv: the first 5,000 issues, each cell kept from running as a formula"),
 });
 export type ImportDryRunResponse = z.infer<typeof ImportDryRunResponse>;
+
+// The commit (W3-G2.13, commit step, part A) -----------------------------------------
+
+export const ImportCommitRequest = ImportDryRunRequest;
+export type ImportCommitRequest = z.infer<typeof ImportCommitRequest>;
+
+export const ImportCommitCounts = z
+  .object({
+    trips: z.number().int().describe("Trips recorded, existing departures included"),
+    tripsCreated: z.number().int().describe("New departures, created in draft"),
+    customers: z.number().int(),
+    bookings: z.number().int(),
+    participants: z.number().int(),
+    payments: z.number().int(),
+    refunds: z.number().int(),
+    unchanged: z
+      .number()
+      .int()
+      .describe("Rows imported before with the same values: nothing written for them"),
+  })
+  .describe("What the commit wrote");
+export type ImportCommitCounts = z.infer<typeof ImportCommitCounts>;
+
+export const ImportCommitResponse = ImportDryRunResponse.extend({
+  committed: z.boolean().describe("True when the batch was saved, all of it"),
+  refusal: z
+    .enum(["not_clean", "write_refused"])
+    .nullable()
+    .describe(
+      "Why nothing was saved: the files no longer pass their checks (not_clean, with the issues listed), or TideGrid changed while saving (write_refused). A refused commit is recorded, so the next try needs a fresh dry run",
+    ),
+  refusedBy: z
+    .string()
+    .max(63)
+    .nullable()
+    .describe(
+      "For write_refused: the name of the TideGrid rule that refused the save, when known, for support to look up. Null otherwise",
+    ),
+  counts: ImportCommitCounts.nullable(),
+});
+export type ImportCommitResponse = z.infer<typeof ImportCommitResponse>;

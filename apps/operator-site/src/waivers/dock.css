@@ -1,0 +1,83 @@
+/*
+ * The printable dock QR code (W3-G2.15-rest). On screen, a preview of the
+ * sign; printed, the sign alone, black on white, filling the page.
+ */
+
+.dock-lede {
+  max-width: 44rem;
+  margin: 0 0 var(--space-4);
+  color: var(--text-body);
+}
+.dock-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.dock-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 32rem;
+  padding: var(--space-6) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  background: #fff;
+  color: #000;
+  text-align: center;
+}
+.dock-sheet__operator {
+  margin: 0;
+  font-size: var(--text-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dock-sheet__title {
+  margin: 0;
+  /* The sheet is white in both themes, so its heading is too. */
+  color: #000;
+  font-size: var(--text-2xl, 1.75rem);
+  line-height: 1.2;
+}
+.dock-sheet__qr {
+  display: block;
+  width: min(18rem, 100%);
+  height: auto;
+}
+.dock-sheet__steps {
+  margin: 0;
+  padding-inline-start: 1.5rem;
+  text-align: start;
+}
+.dock-sheet__steps li + li {
+  margin-top: var(--space-1);
+}
+.dock-sheet__address,
+.dock-sheet__fine {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.dock-sheet__fine {
+  font-size: var(--text-sm);
+}
+
+@media print {
+  .console-main:has(.dock-sheet) .console-page-header,
+  .dock-lede,
+  .dock-actions {
+    display: none;
+  }
+  .dock-sheet {
+    max-width: none;
+    border: 0;
+    padding: 0;
+    gap: 14pt;
+    font-size: 16pt;
+  }
+  .dock-sheet__title {
+    font-size: 32pt;
+  }
+  .dock-sheet__qr {
+    width: 120mm;
+  }
+}

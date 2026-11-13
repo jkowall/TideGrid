@@ -66,7 +66,7 @@ async function send(
   }
 }
 
-async function call<S extends z.ZodType>(
+export async function call<S extends z.ZodType>(
   path: string,
   schema: S,
   init: {

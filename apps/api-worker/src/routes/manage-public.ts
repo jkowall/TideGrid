@@ -659,7 +659,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
       409: errorBody(
-        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
       ),
       422: errorBody(
         "No such place in this party (position_out_of_range), or idempotency_key_reused",
@@ -986,6 +986,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           bookingId: session.bookingId,
           fromTripId: input.fromTripId,
           toTripId: input.toTripId,
+          hooks: bookingHooksFor(c.env, deps),
         });
         if (result.kind !== "moved" && result.kind !== "already_moved") {
           throw rescheduleRefusal(result, bookingGone);

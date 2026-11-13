@@ -189,13 +189,19 @@ export {
   type BookingConfirmedEvent,
   BookingHookRefusal,
   type BookingHooks,
+  type BookingRescheduledEvent,
   noBookingHooks,
   type ParticipantEvent,
   type ParticipantField,
   type ParticipantRemovedEvent,
   type ParticipantUpdatedEvent,
 } from "./hooks.ts";
-// The standard CSV import's dry run (W3-G2.13, part 1).
+// The standard CSV import's dry run (W3-G2.13, part 1) and commit (part A).
+export {
+  type ImportCommitCounts,
+  type ImportCommitResult,
+  runImportCommit,
+} from "./import/commit.ts";
 export { readCsv } from "./import/csv-read.ts";
 export {
   type ImportDryRunResult,

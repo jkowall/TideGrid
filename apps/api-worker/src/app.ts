@@ -36,6 +36,7 @@ import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
 import { registerTenantAccessStaffRoutes } from "./routes/tenant-access-staff.ts";
+import { registerWaiverDockPublicRoutes } from "./routes/waiver-dock-public.ts";
 import { registerWaiverPublicRoutes } from "./routes/waivers-public.ts";
 import { registerWaiverStaffRoutes } from "./routes/waivers-staff.ts";
 
@@ -184,6 +185,7 @@ export function createApp(deps: AppDeps = {}) {
   registerConsoleStaffRoutes(app, deps);
   // Waiver evidence (G2.15).
   registerWaiverPublicRoutes(app, deps);
+  registerWaiverDockPublicRoutes(app, deps);
   registerWaiverStaffRoutes(app, deps);
   // Staff-assisted booking (G2.12d).
   registerStaffBookingRoutes(app, deps);

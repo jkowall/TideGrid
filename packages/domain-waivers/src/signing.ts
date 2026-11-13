@@ -386,7 +386,7 @@ export async function signWaiver(
   const { rows } = await sql<{
     now: Date;
     recipient_email: string | null;
-    mode: "staff_device" | "participant_qr" | null;
+    mode: "staff_device" | "participant_qr" | "dock_lookup" | null;
     staff_id: string | null;
     staff_name: string | null;
   }>`
@@ -408,10 +408,14 @@ export async function signWaiver(
   if (!facts || (facts.recipient_email === null && facts.mode === null)) {
     throw new Error("a session's link has neither a delivery nor a staff-assisted start");
   }
+  const dock = facts.mode === "dock_lookup";
   const assisted =
-    facts.mode !== null && facts.staff_id !== null
+    facts.mode !== null && facts.mode !== "dock_lookup" && facts.staff_id !== null
       ? { mode: facts.mode, staffId: facts.staff_id, staffName: facts.staff_name }
       : null;
+  if (facts.mode !== null && !dock && !assisted) {
+    throw new Error("a staff-assisted link has no staff member");
+  }
   const signedAt = facts.now;
   const evidenceId = crypto.randomUUID();
   const signerName = expectedSigner(participant, request.required_signer) ?? signature;
@@ -432,14 +436,16 @@ export async function signWaiver(
     signedAtLocal: formatInstant(signedAt, booking.timeZone),
     evidenceId,
     requestId: request.id,
-    arrival: assisted
-      ? {
-          kind: assisted.mode,
-          staff: assisted.staffName
-            ? `${assisted.staffName} (${assisted.staffId})`
-            : assisted.staffId,
-        }
-      : { kind: "email_link", recipientMasked: maskEmail(facts.recipient_email ?? "") },
+    arrival: dock
+      ? { kind: "dock_lookup" }
+      : assisted
+        ? {
+            kind: assisted.mode,
+            staff: assisted.staffName
+              ? `${assisted.staffName} (${assisted.staffId})`
+              : assisted.staffId,
+          }
+        : { kind: "email_link", recipientMasked: maskEmail(facts.recipient_email ?? "") },
     sourceIp: meta.sourceIp,
     userAgent: meta.userAgent,
   });
@@ -467,9 +473,9 @@ export async function signWaiver(
       acknowledgments: version.acknowledgments,
       consent_version: ESIGN_CONSENT.version,
       consent_text: ESIGN_CONSENT.text,
-      access_method: assisted ? assisted.mode : "email_link",
-      recipient_email: assisted ? null : facts.recipient_email,
-      match_method: assisted ? "staff_confirmed" : "signer_confirmed",
+      access_method: dock ? "dock_lookup" : assisted ? assisted.mode : "email_link",
+      recipient_email: dock || assisted ? null : facts.recipient_email,
+      match_method: dock ? "booking_lookup" : assisted ? "staff_confirmed" : "signer_confirmed",
       assisted_by: assisted ? assisted.staffId : null,
       source_ip: meta.sourceIp,
       user_agent: meta.userAgent,
@@ -501,8 +507,8 @@ export async function signWaiver(
       contentSha256: version.contentSha256,
       documentSha256,
       signerRole: request.required_signer,
-      accessMethod: assisted ? assisted.mode : "email_link",
-      matchMethod: assisted ? "staff_confirmed" : "signer_confirmed",
+      accessMethod: dock ? "dock_lookup" : assisted ? assisted.mode : "email_link",
+      matchMethod: dock ? "booking_lookup" : assisted ? "staff_confirmed" : "signer_confirmed",
       assistedBy: assisted ? assisted.staffId : null,
     },
   });

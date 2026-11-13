@@ -14,6 +14,7 @@ import {
   rescheduleBooking,
 } from "@tidegrid/domain-booking";
 import { can } from "@tidegrid/domain-identity";
+import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
@@ -187,6 +188,7 @@ export function registerReschedulesStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
           fromTripId: input.fromTripId,
           toTripId: input.toTripId,
           overrideReason,
+          hooks: bookingHooksFor(c.env, deps),
         });
         if (result.kind === "moved") moved = true;
         if (result.kind === "moved" || result.kind === "already_moved") {

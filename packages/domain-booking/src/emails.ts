@@ -61,6 +61,22 @@ const linkNote =
 const demoNote =
   "TideGrid demo: this booking is synthetic. No real card was charged and no money moves.";
 
+/**
+ * Saved by a CSV import, migration 0044: none of the booking's emails are sent yet. The
+ * import's own rules for when its guests hear from TideGrid come in a later
+ * part (W3-G2.13), and an imported booker may have no email at all.
+ */
+export async function importedBooking(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<boolean> {
+  const { rows } = await sql<{ imported: boolean }>`
+    select source = 'imported' as imported from bookings
+     where tenant_id = ${tenantId} and id = ${bookingId}`.execute(trx);
+  return rows[0]?.imported === true;
+}
+
 async function detailFor(
   trx: TenantTransaction,
   tenantId: string,
@@ -148,7 +164,9 @@ export async function enqueueConfirmationEmail(
   ctx: TenantContext,
   bookingId: string,
   options: ComposeOptions = {},
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const policy = await policyText(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
@@ -218,7 +236,9 @@ export async function enqueueManageLinkEmail(
   ctx: TenantContext,
   bookingId: string,
   requestKey: string,
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking link" },
@@ -276,6 +296,8 @@ export async function enqueueReminderEmail(
   bookingId: string,
   options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
            t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS})
@@ -344,7 +366,9 @@ export async function enqueueBalanceEmail(
   options:
     | { kind: "reminder"; dedupeKey: string; notBefore: Date }
     | { kind: "link"; dedupeKey: string },
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   if (!detail.balance) throw new Error("a balance email for a booking with no balance");
   const due = tripWhen(detail.balance.dueAt, detail.trip.timeZone);
@@ -400,7 +424,9 @@ export async function enqueueCancellationEmail(
   ctx: TenantContext,
   bookingId: string,
   options: ComposeOptions = {},
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const c = detail.cancellation;
   if (!c) throw new Error("a cancellation email needs the booking's cancellation");
@@ -475,7 +501,9 @@ export async function enqueueRescheduledEmail(
   ctx: TenantContext,
   bookingId: string,
   move: { rescheduleId: string; fromStartsAt: string },
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const was = tripWhen(move.fromStartsAt, detail.trip.timeZone);
@@ -527,7 +555,9 @@ export async function enqueueRefundFailedEmail(
   ctx: TenantContext,
   bookingId: string,
   amount: number,
-): Promise<{ messageId: string }> {
+): Promise<{ messageId: string } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your refund hasn't gone through yet" },
@@ -592,7 +622,9 @@ export async function enqueueContactChangedEmail(
   ctx: TenantContext,
   bookingId: string,
   change: { contactChangeId: string; oldEmail: string; oldName: string; newEmail: string },
-): Promise<{ messageId: string; duplicate: boolean }> {
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  // An imported booking's emails wait for the import's email rules (W3-G2.13).
+  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking's email address changed" },

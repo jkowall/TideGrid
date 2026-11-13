@@ -1,11 +1,11 @@
 # Standard CSV import and Managed Launch boundaries (draft)
 
-**Status:** Proposed, not adopted; no authority until the owner records approval in the register.
+**Status:** Approved by the owner on 2026-11-13 ([decision register](../06-decision-register.md#2026-11-13-the-owner-approves-the-standard-csv-import-draft-and-its-twelve-open-questions)), with the answers to its open questions recorded there. Still a draft in placement until promoted to a numbered document.
 **Drafted:** 2026-11-08, goal W1-CSV-DEF, for the Stage 0 item "Define the standard CSV import and the boundaries of Managed Launch" in the [roadmap](../05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company).
 **Placement:** a draft, not a numbered V2 document. It is not part of the [authority order](../00-index.md#authority-and-historical-artifacts). Where it differs from the [decision register](../06-decision-register.md) or a numbered document, they win. Promotion to a numbered document is a later goal, after a dated owner approval entry.
 **Data:** every example is synthetic. No real operator export was read or used.
 
-Every column, required field, deduplication key, control total, error code, and custom-work boundary below is **proposed and pending the owner's approval**. The two coordinator defaults D1 and D2 are pending owner confirmation.
+Every column, required field, deduplication key, control total, error code, and custom-work boundary below was approved by the owner on 2026-11-13, including the two coordinator defaults D1 and D2. The open questions at the end are answered in the register entry linked above.
 
 ## What this draft rests on
 
@@ -110,7 +110,7 @@ All proposed. The dry run writes one `errors.csv` per batch.
 
 Every cell of `errors.csv` gets the same formula guard as the console's day export: a cell that starts with `=`, `+`, `-`, `@`, a tab, or a carriage return is written with a leading `'`, so a spreadsheet shows it as text. Rejected values come from the legacy file, so the report treats them as untrusted. A value refused as `invalid_type` or `invalid_enum` appears only in `value`, never in `message`.
 
-Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `later_than_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `trip_departed`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `refund_exceeds_payments`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
+Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `later_than_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `trip_departed`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `refund_exceeds_payments`, `refunds_exceed_total`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
 
 The report also has a summary: accepted and refused rows per file, and each declared control total beside the computed one.
 
@@ -293,7 +293,7 @@ External payment and refund records against imported direct and staff-assisted b
 | `reference` | text(64) | No | The external reference shown to staff. Never a card number |
 | `received_at` | timestamp | Yes | When the money moved; not after `exported_at` (`later_than_export`) |
 
-For each booking, payments minus refunds must not exceed the total (`overpaid`), and must not be negative: a refund can never exceed the payments recorded for that booking (`refund_exceeds_payments`). Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
+For each booking, payments minus refunds must not exceed the total (`overpaid`), and must not be negative: a refund can never exceed the payments recorded for that booking (`refund_exceeds_payments`). Refunds may not exceed the booking's total either (`refunds_exceed_total`), because TideGrid caps a booking's refunds at what it cost; an overpayment and its refund are netted out of the export instead. Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
 
 - **Deduplication key:** `source_system` + `source_payment_id`.
 - **Control totals:** `row_count`, `sum_payment_cents`, `sum_refund_cents`, `sum_outstanding_cents` (over every non-OTA booking in the batch, after payments from earlier batches). The dry run and the commit also check, per booking, that total equals payments minus refunds plus outstanding.

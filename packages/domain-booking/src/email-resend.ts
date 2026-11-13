@@ -442,6 +442,8 @@ export async function resendBookingEmail(
       kind === "confirmation"
         ? await enqueueConfirmationEmail(trx, ctx, bookingId, { dedupeKey: key })
         : await enqueueCancellationEmail(trx, ctx, bookingId, { dedupeKey: key });
+    // An imported booking's emails are held (W3-G2.13): nothing to send again.
+    if (!made) return { kind: "refused", code: "email_invalid", availableAt: null };
     if (made.duplicate) {
       // The generation is read from the ledger under the tenant's resend lock,
       // and a message without its ledger row cannot commit (0014), so its key

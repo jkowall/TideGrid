@@ -258,7 +258,7 @@ export async function changeBookerContact(
         dedupeKey: `booking.balance_reminder:${input.bookingId}:contact.${contactChangeId}:${message.id}`,
         notBefore: new Date(message.next_attempt_at),
       });
-      if (!done.duplicate) rewritten += 1;
+      if (done && !done.duplicate) rewritten += 1;
     }
     await enqueueContactChangedEmail(trx, ctx, input.bookingId, {
       contactChangeId,

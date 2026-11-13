@@ -54,6 +54,7 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["POST", `/v1/staff/tenants/${tenant}/complimentary-bookings`],
     // The standard CSV import's dry run (W3-G2.13).
     ["POST", `/v1/staff/tenants/${tenant}/import-dry-runs`],
+    ["POST", `/v1/staff/tenants/${tenant}/import-commits`],
     // Important links (W3-G2.14b-rest).
     ["GET", `/v1/staff/tenants/${tenant}/important-links`],
     ["POST", `/v1/staff/tenants/${tenant}/important-links`],
@@ -201,6 +202,10 @@ describe("contract", () => {
         "/v1/public/trips/{tripId}/offer",
         "/v1/public/quotes",
         "/v1/public/quotes/{quoteId}",
+        // The dock QR lookup (W3-G2.15-rest).
+        "/v1/public/waiver-dock/lookups",
+        "/v1/public/waiver-dock/party",
+        "/v1/public/waiver-dock/signings",
         "/v1/staff/tenants/{tenantId}/audit-events",
         "/v1/staff/tenants/{tenantId}/catalog",
         "/v1/staff/tenants/{tenantId}/members",
@@ -280,6 +285,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
         "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing",
+        // The printed dock QR code's address (W3-G2.15-rest).
+        "/v1/staff/tenants/{tenantId}/waiver-dock-code",
         // Waiver link renewal and the send-count reset (W1-WAIVER-RENEWAL).
         "/v1/public/waiver-links/renewal",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset",
@@ -321,6 +328,7 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/fee-invoices",
         // The standard CSV import's dry run (W3-G2.13).
         "/v1/staff/tenants/{tenantId}/import-dry-runs",
+        "/v1/staff/tenants/{tenantId}/import-commits",
         "/v1/staff/tenants/{tenantId}/important-links",
         "/v1/staff/tenants/{tenantId}/important-links/{linkId}",
         "/v1/staff/tenants/{tenantId}/important-links/{linkId}/archive",
@@ -331,6 +339,8 @@ describe("contract", () => {
     expect(Object.keys(doc.components.securitySchemes).sort()).toEqual([
       "accessJwt",
       "checkoutSecret",
+      // A matched dock lookup (W3-G2.15-rest).
+      "dockLookup",
       "fakeClientSecret",
       // The guest's booking session (lane 1, G2.11c).
       "manageSession",

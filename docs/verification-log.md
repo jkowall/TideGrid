@@ -2,7 +2,46 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-13
+
+### Saving a standard CSV import, part A (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0044_import_commit.sql`, after the owner approved the import draft and its twelve questions on 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** `POST /v1/staff/tenants/{tenantId}/import-commits` (owners only, idempotent): a clean dry run of the same files is saved all or nothing. New trips land in draft; each booking gets an imported checkout and order (legacy totals, no quote), a confirmed hold through the owner-approved import branch of the capacity rule, a booking with source `imported` and no TideGrid payment, its participants, and its legacy payments and refunds as labeled external settlements. An append-only import ledger is the evidence, and every import branch in the database opens only for ledger rows from a clean commit in the same transaction. Re-imports skip unchanged rows and refuse changed ones. The console reads imported bookings (payment state "Imported", a booker with no email). Imported bookings send no email yet.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` (6 cases: a full commit and every row it writes, no email and no personal data in the run or audit; a second batch of the same records as no-ops and a changed customer refused; no dry run, other files, a wrong run number, and booking staff all refused; a commit that no longer fits its trip refused and recorded, needing a fresh dry run; staff cancel with nothing returned and the guest refused; ledger rows outside a commit, a quote-less hold without a ledger row, ledger updates, and another tenant's reads all refused), the dry-run tests, the API's `imports.integration.test.ts` (4 cases, including the commit, its replay, a second commit refused, and the booking detail read back), and the tenancy privileges test. Unit: `validate.test.ts`, contract and console source tests.
+- **Still open.** Coordinator defaults D1 to D8 await the owner. Charter balances, opening balances, and legacy waiver status (parts B to D), and the import's email rules (part D). No console screen for the import yet.
+
+### The dock QR lookup, part 2 (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, no migration, on part 1 (pull request 158). Synthetic data only; no provider call, no deploy.
+
+- **Built.** The guest site's `/dock` page (find the booking, list the party, start a signing on this phone); `GET /v1/staff/tenants/{tenantId}/waiver-dock-code` for owners and booking staff; the console's `/dock-code` page that draws and prints the code. A dock session on the waiver page keeps the guest's own-phone behavior and offers "Back to your party".
+- **Proof.** `DockPage.test.tsx` (5 cases: a match lists the party and starts a signing with the secret only as a bearer, never in a URL or storage; the list comes back without typing again; every miss says the same and a held guest is sent to the crew; both fields are asked for before any call; a crew signing in progress and an ended lookup each say what to do). `DockCodePage.test.tsx` (3 cases: the route and roles; one QR code with the address in words; a site with no address, and an answer that is not the dock page, draw nothing). The waiver API integration suite adds the dock code for owners and booking staff, finance refused. Guest site 1033, console 1196, API unit 295 pass.
+
+### The dock QR lookup, part 1 (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0043`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)), defaults D1 to D5 pending. Synthetic data only; no provider call, no deploy.
+
+- **Built.** `waiver_dock_lookups` and its limits in the database; `lookUpAtDock` and `startDockSigning` in the waiver module; `POST /v1/public/waiver-dock/lookups` and `/signings` on the guest's host; the mode `dock_lookup` for a code a lookup starts, with its evidence and PDF wording. No pages yet (part 2).
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `dock-lookup.integration.test.ts` (12 cases: a match shows only first names and an initial; wrong name, another day, another operator, and an unknown code all answer the same; a signing opens, and its evidence and audit event record `dock_lookup` with `identity_checked` false; a newer code replaces the older; 20 misses hold an address, an IPv6 address counts by its /64, and 8 hold a code; 300 misses at an operator hold misses but not a right code and name; a live crew code or session is never ended from the dock and holds the dock's start; a lookup ends when its trip no longer departs today; the database refuses a match for another day or code, a writer that is not a guest, an update, and a staff-started dock row; a lapsed lookup starts nothing), `dock.test.ts` (code folding and last names), and `waiver-dock.integration.test.ts` through the API (one 404 for every miss, 429 past the limit, the session opens as `dock_lookup`). The waiver, database, API waiver, and console waiver suites pass unchanged.
+
+### A moved booking keeps its waiver signatures only while the version is unchanged (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0042`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** The booking module's move runs a new `bookingRescheduled` hook in its transaction; the guest's and staff's move routes pass the waiver hooks. The waiver module revokes a signature whose version no longer applies (`version_changed`) and assigns the version in effect now; an unsigned request on an older version is superseded by one for the current version, so the old text cannot be signed after the move (requests locked first, so a signature in flight is waited for). `0042` adds the reason and holds it to signed requests, in the transaction that moved the booking, on a version no longer in effect.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `move-resign.integration.test.ts` (7 cases: a signature on the current version carries over; one on an older version is revoked, the new version is assigned and emailed, and the evidence stays; an unsigned old-version request is superseded and its open session can no longer sign; the database refuses the reason outside a move, for a move committed by another transaction, on the version still in effect, and on a pending request). Reviewed by an independent reviewer and a security reviewer; their findings (pending requests, the guard's transaction and version checks) are fixed here. The reschedule, party-change, waiver, and API reschedule suites pass unchanged.
+
 ## 2026-11-11
+
+### Names and typed signatures in other alphabets in the signed PDF (W3-G2.15-rest, part 2), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-11. Synthetic data only; no provider call, no deploy.
+
+- **Built.** The waiver PDF draws characters WinAnsi lacks (Latin extensions, Greek, Cyrillic, Armenian, Georgian) with an embedded subset of DejaVu Sans: only the glyphs the document uses, renumbered, with a Unicode map so the text can be searched. A small TrueType reader and subsetter (`truetype.ts`, no new dependency) and a script that reduces the bundled font to those alphabets. Shaped and right-to-left scripts keep the question mark.
+- **Proof.** `truetype.test.ts` (6 cases: coverage and refusals by script, widths, a compact subset that sums to a valid font with its license names, a composite glyph's parts renumbered, deterministic bytes) and `render.test.ts` (2 new cases: a WinAnsi waiver's bytes pinned to the hash from before the change; a Polish, Greek, Cyrillic, and Chinese sample with the subset font, its Unicode map, the oblique slant, the question mark, and every embedded glyph drawn). The sample was also opened with Poppler (`pdffonts` lists the embedded subset; `pdftotext` returns the names; the page renders with the letters). Waiver integration suites green. The API Worker grows from 561 to 733 KiB compressed.
+- **Still open.** Defaults D1 to D3 await the owner.
 
 ### Demo guest app on test phones (W1N-TESTFLIGHT), November 10 and 11, 2026
 

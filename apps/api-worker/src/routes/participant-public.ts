@@ -92,6 +92,12 @@ export function invitationRefusal(
         "participant_no_email",
         "This participant has no email of their own; add it before inviting them",
       );
+    case "imported_booking":
+      return new ApiError(
+        409,
+        "booking_imported",
+        "This booking was imported from an earlier system, and TideGrid does not email it yet",
+      );
     case "limit_reached":
       return new ApiError(
         429,

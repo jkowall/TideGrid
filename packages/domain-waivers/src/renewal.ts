@@ -156,6 +156,7 @@ export async function renewWaiverLink(
     case "no_participant":
     case "no_address":
     case "not_renewable":
+    case "imported_booking":
       return skip("not_renewable");
     case "renewal_limit":
       return skip("renewal_limit");
@@ -253,6 +254,7 @@ export async function resendWaiverForBooker(
       return refuse("not_found");
     case "no_address":
     case "not_renewable":
+    case "imported_booking":
       return refuse("not_sent");
     case "renewal_limit":
     case "limit_reached":

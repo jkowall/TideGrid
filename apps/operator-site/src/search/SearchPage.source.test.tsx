@@ -87,6 +87,7 @@ describe("the Source control", () => {
         "Online, by the guest",
         "Staff bookings",
         "Complimentary",
+        "Imported",
       ]);
       const q = role === "finance" ? "QKG6" : "maya";
       type(q);
@@ -215,7 +216,7 @@ describe("the staff badge", () => {
     async (role) => {
       api({
         [route.search()]: answer(role, {
-          results: [staffMaya, directLuis, { ...priya, source: "imported" as never }],
+          results: [staffMaya, directLuis, { ...priya, source: "partner" as never }],
           total: 3,
         }),
       });

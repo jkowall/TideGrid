@@ -20,8 +20,9 @@ import { LinksPage, linksPath } from "./links/LinksPage.tsx";
 import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
 import { NewBookingPage } from "./new-booking/NewBookingPage.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
-import { roleLabels } from "./roles.ts";
+import { canPrintDockCode, roleLabels } from "./roles.ts";
 import { SearchPage } from "./search/SearchPage.tsx";
+import { DockCodePage, dockCodePath } from "./waivers/DockCodePage.tsx";
 
 export { roleLabels } from "./roles.ts";
 
@@ -45,6 +46,8 @@ const sections: ReadonlyArray<{
   },
   // W3-G2.14b-rest: every role reads them; owners change them.
   { path: linksPath, label: "Important links", icon: "external" },
+  // W3-G2.15-rest: owners and booking staff, who run the dock.
+  { path: dockCodePath, label: "Dock QR code", icon: "anchor", shows: canPrintDockCode },
 ];
 
 /** The console's pages, by address. Ids in an address are UUIDs; anything else is not a page. */
@@ -57,6 +60,7 @@ export type Route =
   | { kind: "exceptions" }
   | { kind: "email_exceptions" }
   | { kind: "links" }
+  | { kind: "dock_code" }
   | { kind: "roster"; tripId: string }
   | { kind: "new_booking"; tripId: string }
   | { kind: "not_found" };
@@ -74,6 +78,7 @@ export function routeOf(path: string): Route {
   if (path === "/exceptions") return { kind: "exceptions" };
   if (path === emailExceptionsPath) return { kind: "email_exceptions" };
   if (path === linksPath) return { kind: "links" };
+  if (path === dockCodePath) return { kind: "dock_code" };
   const booking = bookingPath.exec(path)?.[1];
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
   const roster = rosterPath.exec(path)?.[1];
@@ -96,6 +101,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
   email_exceptions: { section: emailExceptionsPath, title: "Email exceptions" },
   links: { section: linksPath, title: "Important links" },
+  dock_code: { section: dockCodePath, title: "Dock QR code" },
   not_found: { section: null, title: "Not found" },
 };
 
@@ -411,6 +417,11 @@ export function ConsoleShell({
       break;
     case "links":
       page = <LinksPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
+      break;
+    case "dock_code":
+      page = (
+        <DockCodePage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
       break;
     case "roster":
       page = (

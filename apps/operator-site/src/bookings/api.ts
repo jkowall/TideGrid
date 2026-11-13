@@ -101,8 +101,11 @@ function isExtras(extras: unknown): boolean {
 }
 
 const paymentStates = new Set(["pending", "succeeded", "failed"]);
-/** A list's or roster's charge state: a payment's, or complimentary with none (W3-G2.12-rest). */
-const chargeStates = new Set([...paymentStates, "complimentary"]);
+/**
+ * A list's or roster's charge state: a payment's, or complimentary (W3-G2.12-rest) or
+ * imported (W3-G2.13) with none.
+ */
+const chargeStates = new Set([...paymentStates, "complimentary", "imported"]);
 const complimentaryReasons = new Set([
   "service_recovery",
   "staff_or_crew",
@@ -150,7 +153,10 @@ function isCanceledConsistently(b: Partial<BookingDetail>): boolean {
 export function isBooker(b: unknown, withEmail: boolean): boolean {
   if (b === undefined) return true;
   const booker = b as { name?: unknown; email?: unknown } | null;
-  return isString(booker?.name) && (!withEmail || isString(booker?.email));
+  // An imported booking's booker may have no email (W3-G2.13).
+  return (
+    isString(booker?.name) && (!withEmail || isString(booker?.email) || booker?.email === null)
+  );
 }
 
 function isListItem(b: Partial<BookingListItem> | null | undefined): boolean {

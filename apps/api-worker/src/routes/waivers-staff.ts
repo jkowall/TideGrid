@@ -3,7 +3,9 @@ import {
   BookingParams,
   type BookingWaivers as BookingWaiversJson,
   BookingWaiversResponse,
+  DockCodeResponse,
   IdempotencyKey,
+  StaffTenantParams,
   TripParams,
   TripWaiversResponse,
   WaiverAssistedStartRequest,
@@ -38,6 +40,7 @@ const tripWaiversPath = "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers";
 const resendPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend";
 const documentPath = "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document";
 const assistedPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing";
+const dockCodePath = "/v1/staff/tenants/{tenantId}/waiver-dock-code";
 const sendResetPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset";
 
 const iso = (d: Date) => d.toISOString();
@@ -174,6 +177,64 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     return c.json(body as BookingWaiversResponse, 200);
   });
 
+  const dockCodeRoute = createRoute({
+    method: "get",
+    path: dockCodePath,
+    tags: ["staff", "waivers"],
+    summary: "The address the printed dock QR code opens",
+    description:
+      "Owners and booking staff. The operator's guest site dock page (/dock), where a guest types the booking code and the booker's last name to sign on their own phone on the day of the trip (W3-G2.15-rest). The address carries no token, name, or booking detail, so one printed code serves every trip.",
+    security: staffSecurity,
+    request: { params: StaffTenantParams },
+    responses: {
+      200: {
+        content: { "application/json": { schema: DockCodeResponse } },
+        description: "The dock page's address",
+      },
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant"),
+      409: errorBody(
+        "The operator has no working guest site address (waiver_guest_site_unavailable)",
+      ),
+    },
+  });
+
+  app.openapi(dockCodeRoute, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const settings = deliverySettings(c.env);
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "bookings.read", snapshot: true },
+      async (trx) => {
+        const tenant = await trx
+          .selectFrom("tenants")
+          .select("slug")
+          .where("id", "=", tenantId)
+          .executeTakeFirst();
+        const origin = tenant
+          ? await guestOriginFor(
+              trx,
+              tenantId,
+              tenant.slug,
+              settings.guestLinkOrigin,
+              settings.environment,
+            )
+          : null;
+        if (!origin) {
+          throw new ApiError(
+            409,
+            "waiver_guest_site_unavailable",
+            "This operator's guest site has no working address for the dock page",
+          );
+        }
+        return { url: `${origin}/dock` };
+      },
+    );
+    return c.json(body as DockCodeResponse, 200);
+  });
+
   const tripRoute = createRoute({
     method: "get",
     path: tripWaiversPath,
@@ -238,7 +299,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or waiver request (waiver_request_not_found)"),
       409: errorBody(
-        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); or the email could not be built (waiver_email_invalid). A refusal is final for its Idempotency-Key: send again with a new key",
+        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
       ),
       422: errorBody("idempotency_key_reused"),
     },
@@ -325,6 +386,11 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
             return refuse(
               "waiver_email_invalid",
               "TideGrid could not build this email from the booking's details",
+            );
+          case "imported_booking":
+            return refuse(
+              "waiver_imported_booking",
+              "This booking was imported from an earlier system, and TideGrid does not email its waivers yet",
             );
         }
       },

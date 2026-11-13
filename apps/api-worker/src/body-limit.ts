@@ -26,7 +26,7 @@ const webhookPrefix = "/v1/webhooks/payments/";
  * room to spare; a bigger export is custom work under the draft.
  */
 export const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;
-const IMPORT_DRY_RUN_PATH = /^\/v1\/staff\/tenants\/[^/]+\/import-dry-runs$/;
+const IMPORT_DRY_RUN_PATH = /^\/v1\/staff\/tenants\/[^/]+\/import-(?:dry-runs|commits)$/;
 
 /** The routes a guest page calls cross-origin, as in src/hostnames/cors.ts. */
 const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;

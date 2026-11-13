@@ -1,11 +1,19 @@
 /**
  * A small, deterministic PDF 1.4 writer for waiver evidence: text in the
  * standard Helvetica faces with WinAnsi encoding, thin rules, and nothing
- * else. No font is embedded, nothing is compressed, and there is no clock or
- * random id inside: the same input always gives the same bytes, so the
- * SHA-256 recorded with the evidence names exactly one document. The whole
- * file is ASCII apart from the binary marker comment. Runs in Workers and Node.
+ * else. Nothing is compressed, and there is no clock or random id inside: the
+ * same input always gives the same bytes, so the SHA-256 recorded with the
+ * evidence names exactly one document. The whole file is ASCII apart from the
+ * binary marker comment. Runs in Workers and Node.
+ *
+ * A character WinAnsi lacks, in a name or a typed signature, is drawn with
+ * an embedded copy of DejaVu Sans holding only the glyphs the document uses
+ * (fallback-ranges.ts names the alphabets). A document that needs none embeds
+ * nothing, so its bytes are as they always were. A character outside those
+ * alphabets shows a question mark.
  */
+import { fallbackFont, fallbackGlyph, fallbackWidth } from "./fallback-font.ts";
+import { compactTrueType } from "./truetype.ts";
 
 export type PdfFont = "regular" | "bold" | "oblique";
 
@@ -156,6 +164,10 @@ function charWidth(ch: string, font: PdfFont): number {
   const table = font === "bold" ? helveticaBold : helvetica;
   const cp = ch.codePointAt(0) ?? 0;
   if (cp >= 32 && cp <= 126) return table[cp - 32] ?? 600;
+  if (winAnsiCode(cp) === null) {
+    const glyph = fallbackGlyph(cp);
+    if (glyph !== null) return fallbackWidth(glyph);
+  }
   const base = latinBase[ch];
   if (base) return table[(base.codePointAt(0) ?? 65) - 32] ?? 600;
   if (wideHigh.has(ch)) return 1000;
@@ -169,9 +181,13 @@ export function textWidth(text: string, font: PdfFont, size: number): number {
   return (units * size) / 1000;
 }
 
-/** Spaces the PDF cannot show, such as the no-break spaces dates use, become plain spaces. */
+/**
+ * Spaces the PDF cannot show, such as the no-break spaces dates use, become
+ * plain spaces. Text is composed first (NFC), so a letter typed as a base
+ * letter and a combining accent is drawn, and measured, as the one letter.
+ */
 export function plainSpaces(text: string): string {
-  return text.replace(/[  -​  　]/g, " ");
+  return text.normalize("NFC").replace(/[  -​  　]/g, " ");
 }
 
 /**
@@ -268,7 +284,73 @@ function pdfDate(date: Date): string {
   return `D:${iso.slice(0, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(11, 13)}${iso.slice(14, 16)}${iso.slice(17, 19)}Z`;
 }
 
-function contentStream(page: PdfPage): string {
+/** A run of text cut where it moves between Helvetica and the fallback font. */
+interface Segment {
+  text: string;
+  /** Fallback glyph ids, when the segment is drawn with the fallback font. */
+  glyphs: number[] | null;
+}
+
+function segments(text: string, used: Map<number, number>): Segment[] {
+  const out: Segment[] = [];
+  for (const ch of plainSpaces(text)) {
+    const cp = ch.codePointAt(0) ?? 0;
+    const glyph = winAnsiCode(cp) === null ? fallbackGlyph(cp) : null;
+    const last = out.at(-1);
+    if (glyph === null) {
+      if (last && last.glyphs === null) last.text += ch;
+      else out.push({ text: ch, glyphs: null });
+      continue;
+    }
+    if (!used.has(glyph)) used.set(glyph, cp);
+    if (last?.glyphs) {
+      last.text += ch;
+      last.glyphs.push(glyph);
+    } else out.push({ text: ch, glyphs: [glyph] });
+  }
+  return out;
+}
+
+const FALLBACK_KEY = "F4";
+/** DejaVu Sans's capital height (1493 of 2048 units), in 1/1000 em. */
+const DEJAVU_CAP_HEIGHT = 729;
+/** The slant Helvetica-Oblique has, for fallback text in an oblique run. */
+const OBLIQUE_SKEW = 0.21;
+
+function textRun(t: PdfText, used: Map<number, number>, cid: (g: number) => number): string {
+  const parts = segments(t.text, used);
+  if (parts.every((p) => p.glyphs === null)) {
+    return `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(t.x)} ${num(t.y)} Tm ${pdfString(t.text.normalize("NFC"))} Tj ET`;
+  }
+  // One text object for the whole run, so each piece starts exactly where the
+  // viewer finished drawing the last one, with no widths estimated here. An
+  // oblique run slants the whole object and sets its WinAnsi pieces in upright
+  // Helvetica, which is how Helvetica-Oblique is drawn; a bold run strokes the
+  // fallback outlines as well as filling them.
+  const oblique = t.font === "oblique";
+  const plain = oblique ? fontKeys.regular : fontKeys[t.font];
+  const bold = t.font === "bold";
+  const size = num(t.size);
+  const out: string[] = [];
+  if (bold) out.push(`q ${num(t.size * 0.03)} w`);
+  out.push(`BT 1 0 ${oblique ? num(OBLIQUE_SKEW) : "0"} 1 ${num(t.x)} ${num(t.y)} Tm`);
+  for (const p of parts) {
+    if (p.glyphs === null) {
+      out.push(`${bold ? "0 Tr " : ""}/${plain} ${size} Tf ${pdfString(p.text)} Tj`);
+    } else {
+      const hex = p.glyphs.map((g) => cid(g).toString(16).toUpperCase().padStart(4, "0")).join("");
+      out.push(`${bold ? "2 Tr " : ""}/${FALLBACK_KEY} ${size} Tf <${hex}> Tj`);
+    }
+  }
+  out.push(bold ? "ET Q" : "ET");
+  return out.join("\n");
+}
+
+function contentStream(
+  page: PdfPage,
+  used: Map<number, number>,
+  cid: (g: number) => number = (g) => g,
+): string {
   const parts: string[] = [];
   if (page.rules.length > 0) {
     parts.push("0 G");
@@ -278,11 +360,97 @@ function contentStream(page: PdfPage): string {
   }
   for (const t of page.texts) {
     if (t.text.length === 0) continue;
-    parts.push(
-      `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(t.x)} ${num(t.y)} Tm ${pdfString(t.text)} Tj ET`,
-    );
+    parts.push(textRun(t, used, cid));
   }
   return `${parts.join("\n")}\n`;
+}
+
+/** ASCII85, so the embedded font keeps the file ASCII. */
+export function ascii85(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 4) {
+    const chunk = bytes.subarray(i, i + 4);
+    let value = 0;
+    for (let j = 0; j < 4; j++) value = value * 256 + (chunk[j] ?? 0);
+    if (chunk.length === 4 && value === 0) {
+      out += "z";
+      continue;
+    }
+    const digits: string[] = [];
+    for (let j = 0; j < 5; j++) {
+      digits.unshift(String.fromCharCode(33 + (value % 85)));
+      value = Math.floor(value / 85);
+    }
+    out += digits.slice(0, chunk.length + 1).join("");
+  }
+  return `${out}~>`;
+}
+
+/** Six capital letters naming this glyph set, as a font subset's name begins. */
+function subsetTag(glyphs: readonly number[]): string {
+  let h = 0x811c9dc5;
+  for (const g of glyphs) {
+    h ^= g;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  let tag = "";
+  for (let i = 0; i < 6; i++) {
+    tag += String.fromCharCode(65 + (h % 26));
+    h = Math.floor(h / 26) + i * 7;
+  }
+  return tag;
+}
+
+/**
+ * The fallback font's objects, numbered from `first`: the Type 0 font, its
+ * CID font, the descriptor, the embedded subset, and the map back to Unicode
+ * (so the text can be searched and copied).
+ */
+function fallbackObjects(
+  first: number,
+  used: Map<number, number>,
+  embedded: { bytes: Uint8Array; glyphOf: ReadonlyMap<number, number> },
+): string[] {
+  const font = fallbackFont();
+  const glyphs = [...used.keys()].sort((a, b) => a - b);
+  const cid = (g: number) => embedded.glyphOf.get(g) ?? 0;
+  const name = `${subsetTag(glyphs)}+DejaVuSans`;
+  const scale = (v: number) => Math.round((v * 1000) / font.unitsPerEm);
+  const widths = glyphs.map((g) => `${cid(g)} [${fallbackWidth(g)}]`).join(" ");
+  const file = embedded.bytes;
+  const encoded = ascii85(file);
+  const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+  const pairs = glyphs.map((g) => `<${hex4(cid(g))}> <${hex4(used.get(g) ?? 0xfffd)}>`);
+  const blocks: string[] = [];
+  for (let i = 0; i < pairs.length; i += 100) {
+    const block = pairs.slice(i, i + 100);
+    blocks.push(`${block.length} beginbfchar\n${block.join("\n")}\nendbfchar`);
+  }
+  const cmap = [
+    "/CIDInit /ProcSet findresource begin",
+    "12 dict begin",
+    "begincmap",
+    "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def",
+    "/CMapName /Adobe-Identity-UCS def",
+    "/CMapType 2 def",
+    "1 begincodespacerange",
+    "<0000> <FFFF>",
+    "endcodespacerange",
+    ...blocks,
+    "endcmap",
+    "CMapName currentdict /CMap defineresource pop",
+    "end",
+    "end",
+    "",
+  ].join("\n");
+  const [x1, y1, x2, y2] = font.bbox.map(scale) as [number, number, number, number];
+  return [
+    `<< /Type /Font /Subtype /Type0 /BaseFont /${name} /Encoding /Identity-H /DescendantFonts [${first + 1} 0 R] /ToUnicode ${first + 4} 0 R >>`,
+    `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${first + 2} 0 R /CIDToGIDMap /Identity /DW 1000 /W [${widths}] >>`,
+    `<< /Type /FontDescriptor /FontName /${name} /Flags 32 /FontBBox [${x1} ${y1} ${x2} ${y2}] /ItalicAngle 0 /Ascent ${scale(font.ascent)} /Descent ${scale(font.descent)} /CapHeight ${DEJAVU_CAP_HEIGHT} /StemV 80 /FontFile2 ${first + 3} 0 R >>`,
+    `<< /Length ${encoded.length} /Length1 ${file.length} /Filter /ASCII85Decode >>\nstream\n${encoded}\nendstream`,
+    `<< /Length ${cmap.length} >>\nstream\n${cmap}endstream`,
+  ];
 }
 
 /** The document's bytes. Throws on a document with no pages. */
@@ -302,15 +470,28 @@ export function writePdf(doc: PdfDocument): Uint8Array {
     ),
     `<< /Title ${pdfString(doc.title)} /Producer (TideGrid waiver renderer 1) /CreationDate ${pdfString(pdfDate(doc.creationDate))} >>`,
   ];
-  const fontResources = fonts.map((f, i) => `/${fontKeys[f]} ${3 + i} 0 R`).join(" ");
-  doc.pages.forEach((page, i) => {
+  // The fallback glyphs the pages use, with a code point each, and the
+  // objects that embed them, after the pages, only when there are any.
+  const used = new Map<number, number>();
+  let streams = doc.pages.map((page) => contentStream(page, used));
+  // With fallback text, embed only its glyphs, renumbered, and write the
+  // pages again with the new numbers.
+  const embedded = used.size > 0 ? compactTrueType(fallbackFont(), used.keys()) : null;
+  if (embedded) {
+    const cid = (g: number) => embedded.glyphOf.get(g) ?? 0;
+    streams = doc.pages.map((page) => contentStream(page, new Map(), cid));
+  }
+  const fallbackRef = firstPage + doc.pages.length * 2;
+  let fontResources = fonts.map((f, i) => `/${fontKeys[f]} ${3 + i} 0 R`).join(" ");
+  if (embedded) fontResources += ` /${FALLBACK_KEY} ${fallbackRef} 0 R`;
+  streams.forEach((stream, i) => {
     const contentRef = firstPage + i * 2 + 1;
     bodies.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << ${fontResources} >> >> /Contents ${contentRef} 0 R >>`,
     );
-    const stream = contentStream(page);
     bodies.push(`<< /Length ${stream.length} >>\nstream\n${stream}endstream`);
   });
+  if (embedded) bodies.push(...fallbackObjects(fallbackRef, used, embedded));
 
   let out = "%PDF-1.4\n%âãÏÓ\n";
   const offsets: number[] = [];
@@ -323,7 +504,7 @@ export function writePdf(doc: PdfDocument): Uint8Array {
   for (const offset of offsets) out += `${String(offset).padStart(10, "0")} 00000 n \n`;
   out += `trailer\n<< /Size ${bodies.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 
-  // Every character is below 256, so one character is one byte.
+  // Every character is ASCII but the marker's, so one character is one byte.
   const bytes = new Uint8Array(out.length);
   for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i);
   return bytes;
