@@ -189,6 +189,7 @@ export {
   type BookingConfirmedEvent,
   BookingHookRefusal,
   type BookingHooks,
+  type BookingRescheduledEvent,
   noBookingHooks,
   type ParticipantEvent,
   type ParticipantField,

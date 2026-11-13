@@ -21,7 +21,9 @@
  *
  * After the move: the old trip reminder is canceled and a new one written
  * for the new trip, the guest is emailed the new time, and the booking's
- * audit and `booking.rescheduled` event are written.
+ * audit and `booking.rescheduled` event are written. Then the hooks'
+ * `bookingRescheduled` runs: the waiver module keeps each signature only
+ * while the version it signed still applies (owner decision 2026-11-13).
  */
 import { randomUUID } from "node:crypto";
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
@@ -40,6 +42,7 @@ import {
   REMINDER_TEMPLATE,
   RESCHEDULED_TEMPLATE,
 } from "./emails.ts";
+import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { iso, record } from "./views.ts";
 
 /** At most this many trips are offered to move to, soonest first. */
@@ -320,6 +323,8 @@ export interface RescheduleInput {
   toTripId: string;
   /** Staff only: why the policy is set aside. The caller checks the permission. */
   overrideReason?: string | null;
+  /** Run after the move's own writes, in its transaction (waivers re-check their version). */
+  hooks?: BookingHooks | undefined;
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
@@ -416,6 +421,9 @@ export async function rescheduleBooking(
     throw new Error(`a move's new hold did not confirm: ${confirmed.kind}`);
   }
 
+  const hooks = input.hooks ?? noBookingHooks;
+  await hooks.bookingRescheduling?.(trx, ctx, { bookingId: input.bookingId });
+
   // The reminder waiting for the old trip's day, and an earlier move's notice
   // not yet sent, would name a time the booking no longer has. Canceled now,
   // once the move is sure, and before the booking's hold changes: that update
@@ -430,6 +438,15 @@ export async function rescheduleBooking(
   for (const message of reminders) {
     await cancelMessage(trx, ctx, message.id, { code: "booking_moved", revokeLinks: false });
   }
+  // For the same reason, every other message of this booking still to go out
+  // is locked now: the hooks below may cancel some (a waiver request replaced
+  // by the move), after the booking's row is taken.
+  await sql`
+    select id from email_messages
+     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+       and state in ('queued', 'sending')
+     order by id
+       for update`.execute(trx);
   const { rows: inserted } = await sql<{
     created_at: Date | string;
     before_cutoff: boolean;
@@ -491,6 +508,12 @@ export async function rescheduleBooking(
   await enqueueRescheduledEmail(trx, ctx, input.bookingId, {
     rescheduleId,
     fromStartsAt: iso(row.starts_at),
+  });
+  await hooks.bookingRescheduled?.(trx, ctx, {
+    bookingId: input.bookingId,
+    rescheduleId,
+    fromTripId: row.trip_id,
+    toTripId: target.id,
   });
 
   return {

@@ -77,13 +77,15 @@ export function requiredSignerFor(participant: WaiverParticipant): WaiverSignerR
 
 /**
  * Assign the booking's waivers: for every current participant, or only the
- * ones named. The booking must be confirmed in this transaction's view.
+ * ones named. The booking must be confirmed in this transaction's view. A
+ * caller that already chose the version under the assignment key passes it,
+ * so the requests it compared against and the ones assigned name the same one.
  */
 export async function assignBookingWaivers(
   trx: TenantTransaction,
   ctx: TenantContext,
   deps: WaiverDeps,
-  input: { bookingId: string; participantIds?: readonly string[] },
+  input: { bookingId: string; participantIds?: readonly string[]; version?: ApplicableVersion },
 ): Promise<AssignResult> {
   if (!isUuid(input.bookingId)) throw new TypeError("booking id must be a UUID");
   await lockBookingForWaivers(trx, ctx.tenantId, input.bookingId);
@@ -95,7 +97,8 @@ export async function assignBookingWaivers(
   await sql`select pg_advisory_xact_lock_shared(hashtextextended(${assignmentLockKey(ctx.tenantId)}, 0))`.execute(
     trx,
   );
-  const version = await findApplicableVersion(trx, ctx.tenantId, booking.productId);
+  const version =
+    input.version ?? (await findApplicableVersion(trx, ctx.tenantId, booking.productId));
   if (!version) return { required: false, version: null, created: [], alreadyAssigned: 0 };
 
   const wanted = input.participantIds ? new Set(input.participantIds) : null;

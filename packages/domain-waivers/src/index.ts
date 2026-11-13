@@ -52,7 +52,12 @@ export {
   waiverRequestEmail,
 } from "./email.ts";
 export { cleanLine, comparableName, formatInstant } from "./format.ts";
-export { CORRECTED_ADDRESS_REASON, createWaiverHooks, onParticipantUpdated } from "./hooks.ts";
+export {
+  CORRECTED_ADDRESS_REASON,
+  createWaiverHooks,
+  onBookingRescheduled,
+  onParticipantUpdated,
+} from "./hooks.ts";
 export {
   closeRequestAccess,
   requestIdOf,
@@ -90,7 +95,12 @@ export {
   resetWaiverSendCount,
   type SendResetResult,
 } from "./renewal.ts";
-export { type RevokeResult, revokeBookingWaivers, revokeParticipantWaivers } from "./revoke.ts";
+export {
+  type RevokeResult,
+  revokeBookingWaivers,
+  revokeParticipantWaivers,
+  revokeStaleSignatures,
+} from "./revoke.ts";
 export { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 export {
   ESIGN_CONSENT,

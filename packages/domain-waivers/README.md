@@ -46,6 +46,7 @@ The booking module runs [lifecycle hooks](../domain-booking/src/hooks.ts) inside
 | `participantAdded` | Assign the new participant and queue their email. |
 | `participantUpdated` | A change of whether they are a minor (who must sign), or, on a signed waiver, a new name for the participant or for the guardian who signed for a minor, revokes the request (`participant_changed`) and assigns a new one. On a pending request, a new name for the signer ends its staff-assisted codes and sessions (the staff member confirmed the old name); the emailed link stays. A corrected address on a pending request sends it there at once. Nothing else changes a request. |
 | `bookingCanceled` | Revoke every live request on the booking (`booking_canceled`). |
+| `bookingRescheduled` | The booking moved to another trip (W3-G2.15-rest, owner decision 2026-11-13). A signature carries over while the version it signed is still the one that applies now. A signature on an older version is revoked (`version_changed`, from signed only, and the database allows it only right after a move of that booking, migration `0042`), and the person is assigned the version in effect now, with its email. The first signature's evidence stays. An unsigned request on an older version is superseded by one for the current version, with its email, so the old text can no longer be signed. The requests are locked before their state is read, so a signature in flight is waited for and then treated as signed; `bookingRescheduling`, before the move updates the booking, locks them ahead of the booking's messages, the order signing uses. |
 
 None of them refuses: confirmation and party changes never wait on waivers. Assignment is idempotent: the booking row lock serializes it per booking, a participant with a live request is skipped, and the assignment key refuses a duplicate at the database. A retried confirmation or addition creates nothing and sends nothing. Payment and confirmation never depend on a waiver.
 
@@ -80,7 +81,7 @@ What ends access:
 | Event | Links (messaging module) | Sessions | Queued emails |
 |---|---|---|---|
 | Signed | revoked `completed` | the signer's stays open for the signed copy | canceled |
-| Request revoked (participant changed, booking canceled) | revoked `withdrawn` or `booking_canceled` | revoked | canceled |
+| Request revoked (participant changed, booking canceled, version changed on a move) | revoked `withdrawn` or `booking_canceled` | revoked | canceled |
 | Request superseded by a new version | revoked `withdrawn` | revoked | canceled |
 | Address corrected | revoked `recipient_changed` | revoked | canceled, then the new address's email is queued |
 | Resend to the same address | superseded when the new link is issued | stay open | the earlier one canceled, and the link it carried withdrawn |
@@ -215,7 +216,7 @@ Recorded as follow-ups; the demo leaves them out:
 - **The generic dock QR with staff lookup.** One printed code at the dock that finds a guest's waiver by lookup is not built; participant QR and staff-device signing are (above).
 - **Migration suppression.** Imported bookings do not exist yet, so there is no initial-notification policy.
 - **Removing a participant.** When a shared-seat party gives up a place (W3-G2.11-rest), the booking module's `participantRemoved` hook calls `revokeParticipantWaivers` with `participant_removed`: the request, its links, sessions, and queued email end, and a signature already given stays as evidence. The removed participant is no longer listed by the booking module, so nothing is assigned to them again.
-- **Reuse across bookings.** The re-sign policy is `every_booking`; reusing a signature needs verified customer identity.
+- **Reuse across bookings.** The re-sign policy is `every_booking`: a new booking signs afresh, and a signature never reaches another booking (owner decision 2026-11-13). A moved booking keeps its signatures while the version is unchanged (`bookingRescheduled`, above). Reuse across bookings would need verified customer identity.
 - **Mailbox verification beyond the link.** Following the emailed link is the mailbox signal; there is no separate code. A guardian address shared with a participant is flagged to staff (above), not verified.
 - **Scripts that need shaping or right-to-left layout** (Arabic, Hebrew, Indic scripts, Chinese, Japanese, Korean) show a question mark in the PDF; the evidence keeps the exact text. Drawing them needs a shaping engine and much larger fonts.
 - **R2.** Above.

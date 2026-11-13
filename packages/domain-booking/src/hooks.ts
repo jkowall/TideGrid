@@ -77,6 +77,13 @@ export interface BookingCanceledEvent {
   refundId: string | null;
 }
 
+export interface BookingRescheduledEvent {
+  bookingId: string;
+  rescheduleId: string;
+  fromTripId: string;
+  toTripId: string;
+}
+
 export interface BookingHooks {
   bookingConfirmed?(
     trx: TenantTransaction,
@@ -102,6 +109,23 @@ export interface BookingHooks {
     trx: TenantTransaction,
     ctx: TenantContext,
     event: BookingCanceledEvent,
+  ): Promise<void>;
+  /**
+   * A move is sure and about to write: before the booking's row is updated and
+   * before the booking's outgoing messages are locked. Lock here the rows the
+   * module will change in `bookingRescheduled` that it otherwise locks before
+   * those messages. It must not refuse.
+   */
+  bookingRescheduling?(
+    trx: TenantTransaction,
+    ctx: TenantContext,
+    event: { bookingId: string },
+  ): Promise<void>;
+  /** The booking moved to another trip, in the move's transaction, after its own writes. */
+  bookingRescheduled?(
+    trx: TenantTransaction,
+    ctx: TenantContext,
+    event: BookingRescheduledEvent,
   ): Promise<void>;
 }
 
