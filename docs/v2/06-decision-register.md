@@ -8,6 +8,25 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: the owner approves the standard CSV import draft and its twelve open questions
+
+On 2026-11-12 the owner asked for the open Wave 3 calls one at a time with options. On 2026-11-13 the owner chose "Approve all 12 as recommended" for the [standard CSV import draft](drafts/standard-csv-import.md#open-questions-for-the-owner). The draft's files, columns, rules, and boundaries are approved; it stays under `drafts/` until a later goal promotes it to a numbered document, and where it differs from this register, the register wins. The answers, by the draft's question number:
+
+1. **Files, columns, types, and required fields:** approved as drafted.
+2. **D1 confirmed:** a booking's deduplication key is the source system and its booking reference plus the trip date.
+3. **D2 confirmed:** imported payments and refunds are external tender. The import creates no Stripe object and calls no provider.
+4. **Control totals:** approved; any mismatch blocks the commit.
+5. **Custom-work boundary:** approved, including three dry runs, one final delta, and the two-hour import share of the Managed Launch target.
+6. **Complimentary future bookings:** kept out of the standard import; staff enter them after cutover.
+7. **Shared-seat bookings with a balance:** refused (`unexpected_balance`), as drafted.
+8. **Imported trip-card and dollar-card balances:** sold before TideGrid, so their later redemption does not enter the fee base.
+9. **Waiver email for imported bookings:** on by default, set once per batch (`waiver_notifications`), not per booking.
+10. **Error report:** never shows personal values to the operator.
+11. **Card expiry on import:** optional, as the scope has it.
+12. **Import capacity path:** approved. `app.check_capacity_hold` gains an import-only branch, so a commit may confirm imported seats on a `draft` trip or inside a trip's booking cutoff, without checkout's one-hour expiry window. Checkout's trip lock, the capacity count, the party check against the product's limits and the trip's seat capacity, and the refusal of a canceled or departed trip all still apply. No other booking path changes.
+
+This unblocks the commit step of W3-G2.13 (the 2026-11-11 part 1 entry below). The part 1 coordinator defaults D1 and D3 to D6 remain pending; its D2 ("the draft as written") is settled by this entry.
+
 ### 2026-11-11: W3-G2.15-rest, part 2, names and typed signatures in other alphabets in the signed PDF, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-11 ("Go ahead") on the last waiver item that needs no owner call, with the same limits as part 1 below. No migration, no new npm dependency, and no change to what a waiver's own text may contain (still WinAnsi only).

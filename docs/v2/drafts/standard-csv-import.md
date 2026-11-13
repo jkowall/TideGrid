@@ -1,11 +1,11 @@
 # Standard CSV import and Managed Launch boundaries (draft)
 
-**Status:** Proposed, not adopted; no authority until the owner records approval in the register.
+**Status:** Approved by the owner on 2026-11-13 ([decision register](../06-decision-register.md#2026-11-13-the-owner-approves-the-standard-csv-import-draft-and-its-twelve-open-questions)), with the answers to its open questions recorded there. Still a draft in placement until promoted to a numbered document.
 **Drafted:** 2026-11-08, goal W1-CSV-DEF, for the Stage 0 item "Define the standard CSV import and the boundaries of Managed Launch" in the [roadmap](../05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company).
 **Placement:** a draft, not a numbered V2 document. It is not part of the [authority order](../00-index.md#authority-and-historical-artifacts). Where it differs from the [decision register](../06-decision-register.md) or a numbered document, they win. Promotion to a numbered document is a later goal, after a dated owner approval entry.
 **Data:** every example is synthetic. No real operator export was read or used.
 
-Every column, required field, deduplication key, control total, error code, and custom-work boundary below is **proposed and pending the owner's approval**. The two coordinator defaults D1 and D2 are pending owner confirmation.
+Every column, required field, deduplication key, control total, error code, and custom-work boundary below was approved by the owner on 2026-11-13, including the two coordinator defaults D1 and D2. The open questions at the end are answered in the register entry linked above.
 
 ## What this draft rests on
 
