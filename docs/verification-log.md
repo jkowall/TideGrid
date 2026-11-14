@@ -6,14 +6,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ### An imported credit matches what its commit recorded (W3-G2.13 part C follow-up), built November 14, 2026
 
-Goal branch `claude/project-thread-mf1bwl`, migration `0051_import_credit_binding.sql`, on main `5d2bff3`. Synthetic data only; no provider call, no deploy.
+Goal branch `claude/project-thread-mf1bwl`, migration `0051_import_credit_binding.sql`, on main `daa7399`. Synthetic data only; no provider call, no deploy.
 
 - **Built.** The commit writes the customer and the amount of each opening balance beside its ledger row, and the database takes an imported credit only for that amount on that customer's account.
 - **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` in `domain-booking` (inside the saving transaction, another amount or another account is refused with `credit_entries_import_match`, the right one again with `credit_entries_import_once`; no later transaction writes the ledger line); the tenancy grant check; the full integration suite; `pnpm check`.
 
 ### How long the dock QR keeps its lookups (W3-G2.15-rest follow-up), built November 14, 2026
 
-Goal branch `claude/project-thread-mf1bwl`, migration `0050_waiver_dock_retention.sql`, on main `5d2bff3`. Synthetic data only; no provider call, no deploy.
+Goal branch `claude/project-thread-mf1bwl`, migration `0050_waiver_dock_retention.sql`, on main `daa7399`. Synthetic data only; no provider call, no deploy.
 
 - **Built.** A new cron step deletes dock lookups more than 30 days old that started no signing, and redacts the network address on those that did, logging both counts. The runtime can make no other change to a lookup.
 - **Review.** Independent review (second model) of this entry and the credit binding above: the new log counts were dropped by the logger's allowlist (added), the redaction also touched rows about to be deleted and rescanned kept rows each run (now only rows a signing names, with a partial index), a failing dock cleanup would have lost the delivery cleanup's log line (now its own step), and the register overstated what the credit binding proves (reworded).
