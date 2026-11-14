@@ -354,6 +354,17 @@ const staleAfter: ReadonlySet<SaveFailure> = new Set([
   "rate_changed",
 ]);
 
+/**
+ * After these the save may have gone through. The form stays as it was sent, so
+ * the only way on is the same request with the same key, or closing to see the
+ * list as it is now. An edited retry would get a new key and could add the rate twice.
+ */
+const unknownOutcome: ReadonlySet<SaveFailure> = new Set([
+  "unreadable",
+  "unreachable",
+  "unavailable",
+]);
+
 function RateDialog({
   tenantId,
   rate,
@@ -377,6 +388,7 @@ function RateDialog({
   const [shown, setShown] = useState<Partial<Record<Field, string>>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>();
+  const [unsure, setUnsure] = useState(false);
   const key = useRef<{ body: string; key: string } | null>(null);
   const stale = useRef(false);
   const first = useRef<HTMLInputElement>(null);
@@ -413,7 +425,11 @@ function RateDialog({
     };
     const input = rate ? { ...base, active, expectedVersion: rate.version } : base;
     const body = JSON.stringify(input);
-    if (key.current?.body !== body) key.current = { body, key: newIdempotencyKey() };
+    if (key.current?.body !== body) {
+      // The fields are locked while the outcome is unknown, so this can't happen then.
+      if (unsure) return;
+      key.current = { body, key: newIdempotencyKey() };
+    }
     setBusy(true);
     const result = rate
       ? await changeTaxRate(
@@ -427,6 +443,7 @@ function RateDialog({
     if (result.kind === "saved") return onSaved(result.rate, rate === null);
     if (result.reason === "key_reused") key.current = null;
     if (staleAfter.has(result.reason)) stale.current = true;
+    setUnsure(unknownOutcome.has(result.reason));
     setProblem(saveProblems[result.reason]);
   };
 
@@ -460,6 +477,12 @@ function RateDialog({
         {problem && (
           <Notice tone="error" title="The rate wasn't saved">
             <p>{problem}</p>
+            {unsure && (
+              <p>
+                The details stay as they were sent until TideGrid answers, so the rate can't be
+                added or changed twice.
+              </p>
+            )}
           </Notice>
         )}
         {rate && (
@@ -477,7 +500,7 @@ function RateDialog({
           maxLength={nameLimit * 2}
           autoComplete="off"
           error={shown.name}
-          disabled={busy}
+          disabled={busy || unsure}
           onChange={(e) => setName(e.target.value)}
         />
         <TextField
@@ -488,14 +511,14 @@ function RateDialog({
           value={percent}
           autoComplete="off"
           error={shown.rate}
-          disabled={busy}
+          disabled={busy || unsure}
           onChange={(e) => setPercent(e.target.value)}
         />
         <CheckboxField
           label="Prices already include this tax"
           hint="Leave this off when the tax is added on top of the price."
           checked={inclusive}
-          disabled={busy}
+          disabled={busy || unsure}
           onChange={(e) => setInclusive(e.target.checked)}
         />
         <SelectField
@@ -503,7 +526,7 @@ function RateDialog({
           hint="Every location, or only trips that leave from one."
           options={options}
           value={locationId}
-          disabled={busy}
+          disabled={busy || unsure}
           onChange={(e) => setLocationId(e.target.value)}
         />
         {rate && (
@@ -515,7 +538,7 @@ function RateDialog({
                 : "New bookings start using it again."
             }
             checked={rate.active ? !active : active}
-            disabled={busy}
+            disabled={busy || unsure}
             onChange={(e) => setActive(rate.active ? !e.target.checked : e.target.checked)}
           />
         )}
@@ -526,7 +549,7 @@ function RateDialog({
           value={reason}
           autoComplete="off"
           error={shown.reason}
-          disabled={busy}
+          disabled={busy || unsure}
           onChange={(e) => setReason(e.target.value)}
         />
       </form>

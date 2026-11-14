@@ -259,6 +259,11 @@ describe("Tax rates in the console (W3-G2.5-TAX)", () => {
     fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "New" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add rate" }));
     expect(await within(dialog).findByText("The rate wasn't saved")).toBeTruthy();
+    // The add may have gone through, so the details can't be edited into a second add.
+    for (const label of ["Name", "Rate (%)", "Reason"]) {
+      expect((within(dialog).getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+    }
+    expect(within(dialog).getByText(/can't be added or changed twice/)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Add rate" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const keys = sent.filter((s) => s.method === "POST").map((s) => s.key);
@@ -294,6 +299,8 @@ describe("Tax rates in the console (W3-G2.5-TAX)", () => {
     expect(
       await within(dialog).findByText(/Someone changed this rate after you opened it/),
     ).toBeTruthy();
+    // A definite answer: nothing was saved, so the form isn't locked.
+    expect((within(dialog).getByLabelText("Name") as HTMLInputElement).disabled).toBe(false);
     const reads = () => sent.filter((s) => s.method === "GET" && s.path.endsWith("/tax-rates"));
     const before = reads().length;
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
