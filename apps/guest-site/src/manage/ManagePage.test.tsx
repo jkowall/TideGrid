@@ -429,6 +429,60 @@ describe("opening the booking", () => {
     expect(text(by?.querySelector(".manage-block"))).toBe(booker.email);
   });
 
+  describe("the booker's own details", () => {
+    const change = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Change your name or email" }));
+      return screen.getByRole("group", { name: "Your name and email" });
+    };
+    const field = (form: HTMLElement, label: string) =>
+      within(form).getByLabelText(label) as HTMLInputElement;
+
+    it("changes the email, says where the new link went, and keeps the page open", async () => {
+      const calls = await openedFromLink();
+      const form = await change();
+      expect(document.activeElement).toBe(field(form, "Your full name"));
+      fireEvent.change(field(form, "Your email"), { target: { value: " New.Me@Example.test " } });
+      expect(text(form)).toContain("Links sent to your old address will stop working");
+      fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
+      const done = await screen.findByText("Your details are saved");
+      expect(text(done.closest(".manage-done"))).toContain(
+        "We've emailed a new link to new.me@example.test.",
+      );
+      const sent = callsTo(calls, "changeBooker");
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.body).toEqual({ name: booker.name, email: "new.me@example.test" });
+      expect(sent[0]?.headers.get("idempotency-key")).toBeTruthy();
+      expect(text(termValue(card("The trip"), "Booked by")?.querySelector(".manage-block"))).toBe(
+        "new.me@example.test",
+      );
+    });
+
+    it("refuses an empty name or a malformed email before sending anything", async () => {
+      const calls = await openedFromLink();
+      const form = await change();
+      fireEvent.change(field(form, "Your full name"), { target: { value: "  " } });
+      fireEvent.change(field(form, "Your email"), { target: { value: "not-an-email" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
+      expect(text(form)).toContain("Enter your full name");
+      expect(text(form)).toContain("Enter an email address like name@example.com");
+      expect(callsTo(calls, "changeBooker")).toHaveLength(0);
+    });
+
+    it("sends the guest to the operator after three changes in a day", async () => {
+      await openedFromLink({ changeBooker: () => refusal(429, "contact_change_limit_reached") });
+      const form = await change();
+      fireEvent.change(field(form, "Your full name"), { target: { value: "Someone Else" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
+      expect(await within(form).findByText(/changed these details 3 times today/)).toBeTruthy();
+      expect(text(form)).toContain("Contact Demo Harbor Charters");
+    });
+
+    it("offers no change once the trip has left", async () => {
+      await openedFromLink({}, { booking: managedBooking({ partyEditable: false }) });
+      expect(screen.queryByRole("button", { name: "Change your name or email" })).toBeNull();
+    });
+  });
+
   it("leaves out the meeting point's parts the operator did not give", async () => {
     await openedFromLink(
       {},

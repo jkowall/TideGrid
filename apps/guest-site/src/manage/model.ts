@@ -255,6 +255,19 @@ function emailProblem(value: string, required: boolean, what: string): string | 
   return undefined;
 }
 
+/** The booker's corrected name and email, field by field; empty when they can be saved. */
+export function bookerErrors(form: { name: string; email: string }): {
+  name?: string;
+  email?: string;
+} {
+  const errors: { name?: string; email?: string } = {};
+  const name = nameProblem(form.name, "your full name");
+  if (name) errors.name = name;
+  const email = emailProblem(form.email, true, "your email");
+  if (email) errors.email = email;
+  return errors;
+}
+
 /** The form's problems, field by field; empty when it can be saved. */
 export function formErrors(form: ParticipantForm): FormErrors {
   const errors: FormErrors = {};

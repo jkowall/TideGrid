@@ -899,3 +899,80 @@ describe("when the booking does not load", () => {
     expect(screen.queryByText("The page crashed")).toBeNull();
   });
 });
+
+describe("correcting the guest's name and email (W3-G2.11-rest)", () => {
+  const bookerRoute = `PUT /api/v1/staff/tenants/${tenantId}/bookings/${bookingId}/booker`;
+  const change = (emailChanged: boolean) => ({
+    change: {
+      contactChangeId: "0b8f6b0e-2c6a-4d55-9d8e-1d1f1a2b3c4d",
+      nameChanged: !emailChanged,
+      emailChanged,
+      by: "staff",
+      changedAt: "2026-11-04T17:00:00.000Z",
+    },
+  });
+
+  async function openForm() {
+    renderDetail("booking_staff");
+    await loaded();
+    fireEvent.click(within(card("Guest")).getByRole("button", { name: "Correct name or email" }));
+    return within(card("Guest")).getByRole("group", { name: "Correct the guest's details" });
+  }
+
+  it("saves a new email, says where the booking's emails now go, and shows it at once", async () => {
+    const calls = api({
+      [route.booking(bookingId)]: answer("booking_staff"),
+      [bookerRoute]: () => json(change(true)),
+    });
+    const form = await openForm();
+    const email = within(form).getByLabelText("Booker's email");
+    fireEvent.change(email, { target: { value: "  Maya.New@Guest.Example " } });
+    expect(text(form)).toContain("Links sent to the old address stop working");
+    fireEvent.click(within(form).getByRole("button", { name: "Save details" }));
+    const notice = await within(card("Guest")).findByText(/Emails about this booking now go to/);
+    expect(text(notice)).toContain("maya.new@guest.example");
+    expect(terms(card("Guest")).Email).toBe("maya.new@guest.example");
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.path).toBe(bookerRoute.slice(4));
+    expectNoPersonalDataInAddresses();
+  });
+
+  it("checks the details before sending, and sends nothing for a bad email", async () => {
+    const calls = api({ [route.booking(bookingId)]: answer("booking_staff") });
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Booker's email"), {
+      target: { value: "not-an-email" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Save details" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(form).getByLabelText("Booker's email")),
+    );
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("says plainly when someone changed the details a moment ago", async () => {
+    api({
+      [route.booking(bookingId)]: answer("booking_staff"),
+      [bookerRoute]: () => apiError(409, "booking_changed"),
+    });
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Booker's name"), {
+      target: { value: "Maya O. Okonkwo" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Save details" }));
+    expect(text(await within(form).findByText(/Someone changed these details/))).toContain(
+      "Reload the booking",
+    );
+    expect(terms(card("Guest"))["Booked by"]).toBe("Maya Okonkwo");
+  });
+
+  it("offers no correction once the trip has left", async () => {
+    vi.setSystemTime(new Date("2026-11-05T01:00:00Z"));
+    api({ [route.booking(bookingId)]: answer("owner") });
+    renderDetail("owner");
+    await loaded();
+    expect(
+      within(card("Guest")).queryByRole("button", { name: "Correct name or email" }),
+    ).toBeNull();
+  });
+});
