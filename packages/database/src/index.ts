@@ -19,6 +19,7 @@ export {
   DeliveryHandlerError,
   type DeliveryMessage,
   type DeliverySender,
+  type DockLookupCleanupReport,
   deliveryErrorCode,
   getOpenDeadLetter,
   listDeadLetters,
@@ -30,6 +31,7 @@ export {
   recordDeadLetter,
   replayDeadLetter,
   runDeliveryCleanup,
+  runDockLookupCleanup,
   SEND_RETRY_SECONDS,
 } from "./delivery.ts";
 export {

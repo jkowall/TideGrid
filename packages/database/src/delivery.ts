@@ -788,3 +788,23 @@ export async function runDeliveryCleanup(
     quotesDeleted: row?.quotes_deleted ?? 0,
   };
 }
+
+export interface DockLookupCleanupReport {
+  /** Lookups more than 30 days old that started no signing, deleted. */
+  deleted: number;
+  /** Lookups more than 30 days old kept for a signing, client redacted. */
+  redacted: number;
+}
+
+/**
+ * Clean up dock QR lookups more than 30 days old (0050), through
+ * app.waiver_dock_cleanup. The runtime holds no UPDATE or DELETE on them.
+ */
+export async function runDockLookupCleanup(
+  db: Kysely<Database>,
+  options: { limit?: number } = {},
+): Promise<DockLookupCleanupReport> {
+  const { rows } = await sql<{ deleted: number; redacted: number }>`
+    select deleted, redacted from app.waiver_dock_cleanup(${options.limit ?? 1000})`.execute(db);
+  return { deleted: rows[0]?.deleted ?? 0, redacted: rows[0]?.redacted ?? 0 };
+}

@@ -1501,6 +1501,7 @@ export interface Database
   import_customers: ImportCustomersTable;
   import_bookings: ImportBookingsTable;
   import_waiver_statuses: ImportWaiverStatusesTable;
+  import_credits: ImportCreditsTable;
   import_email_releases: ImportEmailReleasesTable;
   import_waiver_email_done: ImportWaiverEmailDoneTable;
   import_booking_email_opened: ImportBookingEmailOpenedTable;
@@ -1938,6 +1939,15 @@ export interface ImportWaiverStatusesTable {
   legacy_status: Fixed<"signed" | "unsigned" | "unknown">;
   legacy_signed_on: FixedDefault<string | null>;
   legacy_system: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+/** The customer and amount an opening balance's ledger row recorded (0051). Append-only. */
+export interface ImportCreditsTable {
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  customer_record_id: Fixed<string>;
+  amount: Fixed<number>;
   created_at: Stamped;
 }
 

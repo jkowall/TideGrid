@@ -1,4 +1,9 @@
-import { createDb, publishOutbox, runDeliveryCleanup } from "@tidegrid/database";
+import {
+  createDb,
+  publishOutbox,
+  runDeliveryCleanup,
+  runDockLookupCleanup,
+} from "@tidegrid/database";
 import { sweepCheckouts, sweepReconciliation } from "@tidegrid/domain-booking";
 import {
   type CustomHostnameProvider,
@@ -69,6 +74,9 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  * 7. Retention (W3-G2.2b) replaces the booker's name and email on abandoned
  *    checkouts older than 30 days (coordinator default D2) with a fixed
  *    redaction, up to 500 a run, and records one audit event per tenant.
+ * 8. Dock QR lookups (0050) more than 30 days old: those that started no
+ *    signing are deleted, and the rest have their client address redacted,
+ *    through app.waiver_dock_cleanup.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -534,6 +542,24 @@ export async function runScheduled(
       });
     } catch (error) {
       retentionLog.error("retention_failed", {
+        ...errorAttributes(error),
+        duration_ms: Date.now() - started,
+      });
+      throw error;
+    }
+
+    // 8. Dock QR lookups (0050): removed or redacted after 30 days.
+    const dockLog = createLogger({ ...base, "event.name": "dock_lookup_cleanup" }, options.log);
+    started = Date.now();
+    try {
+      const report = await runDockLookupCleanup(handle.db);
+      dockLog.info("dock_lookup_cleanup", {
+        "tidegrid.dock_lookup_cleanup.deleted_count": report.deleted,
+        "tidegrid.dock_lookup_cleanup.redacted_count": report.redacted,
+        duration_ms: Date.now() - started,
+      });
+    } catch (error) {
+      dockLog.error("dock_lookup_cleanup_failed", {
         ...errorAttributes(error),
         duration_ms: Date.now() - started,
       });

@@ -24,6 +24,7 @@ vi.mock("@tidegrid/database", async (importOriginal) => ({
     complete: true,
   })),
   runDeliveryCleanup: vi.fn(async () => ({ idempotencyKeysDeleted: 0, quotesDeleted: 0 })),
+  runDockLookupCleanup: vi.fn(async () => ({ deleted: 0, redacted: 0 })),
 }));
 vi.mock("@tidegrid/domain-inventory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tidegrid/domain-inventory")>()),

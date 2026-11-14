@@ -130,6 +130,8 @@ export interface RequestAttributes {
   "tidegrid.outbox_publish.complete"?: boolean;
   "tidegrid.delivery_cleanup.idempotency_keys_deleted"?: number;
   "tidegrid.delivery_cleanup.quotes_deleted"?: number;
+  "tidegrid.dock_lookup_cleanup.deleted_count"?: number;
+  "tidegrid.dock_lookup_cleanup.redacted_count"?: number;
   /** Waiver reminder sweep (W1-G215-REMINDERS). Counts only. */
   "tidegrid.waiver_reminder_sweep.tenant_count"?: number;
   "tidegrid.waiver_reminder_sweep.queued_count"?: number;
@@ -285,6 +287,9 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.outbox_publish.complete",
   "tidegrid.delivery_cleanup.idempotency_keys_deleted",
   "tidegrid.delivery_cleanup.quotes_deleted",
+  // Dock QR lookup retention (0050).
+  "tidegrid.dock_lookup_cleanup.deleted_count",
+  "tidegrid.dock_lookup_cleanup.redacted_count",
   // Waiver reminder sweep (W1-G215-REMINDERS).
   "tidegrid.waiver_reminder_sweep.tenant_count",
   "tidegrid.waiver_reminder_sweep.queued_count",
