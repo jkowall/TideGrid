@@ -175,10 +175,10 @@ export async function changeBookerContact(
   }
 
   // Another correction committed after this transaction began, while this
-  // one waited on the checkout's lock. The email written here would carry
-  // this transaction's start time, earlier than that correction's link
-  // revocations, and delivery would take it for stale. Ask for a retry: the
-  // asker has not seen the details as they are now anyway.
+  // one waited on the checkout's lock. The asker has not seen the details as
+  // they are now, so ask for a retry rather than overwrite them. (Since 0052
+  // delivery reads when an email was written, not when its transaction
+  // began, so this is no longer what keeps a fresh email from looking stale.)
   const { rows: overtaken } = await sql<{ id: string }>`
     select id from booking_contact_changes
      where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
