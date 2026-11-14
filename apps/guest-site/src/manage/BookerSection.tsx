@@ -106,13 +106,23 @@ function BookerEditor({
   const [form, setForm] = useState({ name: booking.booker.name, email: booking.booker.email });
   const [errors, setErrors] = useState<{ name?: string; email?: string }>({});
   const [busy, setBusy] = useState(false);
-  const [trouble, setTrouble] = useState<string | null>(null);
+  const [trouble, setTrouble] = useState<{ text: string; unknown: boolean } | null>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const emailField = useRef<HTMLInputElement>(null);
   // One key per set of details; a retry after no answer sends the same request.
   const attempt = useRef<{ body: string; key: string } | null>(null);
 
-  useEffect(() => nameField.current?.focus(), []);
+  // A save that answers after the editor closed (the booking was canceled
+  // meanwhile, say) changes nothing on the page.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    nameField.current?.focus();
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const refused = (text: string) => setTrouble({ text, unknown: false });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -133,6 +143,7 @@ function BookerEditor({
     setBusy(true);
     setTrouble(null);
     const result = await changeBooker(session, input, attempt.current.key);
+    if (!live.current) return;
     setBusy(false);
     if (result.kind === "ok") {
       attempt.current = null;
@@ -152,7 +163,7 @@ function BookerEditor({
         return;
       }
       if (result.status === 409) {
-        setTrouble(
+        refused(
           result.code === "booking_canceled"
             ? "This booking is canceled, so its details no longer change."
             : result.code === "trip_departed"
@@ -162,7 +173,7 @@ function BookerEditor({
         return;
       }
       if (result.status === 429) {
-        setTrouble(
+        refused(
           result.code === "contact_change_limit_reached"
             ? `You've changed these details 3 times today. Contact ${operator} to change them again.`
             : "That was a lot of tries in a short time. Wait a minute, then try again.",
@@ -170,19 +181,24 @@ function BookerEditor({
         return;
       }
       if (result.status === 404) {
-        setTrouble(`This booking can't be changed here any more. Contact ${operator} for help.`);
+        refused(`This booking can't be changed here any more. Contact ${operator} for help.`);
         return;
       }
       if (result.status === 400 || result.status === 422) {
-        setTrouble("Check the details and try again.");
+        refused("Check the details and try again.");
         return;
       }
     }
-    setTrouble(
-      result.kind === "network"
-        ? "Not saved: we couldn't reach the booking site. Check your connection and try again."
-        : "Not saved: something went wrong on our side. Try again in a moment.",
-    );
+    // No answer, an unreadable one, or the server's trouble: the change may
+    // have been saved. Sending the same details again uses the same key, so it
+    // is taken once and the answer says what happened.
+    setTrouble({
+      unknown: true,
+      text:
+        result.kind === "network"
+          ? "We couldn't reach the booking site, so we don't know whether your details changed. Check your connection, then save the same details again: they're changed only once."
+          : "Something went wrong on our side, so we don't know whether your details changed. Save the same details again in a moment: they're changed only once.",
+    });
   };
 
   const emailChanging =
@@ -193,8 +209,11 @@ function BookerEditor({
       <fieldset className="booking-group">
         <legend className="booking-group__legend">Your name and email</legend>
         {trouble && (
-          <Notice tone="error" title="Not saved">
-            {trouble}
+          <Notice
+            tone={trouble.unknown ? "warning" : "error"}
+            title={trouble.unknown ? "Not confirmed" : "Not saved"}
+          >
+            {trouble.text}
           </Notice>
         )}
         <TextField

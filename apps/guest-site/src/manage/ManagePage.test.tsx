@@ -484,7 +484,10 @@ describe("opening the booking", () => {
       const form = await change();
       fireEvent.change(field(form, "Your email"), { target: { value: "again@example.test" } });
       fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
-      expect(await within(form).findByText(/something went wrong on our side/)).toBeTruthy();
+      expect(
+        await within(form).findByText(/we don't know whether your details changed/),
+      ).toBeTruthy();
+      expect(text(form)).toContain("Not confirmed");
       fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
       expect(await screen.findByText("Your details are saved")).toBeTruthy();
       const sent = callsTo(calls, "changeBooker");

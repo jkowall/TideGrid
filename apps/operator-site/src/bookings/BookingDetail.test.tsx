@@ -966,6 +966,32 @@ describe("correcting the guest's name and email (W3-G2.11-rest)", () => {
     expect(terms(card("Guest"))["Booked by"]).toBe("Maya Okonkwo");
   });
 
+  it("after an answer it can't read, says the outcome is unknown and sends the same key again", async () => {
+    api({
+      [route.booking(bookingId)]: answer("booking_staff"),
+      [bookerRoute]: [() => json({ unexpected: true }), () => json(change(true))],
+    });
+    const stubbed = globalThis.fetch;
+    const keys: (string | null)[] = [];
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") keys.push(new Headers(init.headers).get("Idempotency-Key"));
+      return stubbed(input, init);
+    });
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Booker's email"), {
+      target: { value: "maya.new@guest.example" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Save details" }));
+    const notice = await within(form).findByText(/it isn't known whether the details changed/);
+    expect(text(notice)).toContain("Save the same details again");
+    expect(text(form)).toContain("Not confirmed");
+    fireEvent.click(within(form).getByRole("button", { name: "Save details" }));
+    await within(card("Guest")).findByText(/Emails about this booking now go to/);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   it("offers no correction once the trip has left", async () => {
     vi.setSystemTime(new Date("2026-11-05T01:00:00Z"));
     api({ [route.booking(bookingId)]: answer("owner") });

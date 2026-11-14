@@ -21,15 +21,24 @@ const problems: Record<BookerFailure, string> = {
   not_found: "This booking isn't here any more, so nothing was changed.",
   rejected: "Those details can't be saved. Check the name and the email address.",
   unreadable:
-    "TideGrid sent an answer this console can't read. Reload to check whether the details changed.",
-  unreachable: "The details weren't sent. Check your connection, then save again.",
-  unavailable: "TideGrid isn't responding right now. Save again in a moment.",
+    "TideGrid sent an answer this console can't read, so it isn't known whether the details changed. Save the same details again: they're changed only once.",
+  unreachable:
+    "TideGrid didn't answer, so it isn't known whether the details changed. Check your connection, then save the same details again: they're changed only once.",
+  unavailable:
+    "TideGrid didn't answer properly, so it isn't known whether the details changed. Save the same details again in a moment: they're changed only once.",
   key_reused: "The details changed while they were being sent. Save again.",
   booking_canceled: "This booking is canceled, so its details no longer change.",
   trip_departed: "This trip has left, so its details no longer change.",
   booking_changed:
     "Someone changed these details a moment ago. Reload the booking to see them, then try again.",
 };
+
+/** Failures after which the change may have been saved: the key is kept for a retry. */
+const unknownOutcome: ReadonlySet<BookerFailure> = new Set([
+  "unreachable",
+  "unavailable",
+  "unreadable",
+]);
 
 export function BookerContact({
   tenantId,
@@ -132,7 +141,7 @@ function BookerForm({
   const [draft, setDraft] = useState({ name: booker.name, email: booker.email ?? "" });
   const [errors, setErrors] = useState<{ name?: string; email?: string }>({});
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<BookerFailure | null>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const emailField = useRef<HTMLInputElement>(null);
   /** One key per set of details: kept when the same details are sent again after a failure. */
@@ -175,8 +184,8 @@ function BookerForm({
       onDone({ booker: clean, changed: result.changed, emailChanged: result.emailChanged });
       return;
     }
-    if (result.reason !== "unreachable" && result.reason !== "unavailable") key.current = null;
-    setProblem(problems[result.reason]);
+    if (!unknownOutcome.has(result.reason)) key.current = null;
+    setProblem(result.reason);
   };
 
   return (
@@ -184,8 +193,11 @@ function BookerForm({
       <fieldset aria-labelledby={legendId}>
         <legend id={legendId}>Correct the guest's details</legend>
         {problem && (
-          <Notice tone="error" title="Not saved">
-            {problem}
+          <Notice
+            tone={unknownOutcome.has(problem) ? "warning" : "error"}
+            title={unknownOutcome.has(problem) ? "Not confirmed" : "Not saved"}
+          >
+            {problems[problem]}
           </Notice>
         )}
         <TextField
