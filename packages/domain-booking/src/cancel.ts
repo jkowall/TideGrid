@@ -89,6 +89,8 @@ interface TermsRow {
   /** Null on a complimentary booking (0039), which paid nothing. */
   payment_id: string | null;
   complimentary: boolean;
+  /** Imported from an earlier system (0044): only the operator cancels it. */
+  imported: boolean;
   hold_id: string;
   product_id: string;
   policy_version: number;
@@ -137,7 +139,9 @@ function termsOf(bookingId: string, row: TermsRow): CancellationTerms {
       ? "already_canceled"
       : row.departed
         ? "trip_departed"
-        : remedy === "credit"
+        : // An imported booking was paid outside TideGrid, if at all: only
+          // the operator cancels it (0044).
+          row.imported || remedy === "credit"
           ? "remedy_requires_operator"
           : // Money already went back outside the card flow (W3-G2.10), so
             // the policy's refund would count it twice: the operator decides.
@@ -177,7 +181,7 @@ async function termsRow(
 ): Promise<TermsRow | undefined> {
   const { rows } = await sql<TermsRow>`
     select b.reference, b.state, b.checkout_session_id, b.payment_id,
-           b.payment_id is null as complimentary, b.hold_id,
+           b.payment_id is null as complimentary, b.source = 'imported' as imported, b.hold_id,
            o.product_id, o.policy_version, t.starts_at,
            coalesce(pay.amount, 0) as paid, coalesce(pay.state, 'none') as payment_state,
            t.starts_at - make_interval(mins => v.change_cutoff_minutes) as cutoff_at,

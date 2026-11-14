@@ -621,9 +621,18 @@ function BookingView({
           <Ledger
             caption="Receipt in US dollars"
             hideCaption
-            rows={orderRows(booking.order, booking.payment === null)}
+            rows={orderRows(
+              booking.order,
+              booking.payment === null && !booking.imported,
+              booking.imported === true,
+            )}
           />
-          {booking.payment ? (
+          {booking.imported ? (
+            <p className="manage-quiet">
+              Booked with {brand.name} before they moved to this booking system. What you paid then
+              came across with your booking.
+            </p>
+          ) : booking.payment ? (
             <p className="manage-quiet">
               Paid with a test payment ({formatMoney(booking.payment.amount)}). This is a demo: no
               real card was charged.
@@ -783,10 +792,14 @@ function CancelSection({
         <p>This trip has already left, so it can't be canceled here.</p>
       ) : refusal === "remedy_requires_operator" ? (
         <>
-          <p>
-            Canceling now gives a credit for a future trip, which {brand.name} issues. Contact them
-            to cancel.
-          </p>
+          {terms.remedy === "credit" ? (
+            <p>
+              Canceling now gives a credit for a future trip, which {brand.name} issues. Contact
+              them to cancel.
+            </p>
+          ) : (
+            <p>{brand.name} cancels this booking for you. Contact them to cancel.</p>
+          )}
           <div className="booking-actions">
             <ContactActions brand={brand} primary={false} />
           </div>

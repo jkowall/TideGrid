@@ -16680,6 +16680,10 @@
                           ],
                           "description": "What canceling now would do, from the booking's own policy version"
                         },
+                        "imported": {
+                          "type": "boolean",
+                          "description": "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment"
+                        },
                         "importantLinks": {
                           "type": "array",
                           "items": {
@@ -18208,6 +18212,10 @@
                             "asOf"
                           ],
                           "description": "What canceling now would do, from the booking's own policy version"
+                        },
+                        "imported": {
+                          "type": "boolean",
+                          "description": "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment"
                         },
                         "importantLinks": {
                           "type": "array",
@@ -19807,6 +19815,10 @@
                           ],
                           "description": "What canceling now would do, from the booking's own policy version"
                         },
+                        "imported": {
+                          "type": "boolean",
+                          "description": "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment"
+                        },
                         "importantLinks": {
                           "type": "array",
                           "items": {
@@ -21281,6 +21293,10 @@
                             "asOf"
                           ],
                           "description": "What canceling now would do, from the booking's own policy version"
+                        },
+                        "imported": {
+                          "type": "boolean",
+                          "description": "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment"
                         },
                         "importantLinks": {
                           "type": "array",
@@ -22881,6 +22897,10 @@
                             "asOf"
                           ],
                           "description": "What canceling now would do, from the booking's own policy version"
+                        },
+                        "imported": {
+                          "type": "boolean",
+                          "description": "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment"
                         },
                         "importantLinks": {
                           "type": "array",
@@ -42828,7 +42848,7 @@
             }
           },
           "409": {
-            "description": "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported from an earlier system (booking_imported)",
+            "description": "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported and its batch's email is not released yet (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {
@@ -47184,8 +47204,8 @@
           "imports",
           "waivers"
         ],
-        "summary": "Release a saved batch's waiver email",
-        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.\n\nOnly waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+        "summary": "Release a saved batch's email",
+        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.\n\nThe same release opens each imported booking's own email: the cron first sends its booker a welcome worded for a booking paid before TideGrid, with the management link, and from then on the booking's email works as any booking's does, a charter's balance reminders and online balance payment included. Idempotent by key.",
         "security": [
           {
             "accessJwt": []

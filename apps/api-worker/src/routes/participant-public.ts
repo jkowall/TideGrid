@@ -96,7 +96,7 @@ export function invitationRefusal(
       return new ApiError(
         409,
         "booking_imported",
-        "This booking was imported from an earlier system, and TideGrid does not email it yet",
+        "This booking was imported from an earlier system, and its email waits until the import batch is released",
       );
     case "limit_reached":
       return new ApiError(

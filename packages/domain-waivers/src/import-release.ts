@@ -20,7 +20,9 @@
  * (app.import_waiver_email_held), so a held batch that adds guests to a
  * booking an earlier batch emailed still holds theirs.
  *
- * Only waiver email: the booking's own emails stay held for imported bookings.
+ * The same pass opens a booking's own email for the batch that imported it
+ * (0049, openImportedBookingEmail): the booker's welcome goes out before the
+ * guests' waiver requests and counts toward the same cap.
  */
 import {
   type Database,
@@ -31,6 +33,7 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
+import { openImportedBookingEmail } from "@tidegrid/domain-booking";
 import { type Kysely, type RawBuilder, sql } from "kysely";
 import { assignBookingWaivers } from "./assign.ts";
 import { type SendResult, sendWaiverRequest } from "./delivery.ts";
@@ -54,7 +57,8 @@ export type ImportWaiverReleaseResult =
 
 /**
  * The bookings a batch imported or gave imported guests, confirmed, not yet
- * left, and not finished by the sweep for that batch.
+ * left, and not finished by the sweep for that batch: its waiver email not
+ * done, or, for a booking the batch imported, its own email not open (0049).
  */
 function dueBookings(tenantId: string, runFilter: RawBuilder<unknown>): RawBuilder<unknown> {
   return sql`
@@ -72,10 +76,13 @@ function dueBookings(tenantId: string, runFilter: RawBuilder<unknown>): RawBuild
      where run.tenant_id = ${tenantId} and run.mode = 'commit' and run.clean
        and ${runFilter}
        and b.state = 'confirmed' and t.starts_at > now()
-       and not exists (select 1 from import_waiver_email_done d
+     group by run.id, b.id
+    having not exists (select 1 from import_waiver_email_done d
                         where d.tenant_id = run.tenant_id and d.run_id = run.id
                           and d.booking_id = b.id)
-     group by run.id, b.id`;
+        or (bool_or(ib.record_id is not null)
+            and not exists (select 1 from import_booking_email_opened o
+                             where o.tenant_id = run.tenant_id and o.booking_id = b.id))`;
 }
 
 /**
@@ -128,9 +135,9 @@ function retryable(result: SendResult): boolean {
 }
 
 /**
- * One booking for one batch: create the requests its guests lack and email
- * the pending ones that never had an email. Finished unless a sending limit
- * held an email.
+ * One booking for one batch: open the booking's own email if this batch
+ * imported it, then create the requests its guests lack and email the pending
+ * ones that never had an email. Finished unless a sending limit held an email.
  */
 export async function sendImportedBookingWaivers(
   trx: TenantTransaction,
@@ -146,6 +153,11 @@ export async function sendImportedBookingWaivers(
     else if (retryable(result)) retry = true;
     if (result.kind === "rate_limited" && result.scope === "tenant") operatorLimited = true;
   };
+  // The booker hears first: a booking this batch imported gets its welcome
+  // before its guests' waiver requests (0049). Nothing when it is not this
+  // batch's booking or is open already.
+  const opened = await openImportedBookingEmail(trx, ctx, input);
+  if (opened.kind === "opened") queued += opened.queued;
   // Locks the booking for waivers first, as every waiver command does.
   const assigned = await assignBookingWaivers(trx, ctx, deps, { bookingId: input.bookingId });
   const created = new Set(assigned.created.map((c) => c.requestId));

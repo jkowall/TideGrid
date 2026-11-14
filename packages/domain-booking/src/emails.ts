@@ -38,6 +38,12 @@ import {
 /** The guest site's page that redeems a management link. */
 export const MANAGE_PATH = "/manage";
 export const CONFIRMATION_TEMPLATE = { key: "booking_confirmation", version: 1 } as const;
+/**
+ * An imported booking's welcome (W3-G2.13, 0049): its confirmation, worded for
+ * a booking made and paid before the operator moved to TideGrid. It goes out
+ * under the confirmation's key, so staff "send again" resends it.
+ */
+export const IMPORTED_WELCOME_TEMPLATE = { key: "booking_confirmation", version: 2 } as const;
 export const MANAGE_LINK_TEMPLATE = { key: "booking_manage_link", version: 1 } as const;
 /** Version 2: the refund is on its way, not already back (review M1). */
 export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as const;
@@ -62,19 +68,26 @@ const demoNote =
   "TideGrid demo: this booking is synthetic. No real card was charged and no money moves.";
 
 /**
- * Saved by a CSV import, migration 0044: none of the booking's emails are sent yet. The
- * import's own rules for when its guests hear from TideGrid come in a later
- * part (W3-G2.13), and an imported booker may have no email at all.
+ * Saved by a CSV import, migration 0044: the booking's own email stays held
+ * until the batch that imported it has its email due (saved with
+ * send_at_cutover, or released by an owner) and the import sweep has sent the
+ * booker the welcome (0049). From then on it works as any booking's does. A
+ * booker imported with no email gets none until staff add one.
  */
-export async function importedBooking(
+export async function importedEmailHeld(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
 ): Promise<boolean> {
-  const { rows } = await sql<{ imported: boolean }>`
-    select source = 'imported' as imported from bookings
-     where tenant_id = ${tenantId} and id = ${bookingId}`.execute(trx);
-  return rows[0]?.imported === true;
+  const { rows } = await sql<{ held: boolean }>`
+    select b.source = 'imported'
+           and (s.booker_email is null
+                or not exists (select 1 from import_booking_email_opened o
+                                where o.tenant_id = b.tenant_id and o.booking_id = b.id)) as held
+      from bookings b
+      join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
+  return rows[0]?.held === true;
 }
 
 async function detailFor(
@@ -165,10 +178,13 @@ export async function enqueueConfirmationEmail(
   bookingId: string,
   options: ComposeOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const policy = await policyText(trx, ctx.tenantId, bookingId);
+  if (detail.source === "imported") {
+    return enqueueImportedWelcome(trx, ctx, bookingId, detail, policy, options);
+  }
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "You're booked" },
     {
@@ -227,6 +243,92 @@ export async function enqueueConfirmationEmail(
 }
 
 /**
+ * An imported booking's welcome, in place of its confirmation: the booking as
+ * TideGrid now holds it, what was paid before, any balance and when it is due,
+ * and the management link. Imported bookings
+ * have no receipt lines and no TideGrid payment, and the guest cancels by
+ * asking the operator, so it says neither "paid with" nor "cancel with the
+ * button".
+ */
+async function enqueueImportedWelcome(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  detail: BookingDetailView & { booker: { name: string; email: string } },
+  policy: string,
+  options: ComposeOptions,
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const total = detail.order.totals.total;
+  const balance = detail.balance;
+  const moneyRows: { label: string; value: string }[] = [
+    ...(total > 0 ? [{ label: "Total", value: money(total) }] : []),
+    ...(balance
+      ? [
+          { label: "Paid so far", value: money(balance.paidIn) },
+          {
+            label: "Balance",
+            value:
+              balance.owed > 0
+                ? `${money(balance.owed)}, due by ${tripWhen(balance.dueAt, detail.trip.timeZone)}`
+                : "Paid in full",
+          },
+        ]
+      : []),
+  ];
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your booking has moved to our new booking system" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(detail.booker.name)}. We now manage bookings with TideGrid, and your booking ${detail.reference} came across with everything you booked. Nothing about your trip has changed, and you don't need to book again. Quote reference ${detail.reference} if you contact us.`,
+        2000,
+      ),
+    },
+    { kind: "details", rows: [...tripRows(detail), ...moneyRows] },
+    {
+      kind: "paragraph",
+      text:
+        balance && balance.owed > 0
+          ? "You paid us before the move, and that payment came across with your booking. The balance is due by the date above, and we'll remind you before then."
+          : total > 0
+            ? "You paid us before the move, and that payment came across with your booking. There is nothing more to pay."
+            : "There is nothing to pay here.",
+    },
+    {
+      kind: "paragraph",
+      text: "Use the button to see your booking and to name everyone in your party. To cancel, contact us.",
+    },
+    { kind: "action", label: "Manage your booking", href: "access_link" },
+    { kind: "note", text: linkNote },
+    ...(policy
+      ? [{ kind: "paragraph", text: clean(`Cancellation policy: ${policy}`, 2000) } as const]
+      : []),
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: options.dedupeKey ?? `booking.confirmation:${bookingId}`,
+    template: IMPORTED_WELCOME_TEMPLATE.key,
+    templateVersion: IMPORTED_WELCOME_TEMPLATE.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject(`Booking ${detail.reference}: now on our new booking system`, detail),
+      preview: singleLine(
+        `Your booking came across. See you ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}.`,
+        200,
+      ),
+      blocks,
+    },
+    accessLink: {
+      purpose: "booking_manage",
+      path: MANAGE_PATH,
+      ttlSeconds: MANAGE_LINK_TTL_SECONDS,
+    },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
+}
+
+/**
  * A fresh management link, on the guest's request; `requestKey` names the
  * request, so a retried request enqueues nothing new. Sending it supersedes
  * the links earlier emails carried.
@@ -237,8 +339,8 @@ export async function enqueueManageLinkEmail(
   bookingId: string,
   requestKey: string,
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking link" },
@@ -296,8 +398,8 @@ export async function enqueueReminderEmail(
   bookingId: string,
   options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
            t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS})
@@ -367,8 +469,8 @@ export async function enqueueBalanceEmail(
     | { kind: "reminder"; dedupeKey: string; notBefore: Date }
     | { kind: "link"; dedupeKey: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   if (!detail.balance) throw new Error("a balance email for a booking with no balance");
   const due = tripWhen(detail.balance.dueAt, detail.trip.timeZone);
@@ -425,8 +527,8 @@ export async function enqueueCancellationEmail(
   bookingId: string,
   options: ComposeOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const c = detail.cancellation;
   if (!c) throw new Error("a cancellation email needs the booking's cancellation");
@@ -437,11 +539,13 @@ export async function enqueueCancellationEmail(
         : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, on its way back to your original payment method`
       : c.creditAmount > 0
         ? "None to your card: the value is booking credit instead (below)"
-        : c.paidAmount === 0 && detail.payment === null
-          ? "None: the booking was complimentary, so nothing was paid"
-          : c.overridden
-            ? "None"
-            : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
+        : detail.source === "imported"
+          ? "Not through TideGrid: you paid us before we moved to TideGrid, so we'll contact you about any refund"
+          : c.paidAmount === 0 && detail.payment === null
+            ? "None: the booking was complimentary, so nothing was paid"
+            : c.overridden
+              ? "None"
+              : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking is canceled" },
     {
@@ -502,8 +606,8 @@ export async function enqueueRescheduledEmail(
   bookingId: string,
   move: { rescheduleId: string; fromStartsAt: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const was = tripWhen(move.fromStartsAt, detail.trip.timeZone);
@@ -556,8 +660,8 @@ export async function enqueueRefundFailedEmail(
   bookingId: string,
   amount: number,
 ): Promise<{ messageId: string } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your refund hasn't gone through yet" },
@@ -621,10 +725,13 @@ export async function enqueueContactChangedEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-  change: { contactChangeId: string; oldEmail: string; oldName: string; newEmail: string },
+  change: { contactChangeId: string; oldEmail: string | null; oldName: string; newEmail: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
-  // An imported booking's emails wait for the import's email rules (W3-G2.13).
-  if (await importedBooking(trx, ctx.tenantId, bookingId)) return null;
+  // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
+  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  // A booker imported with no email had no old address to tell.
+  const oldEmail = change.oldEmail;
+  if (!oldEmail) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking's email address changed" },
@@ -645,7 +752,7 @@ export async function enqueueContactChangedEmail(
     dedupeKey: `booking.contact_changed:${change.contactChangeId}`,
     template: CONTACT_CHANGED_TEMPLATE.key,
     templateVersion: CONTACT_CHANGED_TEMPLATE.version,
-    to: { email: change.oldEmail, name: singleLine(change.oldName, 120) },
+    to: { email: oldEmail, name: singleLine(change.oldName, 120) },
     bookingId,
     content: {
       subject: singleLine(`Booking ${detail.reference}: email address changed`, 200),

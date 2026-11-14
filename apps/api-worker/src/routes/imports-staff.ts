@@ -209,10 +209,10 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     method: "post",
     path: importWaiverEmailPath,
     tags: ["staff", "imports", "waivers"],
-    summary: "Release a saved batch's waiver email",
+    summary: "Release a saved batch's email",
     description: [
       "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.",
-      "Only waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+      "The same release opens each imported booking's own email: the cron first sends its booker a welcome worded for a booking paid before TideGrid, with the management link, and from then on the booking's email works as any booking's does, a charter's balance reminders and online balance payment included. Idempotent by key.",
     ].join("\n\n"),
     security: staffSecurity,
     request: {

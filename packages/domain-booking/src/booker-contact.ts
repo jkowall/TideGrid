@@ -145,7 +145,7 @@ export async function changeBookerContact(
      where tenant_id = ${tenantId} and id = ${input.bookingId}`.execute(trx);
   const sessionId = located[0]?.checkout_session_id;
   if (!sessionId) return { kind: "not_found" };
-  const { rows: checkouts } = await sql<{ booker_name: string; booker_email: string }>`
+  const { rows: checkouts } = await sql<{ booker_name: string; booker_email: string | null }>`
     select booker_name, booker_email from checkout_sessions
      where tenant_id = ${tenantId} and id = ${sessionId}
        for update`.execute(trx);

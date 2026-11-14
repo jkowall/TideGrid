@@ -2,6 +2,16 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-14
+
+### Imported bookings' own email and online balance (W3-G2.13 follow-ups), built November 14, 2026
+
+Goal branch `claude/project-thread-mf1bwl`, migration `0049_import_booking_email.sql`, on main `7eeb48e`. Synthetic data only; no provider call, no deploy.
+
+- **Built.** When the batch that imported a booking has its email due, the import sweep opens the booking's own email: one welcome worded for a booking paid before TideGrid (under the confirmation's key, version 2, so staff can resend it) and the trip reminder, before the guests' waiver requests. From then on reminders, link requests, cancellation and move notices, and invitations work as for any booking. The guest's cancel terms send the guest to the operator (`remedy_requires_operator`), and the guest site says the operator cancels it. An imported charter that owes gets its balance and due date in the welcome and its balance reminders, staff may send the balance link, and the API takes its online balance payment as for any charter.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `import-release.integration.test.ts` in `domain-waivers` (welcome and reminder once for a cutover batch, link request held before and sent after, staff resend uses the welcome; a held batch sends nothing, refuses invitations and an early opening, and opens after release; a booker with no email is opened with nothing sent and a staff cancel still works; the guest is sent to the operator and the cancellation notice is worded for money paid before); `commit.integration.test.ts` (the guest's cancel answers `remedy_requires_operator`, and the database still refuses a guest cancellation; an imported charter cannot be opened before its release, then opens once with the balance in the welcome, and the balance link goes out); the guest site's `ManagePage.test.tsx`; `pnpm check`.
+- **Still open.** Coordinator defaults D1 to D5 await the owner. The guest site has no balance screen for any charter yet (a W3-G2.8 gap).
+
 ## 2026-11-13
 
 ### Saving a standard CSV import, part D2, waiver email for imported guests (W3-G2.13), built November 13, 2026

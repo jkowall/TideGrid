@@ -35,6 +35,7 @@ import {
   resolveGuestSession,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
+import { importedEmailHeld } from "./emails.ts";
 import { clean, firstName, singleLine, tripWhen } from "./format.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import {
@@ -81,7 +82,7 @@ export type InviteParticipantResult =
   | { kind: "place_not_named" }
   /** An adult with no email of their own; a minor always has a guardian's. */
   | { kind: "no_address" }
-  /** An imported booking gets no email from TideGrid (W3-G2.13, part A). */
+  /** An imported booking whose email is not open yet (W3-G2.13, 0049). */
   | { kind: "imported_booking" }
   | { kind: "limit_reached" };
 
@@ -125,7 +126,8 @@ export async function inviteParticipant(
   if (!booking) return { kind: "booking_not_found" };
   if (booking.state !== "confirmed") return { kind: "booking_canceled" };
   if (booking.departed) return { kind: "trip_departed" };
-  if (booking.source === "imported") return { kind: "imported_booking" };
+  // An imported booking's email waits for its batch's release (0049).
+  if (await importedEmailHeld(trx, tenantId, input.bookingId)) return { kind: "imported_booking" };
   const givenUp = await placesGivenUp(trx, tenantId, input.bookingId);
   if (givenUp.includes(input.position)) return { kind: "place_removed" };
   if (input.position > booking.party_size + givenUp.length) {

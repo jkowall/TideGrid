@@ -42,7 +42,7 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { type BalanceView, getBookingBalance } from "./balance-read.ts";
-import { enqueueBalanceEmail } from "./emails.ts";
+import { enqueueBalanceEmail, importedEmailHeld } from "./emails.ts";
 import { record } from "./views.ts";
 
 /** Balance link emails staff may send for one booking in an hour. */
@@ -198,7 +198,7 @@ export type SendBalanceLinkResult =
   /** Nothing is owed, or the booking was canceled or its trip has left. */
   | { kind: "nothing_owed" }
   | { kind: "rate_limited"; limit: number }
-  /** An imported booking: its email is held until the import releases it. */
+  /** An imported booking whose email is not open yet (W3-G2.13, 0049). */
   | { kind: "imported_booking" };
 
 /**
@@ -234,7 +234,7 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
-  // An imported booking's email is held (W3-G2.13).
+  // An imported booking whose email is not open yet (W3-G2.13, 0049).
   if (!done) return { kind: "imported_booking" };
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
@@ -272,9 +272,15 @@ export async function openBalancePayment(
      where b.tenant_id = ${ctx.tenantId} and b.id = ${input.bookingId}
        for no key update of b`.execute(trx);
   const booking = rows[0];
-  // An imported booking's balance is paid to staff until the import's email
-  // release (W3-G2.13, part D); no guest card payment opens on it.
-  if (!booking || booking.source === "imported") return { kind: "not_found" };
+  if (!booking) return { kind: "not_found" };
+  // An imported booking's balance is paid to staff until its email is open
+  // (W3-G2.13, 0049): no guest card payment opens on it before.
+  if (
+    booking.source === "imported" &&
+    (await importedEmailHeld(trx, ctx.tenantId, input.bookingId))
+  ) {
+    return { kind: "not_found" };
+  }
   const balance = await getBookingBalance(trx, ctx.tenantId, input.bookingId);
   if (!balance || booking.state !== "confirmed" || booking.departed || balance.owed <= 0) {
     return { kind: "nothing_owed" };

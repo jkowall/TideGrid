@@ -176,6 +176,7 @@ function managedJson(view: ManagedBookingView): ManagedBooking {
     refund: b.refund,
     cancellation: b.cancellation,
     balance: b.balance,
+    imported: b.source === "imported",
     policy: view.policy,
     participants: view.party,
     partyEditable: view.partyEditable,

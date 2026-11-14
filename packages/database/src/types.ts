@@ -1503,6 +1503,7 @@ export interface Database
   import_waiver_statuses: ImportWaiverStatusesTable;
   import_email_releases: ImportEmailReleasesTable;
   import_waiver_email_done: ImportWaiverEmailDoneTable;
+  import_booking_email_opened: ImportBookingEmailOpenedTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1956,6 +1957,14 @@ export interface ImportWaiverEmailDoneTable {
   tenant_id: TenantColumn;
   run_id: Fixed<string>;
   booking_id: Fixed<string>;
+  created_at: Stamped;
+}
+
+/** An imported booking whose own email is open (0049). Append-only. */
+export interface ImportBookingEmailOpenedTable {
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  run_id: Fixed<string>;
   created_at: Stamped;
 }
 
