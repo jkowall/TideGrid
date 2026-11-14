@@ -9,7 +9,17 @@
 import { randomUUID } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
-import { runImportCommit, runImportDryRun } from "@tidegrid/domain-booking";
+import {
+  cancelBooking,
+  changeBookerContact,
+  enqueueManageLinkEmail,
+  inviteParticipant,
+  previewCancellation,
+  resendBookingEmail,
+  runImportCommit,
+  runImportDryRun,
+  staffCancelBooking,
+} from "@tidegrid/domain-booking";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
@@ -35,6 +45,8 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   let ownerB: string;
   let day = "";
   let laterDays: [string, string] = ["", ""];
+  /** Two days out: still worth a trip reminder, and a day of its own. */
+  let soon = "";
   let exportedAt = "";
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
@@ -64,6 +76,8 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     day?: string;
     /** Instead: this many guests, all at crowd@example.test. */
     crowd?: number;
+    /** The booker has no email. */
+    noEmail?: boolean;
     notify: Notify;
   }
 
@@ -102,7 +116,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       ].join("\n"),
       "customers.csv": [
         "source_customer_id,full_name,email,phone",
-        `C-${ref},Ima Sample,ima.${ref.toLowerCase()}@example.test,`,
+        `C-${ref},Ima Sample,${o.noEmail ? "" : `ima.${ref.toLowerCase()}@example.test`},`,
       ].join("\n"),
       "bookings.csv": [
         "source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,included_tax_cents,total_cents,balance_due_date,booked_at",
@@ -166,6 +180,22 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       ...(emailsPerTenant ? { emailsPerTenant } : {}),
     });
 
+  /** The booking's own email, oldest first: template, version, recipient. */
+  async function bookingMail(bookingId: string) {
+    return admin<{ template: string; version: number; to: string }[]>`
+      select m.template, m.template_version as version, m.to_email as "to"
+        from public.email_messages m
+       where m.booking_id = ${bookingId} and m.template not like 'waiver%'
+       order by m.created_at, m.template`;
+  }
+
+  async function opened(bookingId: string) {
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.import_booking_email_opened
+       where booking_id = ${bookingId}`;
+    return row?.n ?? 0;
+  }
+
   async function waiverMail(bookingId: string) {
     return admin<{ state: string; deliveries: number }[]>`
       select w.state,
@@ -188,13 +218,17 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     ownerA = await member(A.id, "owner");
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
-    const [clock] = await admin<{ day: string; day4: string; day5: string; exported: string }[]>`
+    const [clock] = await admin<
+      { day: string; day2: string; day4: string; day5: string; exported: string }[]
+    >`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
+             ((now() at time zone 'UTC')::date + 2)::text as day2,
              ((now() at time zone 'UTC')::date + 4)::text as day4,
              ((now() at time zone 'UTC')::date + 5)::text as day5,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
     laterDays = [clock?.day4 ?? "", clock?.day5 ?? ""];
+    soon = clock?.day2 ?? "";
     exportedAt = clock?.exported ?? "";
   }, 180_000);
 
@@ -366,6 +400,208 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     expect(await done()).toBe(1);
     await sweep();
     expect(await delivered()).toBe(3);
+  });
+
+  it("opens a send_at_cutover booking's own email with one welcome and the trip reminder", async () => {
+    const { runId, bookingId } = await save(A, ownerA, {
+      batchId: "WEL",
+      day: soon,
+      notify: "send_at_cutover",
+    });
+    expect(await bookingMail(bookingId)).toEqual([]);
+    // Before the sweep, a guest's link request sends nothing: the email is held.
+    const guest: TenantContext = {
+      tenantId: A.id,
+      actorType: "guest",
+      actorId: null,
+      requestId: `req-${randomUUID()}`,
+      sourceIp: null,
+    };
+    expect(
+      await inTenantTransaction(runtime.db, guest, (trx) =>
+        enqueueManageLinkEmail(trx, guest, bookingId, "early"),
+      ),
+    ).toBeNull();
+    await sweep();
+    expect(await opened(bookingId)).toBe(1);
+    const mail = await bookingMail(bookingId);
+    expect(mail.map((m) => [m.template, m.version])).toEqual(
+      expect.arrayContaining([
+        ["booking_confirmation", 2],
+        ["booking_reminder", 1],
+      ]),
+    );
+    expect(mail).toHaveLength(2);
+    expect(new Set(mail.map((m) => m.to))).toEqual(new Set(["ima.wel@example.test"]));
+    const [welcome] = await admin<{ subject: string; body: string }[]>`
+      select m.subject, m.text_body as body
+        from public.email_messages m
+       where m.booking_id = ${bookingId} and m.template = 'booking_confirmation'`;
+    expect(welcome?.subject).toContain("now on our new booking system");
+    expect(welcome?.body).toContain("What you paid us before the move came across");
+    expect(welcome?.body).not.toContain("test payment");
+    // Again: nothing more.
+    await sweep();
+    expect(await bookingMail(bookingId)).toHaveLength(2);
+    // Open now: a link request is sent, and so is a staff resend of the welcome.
+    expect(
+      await inTenantTransaction(runtime.db, guest, (trx) =>
+        enqueueManageLinkEmail(trx, guest, bookingId, "after"),
+      ),
+    ).toMatchObject({ duplicate: false });
+    const desk = staff(A.id, deskA);
+    const resent = await inTenantTransaction(runtime.db, desk, (trx) =>
+      resendBookingEmail(trx, desk, {
+        bookingId,
+        kind: "confirmation",
+        reason: "guest_did_not_receive",
+      }),
+    );
+    expect(resent).toMatchObject({ kind: "queued", generation: 1 });
+    if (resent.kind !== "queued") throw new Error("not resent");
+    const [again] = await admin<{ version: number; subject: string }[]>`
+      select template_version as version, subject from public.email_messages
+       where id = ${resent.messageId}`;
+    expect(again?.version).toBe(2);
+    expect(again?.subject).toContain("now on our new booking system");
+    // Opening twice is refused by the key; opening for another batch by the trigger.
+    await expect(
+      inTenantTransaction(runtime.db, desk, (trx) =>
+        trx
+          .insertInto("import_booking_email_opened")
+          .values({ tenant_id: A.id, booking_id: bookingId, run_id: runId })
+          .execute(),
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("keeps a held batch's booking email shut until an owner releases it", async () => {
+    const { runId, bookingId } = await save(A, ownerA, {
+      batchId: "WHOLD",
+      day: soon,
+      notify: "hold_until_staff_release",
+    });
+    await sweep();
+    expect(await bookingMail(bookingId)).toEqual([]);
+    const desk = staff(A.id, deskA);
+    // No invitation, and the database refuses an early opening.
+    expect(
+      await inTenantTransaction(runtime.db, desk, (trx) =>
+        inviteParticipant(trx, desk, { bookingId, position: 1 }),
+      ),
+    ).toEqual({ kind: "imported_booking" });
+    await expect(
+      inTenantTransaction(runtime.db, desk, (trx) =>
+        trx
+          .insertInto("import_booking_email_opened")
+          .values({ tenant_id: A.id, booking_id: bookingId, run_id: runId })
+          .execute(),
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "import_booking_email_opened_due" });
+    const owner = staff(A.id, ownerA);
+    await inTenantTransaction(runtime.db, owner, (trx) =>
+      releaseImportWaiverEmail(trx, owner, { runId }),
+    );
+    await sweep();
+    expect((await bookingMail(bookingId)).map((m) => m.template)).toContain("booking_confirmation");
+    // Open: staff may invite the party.
+    expect(
+      (
+        await inTenantTransaction(runtime.db, desk, (trx) =>
+          inviteParticipant(trx, desk, { bookingId, position: 1 }),
+        )
+      ).kind,
+    ).not.toBe("imported_booking");
+  });
+
+  it("opens a booking with no booker email without sending it anything, until staff add one", async () => {
+    const { bookingId } = await save(B, ownerB, {
+      batchId: "NOMAIL",
+      day: soon,
+      noEmail: true,
+      notify: "send_at_cutover",
+    });
+    await sweep();
+    expect(await opened(bookingId)).toBe(1);
+    expect(await bookingMail(bookingId)).toEqual([]);
+    // Its guests' waiver email still goes.
+    expect(await waiverMail(bookingId)).toEqual([
+      { state: "pending", deliveries: 1 },
+      { state: "pending", deliveries: 0 },
+    ]);
+    // Staff add an address: what opening would have sent goes there (the
+    // welcome with its link, and the trip reminder), and no notice goes to an
+    // old address it never had.
+    const owner = staff(B.id, ownerB);
+    expect(
+      (
+        await inTenantTransaction(runtime.db, owner, (trx) =>
+          changeBookerContact(trx, owner, {
+            bookingId,
+            name: "Ima Sample",
+            email: "ima.found@example.test",
+          }),
+        )
+      ).kind,
+    ).toBe("changed");
+    expect(await bookingMail(bookingId)).toEqual([
+      { template: "booking_confirmation", version: 2, to: "ima.found@example.test" },
+      { template: "booking_reminder", version: 1, to: "ima.found@example.test" },
+    ]);
+    // A staff cancellation does not fail, and its notice goes to the new address.
+    expect(
+      (
+        await inTenantTransaction(runtime.db, owner, (trx) =>
+          staffCancelBooking(trx, owner, {
+            bookingId,
+            choice: { kind: "policy", remedy: "none" },
+            expectedAmount: 0,
+          }),
+        )
+      ).kind,
+    ).toBe("canceled");
+    expect((await bookingMail(bookingId)).map((m) => m.template)).toContain("booking_canceled");
+  });
+
+  it("sends the guest to the operator to cancel, and words the operator's cancellation for money paid before", async () => {
+    const { bookingId } = await save(B, ownerB, {
+      batchId: "WCAN",
+      day: soon,
+      notify: "send_at_cutover",
+    });
+    await sweep();
+    const guest: TenantContext = {
+      tenantId: B.id,
+      actorType: "guest",
+      actorId: null,
+      requestId: `req-${randomUUID()}`,
+      sourceIp: null,
+    };
+    expect(
+      await inTenantTransaction(runtime.db, guest, (trx) =>
+        previewCancellation(trx, B.id, bookingId),
+      ),
+    ).toMatchObject({ cancelable: false, refusal: "remedy_requires_operator", remedy: "none" });
+    expect(
+      (
+        await inTenantTransaction(runtime.db, guest, (trx) =>
+          cancelBooking(trx, guest, { bookingId, expectedRefundAmount: 0 }),
+        )
+      ).kind,
+    ).toBe("remedy_requires_operator");
+    const owner = staff(B.id, ownerB);
+    await inTenantTransaction(runtime.db, owner, (trx) =>
+      staffCancelBooking(trx, owner, {
+        bookingId,
+        choice: { kind: "policy", remedy: "none" },
+        expectedAmount: 0,
+      }),
+    );
+    const [notice] = await admin<{ body: string }[]>`
+      select m.text_body as body from public.email_messages m
+       where m.booking_id = ${bookingId} and m.template = 'booking_canceled'`;
+    expect(notice?.body).toContain("we'll contact you about any refund");
+    expect(notice?.body).not.toContain("complimentary");
   });
 
   it("finds no other tenant's batch, and releases no batch that never held", async () => {

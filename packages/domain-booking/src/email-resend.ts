@@ -443,7 +443,11 @@ export async function resendBookingEmail(
         ? await enqueueConfirmationEmail(trx, ctx, bookingId, { dedupeKey: key })
         : await enqueueCancellationEmail(trx, ctx, bookingId, { dedupeKey: key });
     // An imported booking's emails are held (W3-G2.13): nothing to send again.
-    if (!made) return { kind: "refused", code: "email_invalid", availableAt: null };
+    if (!made) {
+      await sql`rollback to savepoint booking_email_resend`.execute(trx);
+      await sql`release savepoint booking_email_resend`.execute(trx);
+      return { kind: "refused", code: "email_invalid", availableAt: null };
+    }
     if (made.duplicate) {
       // The generation is read from the ledger under the tenant's resend lock,
       // and a message without its ledger row cannot commit (0014), so its key
@@ -479,8 +483,8 @@ export async function resendBookingEmail(
     return { kind: "refused", code: limit, availableAt: facts ? liftsAt(facts, limit) : null };
   }
 
-  const { rows: written } = await sql<{ created_at: Date | string }>`
-    select created_at from email_messages
+  const { rows: written } = await sql<{ created_at: Date | string; template_version: number }>`
+    select created_at, template_version from email_messages
      where tenant_id = ${tenantId} and id = ${messageId}`.execute(trx);
   const createdAt = written[0]?.created_at;
   if (!createdAt) throw new Error("a written resend is not visible");
@@ -490,7 +494,8 @@ export async function resendBookingEmail(
     messageId,
     kind,
     template: template.key,
-    templateVersion: template.version,
+    // The version written: an imported booking's welcome is version 2.
+    templateVersion: written[0]?.template_version ?? template.version,
     generation,
     canceledMessageIds,
     previous: previous

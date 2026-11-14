@@ -155,6 +155,8 @@ export {
   enqueueConfirmationEmail,
   enqueueManageLinkEmail,
   enqueueReminderEmail,
+  IMPORTED_WELCOME_TEMPLATE,
+  importedEmailHeld,
   MANAGE_LINK_TEMPLATE,
   MANAGE_LINK_TTL_SECONDS,
   MANAGE_PATH,
@@ -211,6 +213,11 @@ export {
   renderImportErrors,
   runImportDryRun,
 } from "./import/dry-run.ts";
+// An imported booking's own email (W3-G2.13 follow-up, 0049).
+export {
+  type OpenImportedBookingEmailResult,
+  openImportedBookingEmail,
+} from "./import/email.ts";
 export {
   COLUMNS as IMPORT_COLUMNS,
   CONTROL_METRICS as IMPORT_CONTROL_METRICS,

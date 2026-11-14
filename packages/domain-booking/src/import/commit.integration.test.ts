@@ -10,8 +10,9 @@ import type {} from "@tidegrid/database/global-setup";
 import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { sendBalanceLink } from "../balance.ts";
+import { openBalancePayment, sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
+import { changeBookerContact } from "../booker-contact.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { adjustCredit } from "../credits.ts";
 import { inviteParticipant } from "../invitations.ts";
@@ -20,6 +21,7 @@ import { recordExternalSettlement } from "../reconciliation.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
 import { runImportCommit } from "./commit.ts";
 import { runImportDryRun } from "./dry-run.ts";
+import { openImportedBookingEmail } from "./email.ts";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -425,9 +427,34 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
        where b.tenant_id = ${A.id} and r.external_id = 'R-2' and b.state = 'confirmed'`;
     if (!row) throw new Error("no imported booking R-2");
     const guest = guestContext(A.id);
+    // The guest is sent to the operator (0049); the database refuses it anyway.
+    expect(
+      await inTenantTransaction(runtime.db, guest, (trx) =>
+        cancelBooking(trx, guest, { bookingId: row.id, expectedRefundAmount: 0 }),
+      ),
+    ).toMatchObject({
+      kind: "remedy_requires_operator",
+      terms: { cancelable: false, refusal: "remedy_requires_operator", remedy: "none" },
+    });
+    const [terms] = await admin<
+      { product_id: string; policy_version: number; starts_at: Date; cutoff_at: Date }[]
+    >`
+      select o.product_id, o.policy_version, t.starts_at,
+             t.starts_at - make_interval(mins => v.change_cutoff_minutes) as cutoff_at
+        from public.bookings b
+        join public.orders o on o.id = b.order_id
+        join public.scheduled_trips t on t.id = b.trip_id
+        join public.policy_versions v
+          on v.tenant_id = o.tenant_id and v.product_id = o.product_id and v.version = o.policy_version
+       where b.id = ${row.id}`;
+    if (!terms) throw new Error("no terms");
     await expect(
       inTenantTransaction(runtime.db, guest, (trx) =>
-        cancelBooking(trx, guest, { bookingId: row.id, expectedRefundAmount: 0 }),
+        sql`insert into booking_cancellations
+              (tenant_id, booking_id, payment_id, product_id, policy_version, departs_at,
+               cutoff_at, before_cutoff, remedy, refund_bp, paid_amount, refund_amount)
+            values (${A.id}, ${row.id}, null, ${terms.product_id}, ${terms.policy_version},
+                    ${terms.starts_at}, ${terms.cutoff_at}, true, 'none', 0, 0, 0)`.execute(trx),
       ),
     ).rejects.toMatchObject({ code: "23514", constraint_name: "booking_cancellations_imported" });
     const [emailsBefore] = await admin<{ n: number }[]>`
@@ -667,6 +694,94 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
       expect(
         await inTenantTransaction(runtime.db, ctx, (trx) => sendBalanceLink(trx, ctx, row.id)),
       ).toEqual({ kind: "imported_booking" });
+    }
+    // Once an owner releases the batch and its email is open (0049), the
+    // welcome gives the balance and its due date, the balance reminders are
+    // set, and staff may send the balance link.
+    {
+      const [row] = await admin<{ id: string; run_id: string }[]>`
+        select b.id, r.run_id from public.bookings b
+          join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+          join public.import_records r on r.id = ib.record_id
+         where b.tenant_id = ${D.id} and r.external_id = 'R-3'`;
+      if (!row) throw new Error("no imported charter");
+      const owner = staffCtx(D.id, ownerD);
+      expect(
+        await inTenantTransaction(runtime.db, owner, (trx) =>
+          openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
+        ),
+      ).toEqual({ kind: "not_due" });
+      // No guest card payment of the balance opens while its email is held.
+      const guest = guestContext(D.id);
+      expect(
+        await inTenantTransaction(runtime.db, guest, (trx) =>
+          openBalancePayment(trx, guest, {
+            bookingId: row.id,
+            provider: "fake",
+            minimumAmount: 50,
+          }),
+        ),
+      ).toEqual({ kind: "not_found" });
+      await expect(
+        inTenantTransaction(runtime.db, owner, (trx) =>
+          sql`insert into import_booking_email_opened (tenant_id, booking_id, run_id)
+              values (${D.id}, ${row.id}, ${row.run_id})`.execute(trx),
+        ),
+      ).rejects.toMatchObject({ constraint_name: "import_booking_email_opened_due" });
+      await inTenantTransaction(runtime.db, owner, (trx) =>
+        sql`insert into import_email_releases (tenant_id, run_id)
+            values (${D.id}, ${row.run_id})`.execute(trx),
+      );
+      const opened = await inTenantTransaction(runtime.db, owner, (trx) =>
+        openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
+      );
+      // Its booker came with no email: opening sends nothing, and the balance
+      // link has nowhere to go.
+      expect(opened).toEqual({ kind: "opened", queued: 0 });
+      expect(
+        await inTenantTransaction(runtime.db, owner, (trx) => sendBalanceLink(trx, owner, row.id)),
+      ).toEqual({ kind: "no_booker_email" });
+      expect(
+        await inTenantTransaction(runtime.db, owner, (trx) =>
+          openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
+        ),
+      ).toEqual({ kind: "already_open" });
+      // Staff add an address: it gets the welcome with the balance and its due
+      // date, and the balance reminders are set.
+      expect(
+        (
+          await inTenantTransaction(runtime.db, owner, (trx) =>
+            changeBookerContact(trx, owner, {
+              bookingId: row.id,
+              name: "Jo Fixture",
+              email: "jo.found@example.test",
+            }),
+          )
+        ).kind,
+      ).toBe("changed");
+      const mail = await admin<{ template: string; body: string; to: string }[]>`
+        select template, text_body as body, to_email as to from public.email_messages
+         where booking_id = ${row.id} order by created_at, template`;
+      const welcome = mail.find((m) => m.template === "booking_confirmation");
+      expect(welcome?.to).toBe("jo.found@example.test");
+      expect(welcome?.body).toContain("we'll remind you before then");
+      expect(welcome?.body).toContain("$500.00, due by");
+      expect(mail.some((m) => m.template === "booking_balance_reminder")).toBe(true);
+      expect(mail.some((m) => m.template === "booking_manage_link")).toBe(false);
+      expect(
+        (await inTenantTransaction(runtime.db, owner, (trx) => sendBalanceLink(trx, owner, row.id)))
+          .kind,
+      ).toBe("enqueued");
+      // And the guest may pay what is owed online, as on any charter.
+      expect(
+        await inTenantTransaction(runtime.db, guest, (trx) =>
+          openBalancePayment(trx, guest, {
+            bookingId: row.id,
+            provider: "fake",
+            minimumAmount: 50,
+          }),
+        ),
+      ).toMatchObject({ kind: "opened", amount: 50000 });
     }
     // Money staff record in TideGrid counts in a later batch: a check the
     // legacy system also logged during cutover is not taken a second time.

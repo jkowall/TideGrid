@@ -514,6 +514,25 @@ describe("opening the booking", () => {
     expect(card("Receipt").querySelector(".manage-refund")).toBeNull();
   });
 
+  it("shows an imported booking's receipt as a total paid before the move", async () => {
+    const base = managedBooking();
+    await openedFromLink(
+      {},
+      {
+        booking: {
+          ...base,
+          imported: true,
+          payment: null,
+          order: { ...base.order, lines: [] },
+        },
+      },
+    );
+    expect(receiptRows()).toEqual(["Total $160.51"]);
+    expect(text(card("Receipt").querySelector("p.manage-quiet"))).toBe(
+      "Booked with Demo Harbor Charters before they moved to this booking system. What you paid then came across with your booking.",
+    );
+  });
+
   it("shows the party: who is named, who is not, and how many", async () => {
     await openedFromLink();
     expect(party()).toEqual([
@@ -1713,6 +1732,25 @@ describe("canceling", () => {
     const call = screen.getByRole("link", { name: "Call (305) 555-0142" });
     expect(call.className).toContain("tg-button--secondary");
     expect(call.getAttribute("href")).toBe("tel:+13055550142");
+    expect(screen.queryByRole("button", { name: "Cancel booking" })).toBeNull();
+    expect(callsTo(calls, "cancel")).toHaveLength(0);
+  });
+
+  it("sends the guest to the operator for a booking only the operator cancels, such as an imported one", async () => {
+    const calls = await shown(
+      {},
+      {
+        booking: withTerms(
+          managedBooking(),
+          terms("none", { cancelable: false, refusal: "remedy_requires_operator" }),
+        ),
+      },
+    );
+    expect(cardText()).toContain(
+      "Demo Harbor Charters cancels this booking for you. Contact them to cancel.",
+    );
+    expect(cardText()).not.toContain("credit");
+    expect(screen.getByRole("link", { name: "Call (305) 555-0142" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cancel booking" })).toBeNull();
     expect(callsTo(calls, "cancel")).toHaveLength(0);
   });

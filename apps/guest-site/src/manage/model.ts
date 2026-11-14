@@ -116,6 +116,8 @@ export function orderRows(
   order: ManagedBooking["order"],
   /** A complimentary booking: its total is waived, nothing paid. */
   complimentary = false,
+  /** Imported from the operator's earlier system: a total, paid there. */
+  imported = false,
 ): LedgerRow[] {
   const rows: LedgerRow[] = [];
   for (const line of order.lines) {
@@ -143,6 +145,11 @@ export function orderRows(
       amount: formatMoney(line.amount),
       kind: line.kind === "discount" ? "adjustment" : "item",
     });
+  }
+  if (imported) {
+    return [
+      { id: "total", label: "Total", amount: formatMoney(order.totals.total), kind: "total" },
+    ];
   }
   if (complimentary) {
     rows.push({

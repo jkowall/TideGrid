@@ -151,6 +151,12 @@ export const ManagedBooking = z
       .boolean()
       .describe("True while the party can still be named: confirmed and not departed"),
     cancellationTerms: CancellationTerms,
+    imported: z
+      .boolean()
+      .optional()
+      .describe(
+        "True for a booking brought over from the operator's earlier booking system (W3-G2.13): booked and paid there, with no receipt lines and no TideGrid payment",
+      ),
     importantLinks: z
       .array(GuestImportantLink)
       .optional()
