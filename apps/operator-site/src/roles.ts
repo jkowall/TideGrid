@@ -86,3 +86,11 @@ export function canManageLinks(role: StaffRole): boolean {
 export function canPrintDockCode(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who adds and changes tax rates (W3-G2.5-TAX): owners only. This mirrors the
+ * API's `catalog.manage` permission for display only; every role reads them.
+ */
+export function canManageTaxRates(role: StaffRole): boolean {
+  return role === "owner";
+}

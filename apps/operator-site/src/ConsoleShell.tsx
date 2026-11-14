@@ -22,6 +22,7 @@ import { NewBookingPage } from "./new-booking/NewBookingPage.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
 import { canPrintDockCode, roleLabels } from "./roles.ts";
 import { SearchPage } from "./search/SearchPage.tsx";
+import { TaxRatesPage, taxRatesPath } from "./tax-rates/TaxRatesPage.tsx";
 import { DockCodePage, dockCodePath } from "./waivers/DockCodePage.tsx";
 
 export { roleLabels } from "./roles.ts";
@@ -46,6 +47,7 @@ const sections: ReadonlyArray<{
   },
   // W3-G2.14b-rest: every role reads them; owners change them.
   { path: linksPath, label: "Important links", icon: "external" },
+  { path: taxRatesPath, label: "Tax rates", icon: "receipt" },
   // W3-G2.15-rest: owners and booking staff, who run the dock.
   { path: dockCodePath, label: "Dock QR code", icon: "anchor", shows: canPrintDockCode },
 ];
@@ -60,6 +62,7 @@ export type Route =
   | { kind: "exceptions" }
   | { kind: "email_exceptions" }
   | { kind: "links" }
+  | { kind: "tax_rates" }
   | { kind: "dock_code" }
   | { kind: "roster"; tripId: string }
   | { kind: "new_booking"; tripId: string }
@@ -78,6 +81,7 @@ export function routeOf(path: string): Route {
   if (path === "/exceptions") return { kind: "exceptions" };
   if (path === emailExceptionsPath) return { kind: "email_exceptions" };
   if (path === linksPath) return { kind: "links" };
+  if (path === taxRatesPath) return { kind: "tax_rates" };
   if (path === dockCodePath) return { kind: "dock_code" };
   const booking = bookingPath.exec(path)?.[1];
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
@@ -101,6 +105,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
   email_exceptions: { section: emailExceptionsPath, title: "Email exceptions" },
   links: { section: linksPath, title: "Important links" },
+  tax_rates: { section: taxRatesPath, title: "Tax rates" },
   dock_code: { section: dockCodePath, title: "Dock QR code" },
   not_found: { section: null, title: "Not found" },
 };
@@ -417,6 +422,11 @@ export function ConsoleShell({
       break;
     case "links":
       page = <LinksPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
+      break;
+    case "tax_rates":
+      page = (
+        <TaxRatesPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
       break;
     case "dock_code":
       page = (

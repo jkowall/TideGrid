@@ -8,6 +8,15 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-14: W3-G2.5-TAX, staff screens for tax rates (coordinator defaults pending owner confirmation)
+
+Staff endpoints and the console's Tax rates page for the per-location rates of 2026-11-08 ([pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax), [console](../../apps/operator-site/README.md#tax-rates-w3-g25-tax)). No migration. Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only change rates.** Owners add and change tax rates (`catalog.manage`); every staff role reads them, since staff answer guests' questions about totals.
+- **D2: no delete, only retire.** A rate is never removed: a change is its next version with a reason, and retiring stops new quotes using it. Quotes and bookings already made keep the version they used.
+- **D3: a change says what it was made from.** A change names the version it was made from and is refused if another change came first, so an owner with an old page open cannot undo a retirement or a new percentage.
+- **D4: no tax advice.** The page says TideGrid applies what the operator enters. Nothing warns about two active rates with the same name or location; the owner decides what applies.
+
 ### 2026-11-14: an imported credit matches what its commit recorded (W3-G2.13 part C follow-up)
 
 Follow-up to part C (`0046`), which let an imported credit name its ledger row but did not record which customer or how much that row gave. Migration `0051` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Hardening only, no new behavior and no choice for the owner: the commit records the customer and amount beside the ledger row, and the database refuses an imported credit of another amount or on another account. The database cannot read the file, so this binds the credit to what the commit recorded, once per row. The per-email credit cap is still checked by the commit only (part C's other follow-up).
@@ -514,7 +523,7 @@ Coordinator default, chosen by the coordinator in place of the CPA's answer, pen
 - **The location is part of the version.** Moving a rate appends a version. A version that does not name a location keeps the current one, so a scoped rate never widens to every location by accident; an explicit null applies it everywhere.
 - **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
 
-Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
+Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms; built 2026-11-14, see that entry), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
 
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 

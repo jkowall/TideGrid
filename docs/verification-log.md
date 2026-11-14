@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-14
 
+### Tax rates in the console (W3-G2.5-TAX follow-up), built November 14, 2026
+
+Goal branch `claude/project-thread-mf1bwl`, no migration, on main `592d516`. Synthetic data only; no provider call, no deploy.
+
+- **Built.** Staff endpoints for tax rates (list for every role; add and change, with a reason, for owners; a change names the version it was made from) and the console's Tax rates page at `/tax-rates`: the rates in use with their percentage, whether prices include them, where they apply and their latest change, retired rates folded below, and a dialog to add or change one. The page says TideGrid applies what is entered and gives no tax advice.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `tax-rates.integration.test.ts` in `api-worker` (an owner adds a rate for one location and every role reads it; versions, retirement and the list's order; a change from an older version answers 409 and saves nothing; booking staff and finance refused; another operator's location, rate, or list never reached); `auth-guards.test.ts`; the console's `TaxRatesPage.test.tsx` (16) and `routes.test.tsx`; `pnpm check`.
+- **Review.** Independent review (second model) found that a change from a page open since earlier could silently undo another owner's change, including putting a retired rate back in use (now refused with 409 `tax_rate_changed`), that closing the dialog after an add with an unknown outcome left a stale list where adding again made a second rate (the list now reads again), that a name with an invisible format character got a generic refusal (now named, in the form and the contract), and that changing a retired rate announced it as just retired (now "Saved"). All fixed and tested.
+- **Still open.** Coordinator defaults D1 to D4 await the owner.
+
 ### Email freshness in write order, and renewal behind a correction (W3-G2.11-rest follow-ups), built November 14, 2026
 
 Goal branch `claude/project-thread-mf1bwl`, migration `0052_email_written_at.sql`, on main `42a1384`. Synthetic data only; no provider call, no deploy.

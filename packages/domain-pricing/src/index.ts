@@ -61,6 +61,7 @@ export {
   createTaxRateVersion,
   type VersionResult,
 } from "./setup.ts";
+export { getTaxRate, listTaxRates, type TaxRateView } from "./tax-rates.ts";
 export type * from "./terms.ts";
 export {
   type AddOnInput,
