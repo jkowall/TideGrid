@@ -126,13 +126,15 @@ export async function issueAccessLink(
          and l.consumed_at is null and l.revoked_at is null
          and ((${messageId}::uuid is null and l.message_id is not null)
               or (l.message_id is null
-                  and l.created_at < (select m.created_at from email_messages m
+                  and l.created_at < (select coalesce(m.written_at, m.created_at)
+                                        from email_messages m
                                        where m.tenant_id = ${ctx.tenantId} and m.id = ${messageId}))
               or exists (
                    select 1 from email_messages o, email_messages m
                     where o.tenant_id = l.tenant_id and o.id = l.message_id
                       and m.tenant_id = ${ctx.tenantId} and m.id = ${messageId}
-                      and (o.created_at, o.id) < (m.created_at, m.id)))
+                      and (coalesce(o.written_at, o.created_at), o.id)
+                          < (coalesce(m.written_at, m.created_at), m.id)))
        for update of l skip locked)
     update guest_access_links g
        set revoked_at = now(), revoked_reason = 'superseded'

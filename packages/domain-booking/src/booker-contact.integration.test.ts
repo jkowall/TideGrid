@@ -606,6 +606,17 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     const rows = await messages(booked.bookingId);
     const asked = rows.find((m) => m.dedupe_key.includes(requestKey));
     expect(asked).toMatchObject({ to_email: "slow.new@example.test", state: "sent" });
+    // Links follow write order too: the asked email was written after the
+    // correction's, so a later link never supersedes its link, whichever
+    // was delivered first.
+    const links = await admin<{ to_email: string; written: Date; revoked_reason: string | null }[]>`
+      select m.to_email, m.written_at as written, l.revoked_reason
+        from guest_access_links l join email_messages m on m.id = l.message_id
+       where l.booking_id = ${booked.bookingId} and l.purpose = 'booking_manage'
+         and m.to_email = 'slow.new@example.test'
+       order by m.written_at`;
+    expect(links).toHaveLength(2);
+    expect(links.at(-1)?.revoked_reason).toBeNull();
   });
 
   it("renews nothing from an old link whose renewal waited behind the correction", async () => {
