@@ -6,7 +6,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ### Tax rates in the console (W3-G2.5-TAX follow-up), built November 14, 2026
 
-Goal branch `claude/project-thread-mf1bwl`, no migration. Synthetic data only; no provider call, no deploy.
+Goal branch `claude/project-thread-mf1bwl`, no migration, on main `592d516`. Synthetic data only; no provider call, no deploy.
 
 - **Built.** Staff endpoints for tax rates (list for every role; add and change, with a reason, for owners; a change names the version it was made from) and the console's Tax rates page at `/tax-rates`: the rates in use with their percentage, whether prices include them, where they apply and their latest change, retired rates folded below, and a dialog to add or change one. The page says TideGrid applies what is entered and gives no tax advice.
 - **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `tax-rates.integration.test.ts` in `api-worker` (an owner adds a rate for one location and every role reads it; versions, retirement and the list's order; a change from an older version answers 409 and saves nothing; booking staff and finance refused; another operator's location, rate, or list never reached); `auth-guards.test.ts`; the console's `TaxRatesPage.test.tsx` (16) and `routes.test.tsx`; `pnpm check`.
