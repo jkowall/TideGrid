@@ -764,6 +764,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         import_waiver_email_done: ["INSERT", "SELECT"],
         // Imported bookings whose own email is open (0049), append-only.
         import_booking_email_opened: ["INSERT", "SELECT"],
+        // What each imported opening balance said (0051), append-only.
+        import_credits: ["INSERT", "SELECT"],
         // Important links (0041, W3-G2.14b-rest): edited in place, archived, never deleted.
         important_links: ["INSERT", "SELECT"],
       };

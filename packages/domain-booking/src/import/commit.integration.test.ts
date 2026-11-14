@@ -944,6 +944,65 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     ).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("credits exactly what the opening balance said, on its customer's account (0051)", async () => {
+    const E = await createCheckoutFixture(admin, runtime.db, "imc-e", { days: 6 });
+    const ownerE = await member(E.id, "owner");
+    await dryRun(E, ownerE, { batchId: "CRED-E", charterPaid: 0, credit: 4000 });
+    const ctx = staffCtx(E.id, ownerE);
+    const [other] = await admin<{ id: string }[]>`
+      insert into public.credit_accounts (tenant_id, customer_email)
+      values (${E.id}, 'someone.else@example.test') returning id`;
+    const refusals = await inTenantTransaction(runtime.db, ctx, async (trx) => {
+      const saved = await runImportCommit(
+        trx,
+        ctx,
+        batch(E, { batchId: "CRED-E", run: 2, charterPaid: 0, credit: 4000, mode: "commit" }),
+      );
+      if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+      const { rows } = await sql<{ record_id: string; account_id: string; amount: number }>`
+        select x.record_id, e.account_id, x.amount from import_credits x
+          join credit_entries e on e.import_record_id = x.record_id
+         where x.tenant_id = ${E.id}`.execute(trx);
+      const line = rows[0];
+      if (!line) throw new Error("no import_credits row");
+      expect(line.amount).toBe(4000);
+      const attempt = async (account: string, amount: number) => {
+        await sql`savepoint try_credit`.execute(trx);
+        try {
+          await sql`insert into credit_entries (tenant_id, account_id, kind, amount,
+                      import_record_id, idempotency_key)
+                    values (${E.id}, ${account}, 'import', ${amount}, ${line.record_id},
+                            ${`test:${randomUUID()}`})`.execute(trx);
+          return "written";
+        } catch (error) {
+          return (error as { constraint_name?: string }).constraint_name ?? String(error);
+        } finally {
+          await sql`rollback to savepoint try_credit`.execute(trx);
+        }
+      };
+      return {
+        amount: await attempt(line.account_id, 4001),
+        account: await attempt(other?.id ?? "", 4000),
+        again: await attempt(line.account_id, 4000),
+      };
+    });
+    expect(refusals).toEqual({
+      amount: "credit_entries_import_match",
+      account: "credit_entries_import_match",
+      again: "credit_entries_import_once",
+    });
+    // A ledger line of its own is written only by the commit that wrote the row.
+    const [ledger] = await admin<{ id: string; customer: string }[]>`
+      select x.record_id as id, x.customer_record_id as customer from public.import_credits x
+       where x.tenant_id = ${E.id}`;
+    await expect(
+      inTenantTransaction(runtime.db, ctx, (trx) =>
+        sql`insert into import_credits (tenant_id, record_id, customer_record_id, amount)
+            values (${E.id}, ${ledger?.id ?? ""}, ${ledger?.customer ?? ""}, 1)`.execute(trx),
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
   it("keeps what an earlier waiver tool said, for staff to read, once", async () => {
     // Tenant D's records are in; this batch repeats them with a waiver status.
     await dryRun(D, ownerD, { batchId: "WAIV-1", charterPaid: 0, waiver: "signed" });

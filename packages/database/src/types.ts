@@ -1501,6 +1501,7 @@ export interface Database
   import_customers: ImportCustomersTable;
   import_bookings: ImportBookingsTable;
   import_waiver_statuses: ImportWaiverStatusesTable;
+  import_credits: ImportCreditsTable;
   import_email_releases: ImportEmailReleasesTable;
   import_waiver_email_done: ImportWaiverEmailDoneTable;
   import_booking_email_opened: ImportBookingEmailOpenedTable;
@@ -1942,6 +1943,14 @@ export interface ImportWaiverStatusesTable {
 }
 
 /** An owner's release of a batch's held waiver email (0048). Append-only, once a batch. */
+export interface ImportCreditsTable {
+  record_id: string;
+  tenant_id: Generated<string>;
+  customer_record_id: string;
+  amount: number;
+  created_at: Generated<Date>;
+}
+
 export interface ImportEmailReleasesTable {
   id: Generated<string>;
   tenant_id: TenantColumn;

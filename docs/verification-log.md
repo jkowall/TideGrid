@@ -4,6 +4,13 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-14
 
+### An imported credit matches what its file row said (W3-G2.13 part C follow-up), built November 14, 2026
+
+Goal branch `claude/project-thread-mf1bwl`, migration `0051_import_credit_binding.sql`. Synthetic data only; no provider call, no deploy.
+
+- **Built.** The commit writes the customer and the amount of each opening balance beside its ledger row, and the database takes an imported credit only for that amount on that customer's account.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` in `domain-booking` (inside the saving transaction, another amount or another account is refused with `credit_entries_import_match`, the right one again with `credit_entries_import_once`; no later transaction writes the ledger line); the tenancy grant check; the full integration suite; `pnpm check`.
+
 ### How long the dock QR keeps its lookups (W3-G2.15-rest follow-up), built November 14, 2026
 
 Goal branch `claude/project-thread-mf1bwl`, migration `0050_waiver_dock_retention.sql`. Synthetic data only; no provider call, no deploy.

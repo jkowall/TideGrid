@@ -719,6 +719,12 @@ async function writePlan(
       trx,
     );
     const recordId = await record("opening_balances.csv", credit);
+    // What the row said, which the credit entry must match (0051).
+    const customer = customers.get(credit.sourceCustomerId);
+    if (!customer) throw new Error("a planned credit's customer was not imported");
+    await sql`
+      insert into import_credits (tenant_id, record_id, customer_record_id, amount)
+      values (${tenantId}, ${recordId}, ${customer.recordId}, ${credit.amount})`.execute(trx);
     await sql`
       insert into credit_accounts (tenant_id, customer_email) values (${tenantId}, ${email})
       on conflict (tenant_id, customer_email) do nothing`.execute(trx);

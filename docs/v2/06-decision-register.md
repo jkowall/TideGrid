@@ -8,6 +8,10 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-14: an imported credit matches what its file row said (W3-G2.13 part C follow-up)
+
+Follow-up to part C (`0046`), which let an imported credit name its ledger row but did not record which customer or how much that row gave. Migration `0051` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Hardening only, no new behavior and no choice for the owner: the commit records the customer and amount beside the ledger row, and the database refuses an imported credit of another amount or on another account. The per-email credit cap is still checked by the commit only (part C's other follow-up).
+
 ### 2026-11-14: how long the dock QR keeps its lookups (W3-G2.15-rest follow-up; coordinator defaults pending owner confirmation)
 
 Follow-up to the dock QR lookup (`0043`), which kept every try, with the guest's network address, for good. Migration `0050` and the [database README](../../packages/database/README.md). Under the owner's go of 2026-11-10 on the rest of Wave 3: synthetic data only, no deploy. Coordinator defaults, pending owner confirmation:
