@@ -523,7 +523,7 @@ Coordinator default, chosen by the coordinator in place of the CPA's answer, pen
 - **The location is part of the version.** Moving a rate appends a version. A version that does not name a location keeps the current one, so a scoped rate never widens to every location by accident; an explicit null applies it everywhere.
 - **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
 
-Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
+Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms; built 2026-11-14, see that entry), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
 
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 
