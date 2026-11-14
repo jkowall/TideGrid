@@ -304,11 +304,14 @@ async function enqueueImportedWelcome(
     { kind: "details", rows: [...tripRows(detail), ...moneyRows] },
     {
       kind: "paragraph",
+      // A charter may come across with nothing paid yet; say only what is so.
       text:
         balance && balance.owed > 0
-          ? "You paid us before the move, and that payment came across with your booking. The balance is due by the date above, and we'll remind you before then."
+          ? balance.paidIn > 0
+            ? "What you paid us before the move came across with your booking. The balance is due by the date above, and we'll remind you before then."
+            : "The balance is due by the date above, and we'll remind you before then."
           : total > 0
-            ? "You paid us before the move, and that payment came across with your booking. There is nothing more to pay."
+            ? "What you paid us before the move came across with your booking. There is nothing more to pay."
             : "There is nothing to pay here.",
     },
     {
@@ -557,7 +560,7 @@ export async function enqueueCancellationEmail(
       : c.creditAmount > 0
         ? "None to your card: the value is booking credit instead (below)"
         : detail.source === "imported"
-          ? "Not through TideGrid: you paid us before we moved to TideGrid, so we'll contact you about any refund"
+          ? "Not through TideGrid: this booking came from our earlier booking system, so we'll contact you about any refund"
           : c.paidAmount === 0 && detail.payment === null
             ? "None: the booking was complimentary, so nothing was paid"
             : c.overridden

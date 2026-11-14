@@ -21,8 +21,9 @@
  * booking an earlier batch emailed still holds theirs.
  *
  * The same pass opens a booking's own email for the batch that imported it
- * (0049, openImportedBookingEmail): the booker's welcome goes out before the
- * guests' waiver requests and counts toward the same cap.
+ * (0049, openImportedBookingEmail): the booker's welcome is queued before the
+ * guests' waiver requests (delivery does not promise their order) and counts
+ * toward the same cap.
  */
 import {
   type Database,

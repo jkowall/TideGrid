@@ -438,7 +438,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
         from public.email_messages m
        where m.booking_id = ${bookingId} and m.template = 'booking_confirmation'`;
     expect(welcome?.subject).toContain("now on our new booking system");
-    expect(welcome?.body).toContain("You paid us before the move");
+    expect(welcome?.body).toContain("What you paid us before the move came across");
     expect(welcome?.body).not.toContain("test payment");
     // Again: nothing more.
     await sweep();

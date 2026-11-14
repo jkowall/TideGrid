@@ -65,7 +65,9 @@ export async function openImportedBookingEmail(
     on conflict (tenant_id, booking_id) do nothing
     returning booking_id`.execute(trx);
   if (!opened[0]) return { kind: "already_open" };
-  if (!booking.email) return { kind: "opened", queued: 0 };
+  // Each composer reads the booker's address afresh and sends nothing while
+  // there is none: an address staff added while this waited for the booking's
+  // lock is used, and a booker with no address gets nothing yet.
   const welcome = await enqueueConfirmationEmail(trx, ctx, input.bookingId);
   await enqueueReminderEmail(trx, ctx, input.bookingId);
   // A charter that still owes: its balance reminders, as a new booking's.
