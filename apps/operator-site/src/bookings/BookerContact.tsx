@@ -214,9 +214,11 @@ function BookerForm({
           label="Booker's email"
           type="email"
           hint={
-            emailChanging
-              ? "The booking's emails will go here, with a new link. Links sent to the old address stop working, and the old address is told without a link."
-              : "The booking's emails go here."
+            !emailChanging
+              ? "The booking's emails go here."
+              : booker.email
+                ? "The booking's emails will go here, with a new link. Links sent to the old address stop working, and the old address is told without a link."
+                : "The booking's emails will go here, with a link to the booking."
           }
           value={draft.email}
           onChange={(e) => setDraft({ ...draft, email: e.target.value })}
