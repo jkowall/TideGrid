@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-14
 
+### How long the dock QR keeps its lookups (W3-G2.15-rest follow-up), built November 14, 2026
+
+Goal branch `claude/project-thread-mf1bwl`, migration `0050_waiver_dock_retention.sql`. Synthetic data only; no provider call, no deploy.
+
+- **Built.** The cron's cleanup deletes dock lookups more than 30 days old that started no signing, and redacts the network address on those that did. No other change to a lookup is possible for any role.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `dock-lookup.integration.test.ts` in `domain-waivers` (under 30 days nothing changes; the runtime and the owner cannot update or delete outside the cleanup; a month on, the miss and the unused match are gone and the signed-from match stays with its address redacted; a second run changes nothing); the full integration suite; `pnpm check`.
+- **Still open.** Coordinator defaults D1 to D4 await the owner.
+
 ### Forms to correct the booker's name and email (W3-G2.11-rest follow-up), built November 14, 2026
 
 Goal branch `claude/project-thread-mf1bwl`, no migration, on main `5d2bff3`. Synthetic data only; no provider call, no deploy.

@@ -65,7 +65,8 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    event sent too often without a delivery. Skipped when no OUTBOX_QUEUE
  *    binding is configured, which today is every deployed configuration.
  * 6. Cleanup (W3-G2.3) removes completed idempotency keys and unused quotes
- *    a week past their expiry, through app.delivery_cleanup.
+ *    a week past their expiry, through app.delivery_cleanup, and dock QR
+ *    lookups more than 30 days old, through app.waiver_dock_cleanup (0050).
  * 7. Retention (W3-G2.2b) replaces the booker's name and email on abandoned
  *    checkouts older than 30 days (coordinator default D2) with a fixed
  *    redaction, up to 500 a run, and records one audit event per tenant.
@@ -503,7 +504,8 @@ export async function runScheduled(
       }
     }
 
-    // 6. Cleanup (W3-G2.3): expired idempotency keys and unused quotes.
+    // 6. Cleanup (W3-G2.3): expired idempotency keys and unused quotes, and
+    // dock QR lookups more than 30 days old (0050).
     const cleanupLog = createLogger({ ...base, "event.name": "delivery_cleanup" }, options.log);
     started = Date.now();
     try {
@@ -511,6 +513,8 @@ export async function runScheduled(
       cleanupLog.info("delivery_cleanup", {
         "tidegrid.delivery_cleanup.idempotency_keys_deleted": report.idempotencyKeysDeleted,
         "tidegrid.delivery_cleanup.quotes_deleted": report.quotesDeleted,
+        "tidegrid.delivery_cleanup.dock_lookups_deleted": report.dockLookupsDeleted,
+        "tidegrid.delivery_cleanup.dock_lookups_redacted": report.dockLookupsRedacted,
         duration_ms: Date.now() - started,
       });
     } catch (error) {

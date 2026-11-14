@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
+import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { lookUpAtDock, startAssistedSigning, startDockSigning, type WaiverDeps } from "../index.ts";
 import {
@@ -433,11 +434,70 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
     const found = await lookUp(A.id, booked.reference, "Booker");
     if (found.kind !== "matched") throw new Error(found.kind);
     await world.admin.begin(async (tx) => {
-      await tx`alter table public.waiver_dock_lookups disable trigger waiver_dock_lookups_append_only`;
+      await tx`alter table public.waiver_dock_lookups disable trigger waiver_dock_lookups_cleanup_only`;
       await tx`update public.waiver_dock_lookups set expires_at = now() - interval '1 second'
                 where booking_id = ${booked.bookingId} and matched`;
-      await tx`alter table public.waiver_dock_lookups enable trigger waiver_dock_lookups_append_only`;
+      await tx`alter table public.waiver_dock_lookups enable trigger waiver_dock_lookups_cleanup_only`;
     });
     expect(await startSigning(A.id, found.secret, 1)).toEqual({ kind: "lookup_ended" });
+  });
+
+  it("after 30 days removes tries that started no signing, and redacts the client of one that did (0050)", async () => {
+    const { booked } = await todaysBooking("Retain");
+    const missIp = "198.51.100.77";
+    expect((await lookUp(A.id, booked.reference, "Nobody", missIp)).kind).toBe("not_found");
+    const unused = await lookUp(A.id, booked.reference, "Booker");
+    const used = await lookUp(A.id, booked.reference, "Booker");
+    if (unused.kind !== "matched" || used.kind !== "matched") throw new Error("no match");
+    expect((await startSigning(A.id, used.secret, 1)).kind).toBe("issued");
+    const rows = () =>
+      world.admin<{ matched: boolean; client_key: string; signed: boolean }[]>`
+        select k.matched, k.client_key,
+               exists (select 1 from public.waiver_assisted_links a
+                        where a.tenant_id = k.tenant_id and a.dock_lookup_id = k.id) as signed
+          from public.waiver_dock_lookups k
+         where k.tenant_id = ${A.id} and k.reference_key = ${booked.reference}
+         order by k.matched, signed`;
+    expect(await rows()).toHaveLength(3);
+
+    // Under 30 days old, the cleanup leaves them all.
+    await world.app`select * from app.waiver_dock_cleanup(5000)`;
+    expect(await rows()).toHaveLength(3);
+
+    // Nobody else changes or removes one, old or new.
+    for (const statement of [
+      (tx: Sql) => tx`update public.waiver_dock_lookups set client_key = 'redacted'
+                       where reference_key = ${booked.reference}`,
+      (tx: Sql) =>
+        tx`delete from public.waiver_dock_lookups where reference_key = ${booked.reference}`,
+    ]) {
+      expect(await refusal(asApp(world, A.id, statement))).toMatch(/^(42501|55000)/);
+    }
+    expect(
+      await refusal(
+        world.admin`delete from public.waiver_dock_lookups where reference_key = ${booked.reference}`,
+      ),
+    ).toMatch(/^55000/);
+
+    // A month on.
+    await world.admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`update public.waiver_dock_lookups set created_at = now() - interval '31 days'
+                where tenant_id = ${A.id} and reference_key = ${booked.reference}`;
+    });
+    // Even the owner, outside the cleanup, cannot.
+    expect(
+      await refusal(
+        world.admin`delete from public.waiver_dock_lookups where reference_key = ${booked.reference}`,
+      ),
+    ).toMatch(/^55000/);
+    const [done] = await world.app<{ deleted: number; redacted: number }[]>`
+      select deleted, redacted from app.waiver_dock_cleanup(5000)`;
+    expect(done?.deleted).toBeGreaterThanOrEqual(2);
+    expect(done?.redacted).toBeGreaterThanOrEqual(1);
+    expect(await rows()).toEqual([{ matched: true, client_key: "redacted", signed: true }]);
+    // Run again: nothing more to do for these.
+    await world.app`select * from app.waiver_dock_cleanup(5000)`;
+    expect(await rows()).toEqual([{ matched: true, client_key: "redacted", signed: true }]);
   });
 });

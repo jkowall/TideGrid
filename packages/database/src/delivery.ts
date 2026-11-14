@@ -768,12 +768,17 @@ export async function publishOutbox(
 export interface CleanupReport {
   idempotencyKeysDeleted: number;
   quotesDeleted: number;
+  /** Dock QR lookups more than 30 days old that started no signing (0050). */
+  dockLookupsDeleted: number;
+  /** Dock QR lookups more than 30 days old kept for a signing, client redacted (0050). */
+  dockLookupsRedacted: number;
 }
 
 /**
  * Remove completed idempotency keys and unused quotes a week past their
- * expiry, through app.delivery_cleanup. The runtime holds no DELETE; the
- * definer function deletes only those rows.
+ * expiry, through app.delivery_cleanup, and clean up dock QR lookups more than
+ * 30 days old, through app.waiver_dock_cleanup. The runtime holds no DELETE;
+ * the definer functions change only those rows.
  */
 export async function runDeliveryCleanup(
   db: Kysely<Database>,
@@ -783,8 +788,12 @@ export async function runDeliveryCleanup(
     select idempotency_keys_deleted, quotes_deleted
       from app.delivery_cleanup(${options.limit ?? 1000})`.execute(db);
   const row = rows[0];
+  const { rows: dock } = await sql<{ deleted: number; redacted: number }>`
+    select deleted, redacted from app.waiver_dock_cleanup(${options.limit ?? 1000})`.execute(db);
   return {
     idempotencyKeysDeleted: row?.idempotency_keys_deleted ?? 0,
     quotesDeleted: row?.quotes_deleted ?? 0,
+    dockLookupsDeleted: dock[0]?.deleted ?? 0,
+    dockLookupsRedacted: dock[0]?.redacted ?? 0,
   };
 }

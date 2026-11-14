@@ -8,6 +8,15 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-14: how long the dock QR keeps its lookups (W3-G2.15-rest follow-up; coordinator defaults pending owner confirmation)
+
+Follow-up to the dock QR lookup (`0043`), which kept every try, with the guest's network address, for good. Migration `0050` and the [database README](../../packages/database/README.md). Under the owner's go of 2026-11-10 on the rest of Wave 3: synthetic data only, no deploy. Coordinator defaults, pending owner confirmation:
+
+- **D1: 30 days.** A try at the dock lookup is kept 30 days, matching how long an abandoned checkout keeps its booker (W3-G2.2b D2). The lookup's limits look back at most 24 hours, so nothing they need is lost.
+- **D2: tries that started no signing are deleted.** Every miss, and a match nobody signed from, is removed after 30 days.
+- **D3: a try that started a signing stays, without its address.** The signing link names it, so the row stays, but its network address is replaced with `redacted`. The signature's own evidence keeps what it recorded when the guest signed.
+- **D4: the cron does it.** It runs with the delivery cleanup, a bounded number of rows a run. No audit row: this is housekeeping.
+
 ### 2026-11-14: imported bookings' own email and online balance (W3-G2.13 follow-ups; coordinator defaults pending owner confirmation)
 
 Follow-up to part D2 (the entry below), whose D5 kept an imported booking's own emails held until they had wording for a booking paid before TideGrid, and kept an imported charter's balance out of TideGrid's own email and payment. Migration `0049` and the [database README](../../packages/database/README.md#import-booking-email-0049). Under the owner's go of 2026-11-10 on the rest of Wave 3: synthetic data only, no provider call, account, new Worker binding, or deploy. Coordinator defaults, pending owner confirmation:
