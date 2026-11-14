@@ -49559,6 +49559,11 @@
                   "active": {
                     "type": "boolean",
                     "description": "False retires the rate: new quotes stop using it"
+                  },
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The version this change was made from; if another change came first, it answers 409 tax_rate_changed and saves nothing"
                   }
                 },
                 "required": [
@@ -49567,7 +49572,8 @@
                   "inclusive",
                   "locationId",
                   "reason",
-                  "active"
+                  "active",
+                  "expectedVersion"
                 ],
                 "additionalProperties": false,
                 "description": "The whole rate as it should be from now on"
@@ -49753,6 +49759,40 @@
           },
           "404": {
             "description": "No such tenant or tax rate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The rate changed since the change was made from it (tax_rate_changed)",
             "content": {
               "application/json": {
                 "schema": {

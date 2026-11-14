@@ -161,6 +161,7 @@ export function registerTaxRateRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
         description: "The rate as it is now",
       },
       ...writeResponses,
+      409: errorBody("The rate changed since the change was made from it (tax_rate_changed)"),
     },
   });
 
@@ -185,9 +186,19 @@ export function registerTaxRateRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
         },
       },
       async (trx, ctx) => {
-        const result = await createTaxRateVersion(trx, ctx, { ...input, taxRateId });
+        const { expectedVersion, ...change } = input;
+        const result = await createTaxRateVersion(trx, ctx, { ...change, taxRateId });
         if (result.kind === "not_found") throw notFound();
         if (result.kind === "invalid") refused(result.problems);
+        // The command holds the rate's lock, so its version says whether
+        // another change came first; throwing rolls this one back.
+        if (result.version !== expectedVersion + 1) {
+          throw new ApiError(
+            409,
+            "tax_rate_changed",
+            "The rate changed since this change was made; read it again",
+          );
+        }
         return saved(trx, ctx, taxRateId);
       },
     );

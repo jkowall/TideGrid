@@ -19,6 +19,7 @@ const Name = z
   .refine((v) => v.trim().length > 0, "A name with a visible character")
   // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to refuse them.
   .refine((v) => !/[\u0000-\u001f\u007f-\u009f]/.test(v), "No control characters")
+  .refine((v) => !/\p{Cf}/u.test(v), "No invisible format characters")
   .describe("What staff and receipts call it, such as 'State sales tax'");
 
 const Reason = z
@@ -55,6 +56,13 @@ export const TaxRateChange = z
   .strictObject({
     ...TaxRateFields,
     active: z.boolean().describe("False retires the rate: new quotes stop using it"),
+    expectedVersion: z
+      .number()
+      .int()
+      .min(1)
+      .describe(
+        "The version this change was made from; if another change came first, it answers 409 tax_rate_changed and saves nothing",
+      ),
   })
   .describe("The whole rate as it should be from now on");
 export type TaxRateChange = z.infer<typeof TaxRateChange>;

@@ -213,12 +213,14 @@ describe.skipIf(!env)("tax rates through the API (W3-G2.5-TAX staff screens)", (
     const moved = await change(A, id, {
       ...rate({ name: "Aaa first by name", ratePpm: 70_000 }),
       active: true,
+      expectedVersion: 1,
     });
     expect(moved.status).toBe(201);
     expect(moved.json.taxRate).toMatchObject({ version: 2, ratePpm: 70_000, active: true });
     const retired = await change(A, id, {
       ...rate({ name: "Aaa first by name", ratePpm: 70_000, reason: "No longer charged" }),
       active: false,
+      expectedVersion: 2,
     });
     expect(retired.json.taxRate).toMatchObject({
       version: 3,
@@ -235,6 +237,19 @@ describe.skipIf(!env)("tax rates through the API (W3-G2.5-TAX staff screens)", (
     const [versions] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.tax_rate_versions where tax_rate_id = ${id}`;
     expect(versions?.n).toBe(3);
+
+    // A change made from an older version saves nothing: it would undo the
+    // retirement above.
+    const stale = await change(A, id, {
+      ...rate({ name: "Aaa renamed", ratePpm: 70_000, reason: "From an old page" }),
+      active: true,
+      expectedVersion: 2,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.json.error.code).toBe("tax_rate_changed");
+    const [after] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.tax_rate_versions where tax_rate_id = ${id}`;
+    expect(after?.n).toBe(3);
   });
 
   it("refuses booking staff and finance, another operator's location, and a rate that is not there", async () => {
@@ -250,13 +265,22 @@ describe.skipIf(!env)("tax rates through the API (W3-G2.5-TAX staff screens)", (
     const ours = await add(A, rate());
     const id = ours.json.taxRate.id as string;
     for (const who of [A.bookingStaff, A.finance]) {
-      expect((await change(A, id, { ...rate(), active: false }, who)).status).toBe(403);
+      expect(
+        (await change(A, id, { ...rate(), active: false, expectedVersion: 1 }, who)).status,
+      ).toBe(403);
     }
     // Another operator's rate, an unknown one, and a malformed id are all "not here".
     const bRate = await add(B, rate());
-    expect((await change(A, bRate.json.taxRate.id, { ...rate(), active: true })).status).toBe(404);
-    expect((await change(A, randomUUID(), { ...rate(), active: true })).status).toBe(404);
-    expect((await change(A, "not-a-uuid", { ...rate(), active: true })).status).toBe(404);
+    expect(
+      (await change(A, bRate.json.taxRate.id, { ...rate(), active: true, expectedVersion: 1 }))
+        .status,
+    ).toBe(404);
+    expect(
+      (await change(A, randomUUID(), { ...rate(), active: true, expectedVersion: 1 })).status,
+    ).toBe(404);
+    expect(
+      (await change(A, "not-a-uuid", { ...rate(), active: true, expectedVersion: 1 })).status,
+    ).toBe(404);
     // And B's list never shows A's rates.
     const listed = await request("GET", ratesPath(B), { as: B.owner });
     expect(listed.json.taxRates.some((r: Json) => r.id === id)).toBe(false);

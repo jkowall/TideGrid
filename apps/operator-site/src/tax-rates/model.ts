@@ -23,6 +23,8 @@ export const nameLimit = 80;
 export const reasonLimit = 500;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to find them.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+/** Invisible format characters (zero-width spaces, direction marks), which the API refuses in a name. */
+const FORMAT = /\p{Cf}/u;
 
 export type Field = "name" | "rate" | "reason";
 
@@ -36,7 +38,9 @@ export function formProblems(form: {
   const name = form.name.trim();
   if (!name) problems.name = "Give the rate a name.";
   else if (name.length > nameLimit) problems.name = `Use at most ${nameLimit} characters.`;
-  else if (CONTROL.test(name)) problems.name = "Remove hidden or control characters from the name.";
+  else if (CONTROL.test(name) || FORMAT.test(name)) {
+    problems.name = "Remove hidden or control characters from the name.";
+  }
   if (ppmOf(form.rate) === null) {
     problems.rate = "Enter a percentage from 0.0001 to 50, such as 6.25.";
   }

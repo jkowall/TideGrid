@@ -233,6 +233,7 @@ describe("Tax rates in the console (W3-G2.5-TAX)", () => {
       locationId: marina,
       reason: "Repealed",
       active: false,
+      expectedVersion: 1,
     });
     await waitFor(() => expect(screen.getByText("No tax rates in use")).toBeTruthy());
     expect(screen.getByText(/Retired rates \(1\)/)).toBeTruthy();
@@ -277,6 +278,67 @@ describe("Tax rates in the console (W3-G2.5-TAX)", () => {
     expect(screen.queryByRole("button", { name: /Change State sales tax/ })).toBeNull();
   });
 
+  it("saves nothing when another owner changed the rate first, and reads the list again on close", async () => {
+    const old = rate();
+    const sent = stub([old], {
+      [`POST ${base}/tax-rates/${old.id}/versions`]: () =>
+        Response.json({ error: { code: "tax_rate_changed", message: "changed" } }, { status: 409 }),
+    });
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: /Change State sales tax/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Sales tax" } });
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Shorter" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect(
+      await within(dialog).findByText(/Someone changed this rate after you opened it/),
+    ).toBeTruthy();
+    const reads = () => sent.filter((s) => s.method === "GET" && s.path.endsWith("/tax-rates"));
+    const before = reads().length;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(reads().length).toBe(before + 1));
+  });
+
+  it("reads the list again after an add with no answer, so a second try can't add it twice", async () => {
+    const sent = stub([], {
+      [`POST ${base}/tax-rates`]: () => {
+        throw new TypeError("offline");
+      },
+    });
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Add a tax rate" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "City tax" } });
+    fireEvent.change(within(dialog).getByLabelText("Rate (%)"), { target: { value: "2" } });
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "New" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add rate" }));
+    expect(await within(dialog).findByText(/it isn't known whether this was saved/)).toBeTruthy();
+    const reads = () => sent.filter((s) => s.method === "GET" && s.path.endsWith("/tax-rates"));
+    const before = reads().length;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(reads().length).toBe(before + 1));
+  });
+
+  it("says Saved, not Retired, when a retired rate is changed and stays retired", async () => {
+    const old = rate({ active: false });
+    stub([old], {
+      [`POST ${base}/tax-rates/${old.id}/versions`]: () =>
+        Response.json({ taxRate: { ...old, version: 2, name: "Old sales tax" } }, { status: 201 }),
+    });
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: /Change State sales tax/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Old sales tax" } });
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Rename" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Saved Old sales tax."),
+    );
+  });
+
   it("shows a failed read with a way to try again", async () => {
     vi.stubGlobal(
       "fetch",
@@ -308,6 +370,12 @@ describe("tax rate model", () => {
       name: "Remove hidden or control characters from the name.",
       reason: "Use at most 500 characters.",
     });
+  });
+
+  it("refuses an invisible format character in a name, as the API does", () => {
+    expect(formProblems({ name: "Sales\u200btax", rate: "6", reason: "Set up" }).name).toBe(
+      "Remove hidden or control characters from the name.",
+    );
   });
 
   it("says how and where a rate applies", () => {

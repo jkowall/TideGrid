@@ -263,20 +263,31 @@ export function TaxRatesPage({
           tenantId={tenantId}
           rate={editing === "new" ? null : editing}
           locations={locations}
-          onClose={() => {
+          onClose={(stale) => {
             const from = editing === "new" ? addButtonId : rowId(editing.id);
             setEditing(null);
+            if (stale) {
+              // The rate may have changed, or been saved with no answer: read
+              // the list again, so a second try doesn't add it twice.
+              focusAfter.current = from;
+              setRefreshing(true);
+              setAttempt((n) => n + 1);
+              return;
+            }
             requestAnimationFrame(() => document.getElementById(from)?.focus());
           }}
           onSaved={(rate, added) => {
+            const was = editing === "new" ? null : editing;
             setEditing(null);
             put(
               rate,
               added
                 ? `Added ${rate.name}.`
-                : rate.active
-                  ? `Saved ${rate.name}.`
-                  : `Retired ${rate.name}. New bookings don't use it.`,
+                : was?.active && !rate.active
+                  ? `Retired ${rate.name}. New bookings don't use it.`
+                  : !was?.active && rate.active
+                    ? `${rate.name} is in use again.`
+                    : `Saved ${rate.name}.`,
             );
           }}
         />
@@ -316,19 +327,32 @@ const saveProblems: Record<SaveFailure, string> = {
   forbidden: "Only owners change tax rates.",
   suspended: "While this operator is suspended, tax rates can't change.",
   no_access: "You no longer have access to this operator. Ask one of its owners.",
-  not_found: "This rate isn't here any more. Reload the page.",
+  not_found: "This rate isn't here any more. Close this to see the rates as they are now.",
   rejected: "That rate couldn't be saved. Check the name, the percentage, and the reason.",
   unreadable:
-    "TideGrid sent an answer this console can't read. Reload to check the rate was saved.",
+    "TideGrid sent an answer this console can't read, so it isn't known whether this was saved. Close this to see the rates as they are now, or send it again: the same change is applied only once.",
   unreachable:
     "TideGrid didn't answer, so it isn't known whether this was saved. Check your connection and send it again: the same change is applied only once.",
   unavailable:
     "TideGrid didn't answer properly, so it isn't known whether this was saved. Send it again in a moment: the same change is applied only once.",
   key_reused: "The rate changed while it was being sent. Save again.",
-  unknown_location: "That location isn't this operator's any more. Reload the page.",
+  rate_changed:
+    "Someone changed this rate after you opened it, so nothing was saved. Close this, check the rate as it is now, then change it again.",
+  unknown_location:
+    "That location isn't this operator's any more. Close this to see the locations as they are now.",
 };
 
 const everyLocation = "";
+
+/** After these, the page reads the list again when the dialog closes. */
+const staleAfter: ReadonlySet<SaveFailure> = new Set([
+  "unreadable",
+  "unreachable",
+  "unavailable",
+  "not_found",
+  "unknown_location",
+  "rate_changed",
+]);
 
 function RateDialog({
   tenantId,
@@ -340,7 +364,8 @@ function RateDialog({
   tenantId: string;
   rate: TaxRate | null;
   locations: RateLocation[];
-  onClose: () => void;
+  /** `stale`: the list may be out of date, so the page reads it again. */
+  onClose: (stale: boolean) => void;
   onSaved: (rate: TaxRate, added: boolean) => void;
 }) {
   const [name, setName] = useState(rate?.name ?? "");
@@ -353,6 +378,7 @@ function RateDialog({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>();
   const key = useRef<{ body: string; key: string } | null>(null);
+  const stale = useRef(false);
   const first = useRef<HTMLInputElement>(null);
   const formId = useId();
 
@@ -385,30 +411,36 @@ function RateDialog({
       locationId: locationId === everyLocation ? null : locationId,
       reason: reason.trim(),
     };
-    const input = rate ? { ...base, active } : base;
+    const input = rate ? { ...base, active, expectedVersion: rate.version } : base;
     const body = JSON.stringify(input);
     if (key.current?.body !== body) key.current = { body, key: newIdempotencyKey() };
     setBusy(true);
     const result = rate
-      ? await changeTaxRate(tenantId, rate.id, { ...base, active }, key.current.key)
+      ? await changeTaxRate(
+          tenantId,
+          rate.id,
+          { ...base, active, expectedVersion: rate.version },
+          key.current.key,
+        )
       : await addTaxRate(tenantId, base, key.current.key);
     setBusy(false);
     if (result.kind === "saved") return onSaved(result.rate, rate === null);
     if (result.reason === "key_reused") key.current = null;
+    if (staleAfter.has(result.reason)) stale.current = true;
     setProblem(saveProblems[result.reason]);
   };
 
   return (
     <Dialog
       title={rate ? `Change ${rate.name}` : "Add a tax rate"}
-      onClose={onClose}
+      onClose={() => onClose(stale.current)}
       dismissible={!busy}
       initialFocus={first}
       restoreFocus={false}
       className="links-dialog"
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={() => onClose(stale.current)} disabled={busy}>
             Cancel
           </Button>
           <Button

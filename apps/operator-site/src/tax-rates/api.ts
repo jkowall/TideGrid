@@ -89,7 +89,7 @@ export async function loadTaxRates(
 }
 
 /** Why a change was not saved. */
-export type SaveFailure = ReadFailure | "unknown_location" | "key_reused";
+export type SaveFailure = ReadFailure | "unknown_location" | "key_reused" | "rate_changed";
 
 export type SaveResult = { kind: "saved"; rate: TaxRate } | { kind: "failed"; reason: SaveFailure };
 
@@ -109,6 +109,9 @@ async function save(path: string, body: TaxRateInput | TaxRateChange, key: strin
       return isRate(answer?.taxRate)
         ? ({ kind: "saved", rate: answer.taxRate } as const)
         : ({ kind: "failed", reason: "unreadable" } as const);
+    }
+    if (res.status === 409 && (await errorCode(res.clone())) === "tax_rate_changed") {
+      return { kind: "failed", reason: "rate_changed" } as const;
     }
     if (res.status === 422) {
       const code = await errorCode(res.clone());
