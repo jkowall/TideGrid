@@ -1,6 +1,8 @@
 import {
+  type BookerContactRequest,
   CancelBookingResponse,
   CancellationTermsResponse,
+  GuestBookerContactResponse,
   type ManagedBooking,
   ManagedBookingResponse,
   ManageLinkAccepted,
@@ -125,6 +127,34 @@ export async function inviteParticipant(
     timeoutMs: commandTimeoutMs,
   });
   return mapOk(result, (r) => r.recipient);
+}
+
+/**
+ * Correct the booker's own name and email (W3-G2.11-rest). On a new email the
+ * old address's links stop working and the new address gets a fresh link;
+ * this session stays open. `changed` is false when the details were already
+ * these.
+ */
+export async function changeBooker(
+  session: string,
+  input: BookerContactRequest,
+  key: string,
+  signal?: AbortSignal,
+): Promise<Result<{ booking: ManagedBooking; changed: boolean; emailChanged: boolean }>> {
+  const result = await call("/v1/public/manage/booker", {
+    method: "PUT",
+    bearer: session,
+    body: input,
+    key,
+    schema: GuestBookerContactResponse,
+    signal,
+    timeoutMs: commandTimeoutMs,
+  });
+  return mapOk(result, (r) => ({
+    booking: r.booking,
+    changed: r.change !== null,
+    emailChanged: r.change?.emailChanged === true,
+  }));
 }
 
 export async function readTerms(session: string, signal?: AbortSignal) {

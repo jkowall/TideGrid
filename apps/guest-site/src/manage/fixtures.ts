@@ -338,6 +338,7 @@ export type Route =
   | "read"
   | "saveParticipant"
   | "invite"
+  | "changeBooker"
   | "readTerms"
   | "cancel"
   | "emailLink"
@@ -354,6 +355,7 @@ export function routeOf(call: Pick<Call, "method" | "path">): Route {
   if (method === "POST" && /^\/v1\/public\/manage\/participants\/\d+\/invitation$/.test(path)) {
     return "invite";
   }
+  if (method === "PUT" && path === "/v1/public/manage/booker") return "changeBooker";
   if (method === "GET" && path === "/v1/public/manage/cancellation") return "readTerms";
   if (method === "POST" && path === "/v1/public/manage/cancellation") return "cancel";
   if (method === "POST" && path === "/v1/public/manage/link-email") return "emailLink";
@@ -453,6 +455,29 @@ export const answers: Record<Route, Answer> = {
     if (p.isMinor) return json({ status: "accepted", recipient: "guardian" }, 202);
     if (!p.email) return refusal(409, "participant_no_email");
     return json({ status: "accepted", recipient: "participant" }, 202);
+  }),
+  // The booker's own name and email: the change, or null when they were already these.
+  changeBooker: withSession((call) => {
+    const key = IdempotencyKey.safeParse(call.headers.get("idempotency-key"));
+    const body = call.body as { name?: unknown; email?: unknown } | undefined;
+    if (!key.success || typeof body?.name !== "string" || typeof body.email !== "string") {
+      return refusal(400, "validation_failed");
+    }
+    const before = server.booking.booker;
+    const nameChanged = body.name !== before.name;
+    const emailChanged = body.email !== before.email;
+    if (!nameChanged && !emailChanged) return json({ booking: server.booking, change: null });
+    server.booking = { ...server.booking, booker: { name: body.name, email: body.email } };
+    return json({
+      booking: server.booking,
+      change: {
+        contactChangeId: "7d1c4c1e-2f55-4a7e-9a55-2d3cc0a7e0b1",
+        nameChanged,
+        emailChanged,
+        by: "guest",
+        changedAt: new Date().toISOString(),
+      },
+    });
   }),
   readTerms: withSession(() => json({ terms: server.booking.cancellationTerms })),
   // Cancels once, if the guest was shown what canceling gives now.

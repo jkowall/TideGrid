@@ -25,6 +25,7 @@ import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, canUseNotes, roleNames } from "../roles.ts";
 import { BookingWaiversCard } from "../waivers/BookingWaivers.tsx";
 import { loadBooking } from "./api.ts";
+import { BookerContact } from "./BookerContact.tsx";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
   bookingStates,
@@ -50,8 +51,8 @@ import { canRetry, ReadFailed } from "./States.tsx";
 /**
  * One booking (G2.12b): the trip and where to meet, the guest (for roles that
  * may see them), the party and extras, the immutable order, the payment with
- * its provider reference masked, any refund, and what happened when. Read
- * only: changes to a booking arrive with later goals.
+ * its provider reference masked, any refund, and what happened when. Owners
+ * and booking staff may correct the booker's name and email (W3-G2.11-rest).
  */
 
 type Load =
@@ -160,7 +161,15 @@ export function BookingDetailPage({
         ))}
       {booking && (
         <Detail
+          tenantId={tenantId}
           booking={booking}
+          onBookerSaved={(booker) =>
+            setLoad((current) =>
+              current.kind === "ready"
+                ? { ...current, booking: { ...current.booking, booker } }
+                : current,
+            )
+          }
           seesGuests={canSeeGuests(role)}
           roleName={roleNames[role]}
           notes={
@@ -205,14 +214,19 @@ export function BookingDetailPage({
 }
 
 function Detail({
+  tenantId,
   booking,
   seesGuests,
   roleName,
   notes,
   waivers,
   email,
+  onBookerSaved,
 }: {
+  tenantId: string;
   booking: BookingDetail;
+  /** The booker as corrected (W3-G2.11-rest): shown at once. */
+  onBookerSaved: (booker: { name: string; email: string }) => void;
   seesGuests: boolean;
   roleName: string;
   /** The booking's internal notes (G2.12c), last on the page; none for finance. */
@@ -307,12 +321,15 @@ function Detail({
         <section className="console-card bd-card" aria-labelledby="bd-guest">
           <h2 id="bd-guest">Guest</h2>
           {seesGuests && booking.booker ? (
-            <dl className="console-dl">
-              <dt>Booked by</dt>
-              <dd>{booking.booker.name}</dd>
-              <dt>Email</dt>
-              <dd className="console-dl__wrap">{booking.booker.email ?? "No email on file"}</dd>
-            </dl>
+            <BookerContact
+              tenantId={tenantId}
+              bookingId={booking.id}
+              booker={booking.booker}
+              editable={
+                booking.state === "confirmed" && new Date(trip.startsAt).getTime() > Date.now()
+              }
+              onSaved={onBookerSaved}
+            />
           ) : (
             <p className="bd-hidden">
               <Icon name="eye-off" />

@@ -37,6 +37,7 @@ import {
   readTerms,
   renewLink,
 } from "./api.ts";
+import { BookerSection } from "./BookerSection.tsx";
 import { DemoMailboxLink } from "./DemoMailbox.tsx";
 import {
   cutoffSentence,
@@ -611,6 +612,13 @@ function BookingView({
               </dd>
             </div>
           </dl>
+          <BookerSection
+            booking={booking}
+            session={session.token}
+            operator={brand.name}
+            onChanged={onChange}
+            onEnded={() => onEnded("expired")}
+          />
           <ImportantLinks operator={brand.name} links={booking.importantLinks ?? []} />
         </section>
 
