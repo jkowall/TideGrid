@@ -217,6 +217,7 @@ export * from "./reschedules.ts";
 export * from "./self-service.ts";
 // Staff-assisted booking (G2.12d).
 export * from "./staff-booking.ts";
+export * from "./tax-rates.ts";
 // Tenant access remainder (W3-G2.2b): invitations, support access, export, deletion request.
 export * from "./tenant-access.ts";
 // Waiver evidence (G2.15).

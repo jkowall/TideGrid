@@ -35,6 +35,7 @@ import { registerReschedulesStaffRoutes } from "./routes/reschedules-staff.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
+import { registerTaxRateRoutes } from "./routes/tax-rates.ts";
 import { registerTenantAccessStaffRoutes } from "./routes/tenant-access-staff.ts";
 import { registerWaiverDockPublicRoutes } from "./routes/waiver-dock-public.ts";
 import { registerWaiverPublicRoutes } from "./routes/waivers-public.ts";
@@ -200,6 +201,7 @@ export function createApp(deps: AppDeps = {}) {
   // The standard CSV import's dry run (W3-G2.13).
   registerImportStaffRoutes(app, deps);
   registerImportantLinkRoutes(app, deps);
+  registerTaxRateRoutes(app, deps);
 
   // After every route: the cap's 413 on each operation with a request body.
   declarePayloadTooLarge(app);

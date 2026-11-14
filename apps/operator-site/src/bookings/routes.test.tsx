@@ -251,7 +251,8 @@ describe("the navigation", () => {
     });
     // The nav lists the sections, in order; the owner also sees Email
     // exceptions (W1-EMAIL-EXC). Every role sees Important links (W3-G2.14b-rest);
-    // owners and booking staff see the Dock QR code (W3-G2.15-rest).
+    // owners and booking staff see the Dock QR code (W3-G2.15-rest); every
+    // role sees Tax rates (W3-G2.5-TAX).
     expect(
       within(nav())
         .getAllByRole("link")
@@ -263,6 +264,7 @@ describe("the navigation", () => {
       "Exceptions",
       "Email exceptions",
       "Important links",
+      "Tax rates",
       "Dock QR code",
     ]);
   });

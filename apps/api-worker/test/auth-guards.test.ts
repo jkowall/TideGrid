@@ -61,6 +61,9 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["POST", `/v1/staff/tenants/${tenant}/important-links`],
     ["PUT", `/v1/staff/tenants/${tenant}/important-links/${someId}`],
     ["POST", `/v1/staff/tenants/${tenant}/important-links/${someId}/archive`],
+    ["GET", `/v1/staff/tenants/${tenant}/tax-rates`],
+    ["POST", `/v1/staff/tenants/${tenant}/tax-rates`],
+    ["POST", `/v1/staff/tenants/${tenant}/tax-rates/${someId}/versions`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -334,6 +337,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/important-links",
         "/v1/staff/tenants/{tenantId}/important-links/{linkId}",
         "/v1/staff/tenants/{tenantId}/important-links/{linkId}/archive",
+        "/v1/staff/tenants/{tenantId}/tax-rates",
+        "/v1/staff/tenants/{tenantId}/tax-rates/{taxRateId}/versions",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
