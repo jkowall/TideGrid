@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-14
 
+### Forms to correct the booker's name and email (W3-G2.11-rest follow-up), built November 14, 2026
+
+Goal branch `claude/project-thread-mf1bwl`, no migration, on main `5d2bff3`. Synthetic data only; no provider call, no deploy.
+
+- **Built.** The guest's manage page has a "Your details" section where the booker corrects their name and email (the API from PR 144: three a day, a new email moves the booking's links and tells the old address). The console's booking Guest card has "Correct name or email" for owners and booking staff, unlimited, on a confirmed booking whose trip has not left. Both keep the same idempotency key when the same details are sent again after a failure that leaves the outcome unknown, and say plainly what happened to the old address's links.
+- **Proof.** Console `BookingDetail.test.tsx` (4 new tests: a new email saved and shown, checks before sending, a change made a moment ago by someone else, no correction once the trip has left) and the guest site's `ManagePage.test.tsx` (5 new tests: a new email, checks before sending, the daily limit, the same key after a server error, no change once the trip has left); the console and guest unit suites; `pnpm check`.
+- **Review.** Independent review (second model) found that the guest form dropped its idempotency key after a server error or a non-limit 429, so a retry could apply twice, and that a removed booking had no message of its own. Both are fixed and tested.
+- **Still open.** Nothing new.
+
 ### Imported bookings' own email and online balance (W3-G2.13 follow-ups), built November 14, 2026
 
 Goal branch `claude/project-thread-mf1bwl`, migration `0049_import_booking_email.sql`, on main `7eeb48e`. Synthetic data only; no provider call, no deploy.
