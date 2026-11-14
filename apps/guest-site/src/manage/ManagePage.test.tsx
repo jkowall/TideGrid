@@ -477,6 +477,21 @@ describe("opening the booking", () => {
       expect(text(form)).toContain("Contact Demo Harbor Charters");
     });
 
+    it("sends the same key again after the server's trouble, so the change is taken once", async () => {
+      const calls = await openedFromLink({
+        changeBooker: inOrder(() => refusal(503, "unavailable"), answers.changeBooker),
+      });
+      const form = await change();
+      fireEvent.change(field(form, "Your email"), { target: { value: "again@example.test" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
+      expect(await within(form).findByText(/something went wrong on our side/)).toBeTruthy();
+      fireEvent.click(within(form).getByRole("button", { name: "Save your details" }));
+      expect(await screen.findByText("Your details are saved")).toBeTruthy();
+      const sent = callsTo(calls, "changeBooker");
+      expect(sent).toHaveLength(2);
+      expect(sent[1]?.headers.get("idempotency-key")).toBe(sent[0]?.headers.get("idempotency-key"));
+    });
+
     it("offers no change once the trip has left", async () => {
       await openedFromLink({}, { booking: managedBooking({ partyEditable: false }) });
       expect(screen.queryByRole("button", { name: "Change your name or email" })).toBeNull();

@@ -195,7 +195,7 @@ function BookerForm({
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           error={errors.name}
           autoComplete="off"
-          maxLength={200}
+          maxLength={120}
         />
         <TextField
           ref={emailField}

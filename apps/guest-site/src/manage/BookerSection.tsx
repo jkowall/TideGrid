@@ -140,7 +140,13 @@ function BookerEditor({
       return;
     }
     if (result.kind === "refused") {
-      attempt.current = null;
+      // A refusal that may have saved nothing (the server's trouble, or a
+      // short rate limit) keeps the key, so the same details sent again
+      // are taken once, and the answer says what really happened.
+      const retryable =
+        result.status >= 500 ||
+        (result.status === 429 && result.code !== "contact_change_limit_reached");
+      if (!retryable) attempt.current = null;
       if (result.status === 401) {
         onEnded();
         return;
@@ -161,6 +167,10 @@ function BookerEditor({
             ? `You've changed these details 3 times today. Contact ${operator} to change them again.`
             : "That was a lot of tries in a short time. Wait a minute, then try again.",
         );
+        return;
+      }
+      if (result.status === 404) {
+        setTrouble(`This booking can't be changed here any more. Contact ${operator} for help.`);
         return;
       }
       if (result.status === 400 || result.status === 422) {
