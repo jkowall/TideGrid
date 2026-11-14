@@ -68,13 +68,30 @@ const demoNote =
   "TideGrid demo: this booking is synthetic. No real card was charged and no money moves.";
 
 /**
- * Saved by a CSV import, migration 0044: the booking's own email stays held
- * until the batch that imported it has its email due (saved with
- * send_at_cutover, or released by an owner) and the import sweep has sent the
- * booker the welcome (0049). From then on it works as any booking's does. A
- * booker imported with no email gets none until staff add one.
+ * Saved by a CSV import, migration 0044: the booking's email stays held until
+ * the batch that imported it has its email due (saved with send_at_cutover,
+ * or released by an owner) and the import sweep has opened it (0049). From
+ * then on it works as any booking's does.
  */
 export async function importedEmailHeld(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<boolean> {
+  const { rows } = await sql<{ held: boolean }>`
+    select b.source = 'imported'
+           and not exists (select 1 from import_booking_email_opened o
+                            where o.tenant_id = b.tenant_id and o.booking_id = b.id) as held
+      from bookings b
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
+  return rows[0]?.held === true;
+}
+
+/**
+ * No email to the booker: an imported booking still held, or one imported
+ * with no address (it gets email once staff add one).
+ */
+async function bookerMailHeld(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
@@ -179,7 +196,7 @@ export async function enqueueConfirmationEmail(
   options: ComposeOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const policy = await policyText(trx, ctx.tenantId, bookingId);
   if (detail.source === "imported") {
@@ -340,7 +357,7 @@ export async function enqueueManageLinkEmail(
   requestKey: string,
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking link" },
@@ -399,7 +416,7 @@ export async function enqueueReminderEmail(
   options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
            t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS})
@@ -470,7 +487,7 @@ export async function enqueueBalanceEmail(
     | { kind: "link"; dedupeKey: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   if (!detail.balance) throw new Error("a balance email for a booking with no balance");
   const due = tripWhen(detail.balance.dueAt, detail.trip.timeZone);
@@ -528,7 +545,7 @@ export async function enqueueCancellationEmail(
   options: ComposeOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const c = detail.cancellation;
   if (!c) throw new Error("a cancellation email needs the booking's cancellation");
@@ -607,7 +624,7 @@ export async function enqueueRescheduledEmail(
   move: { rescheduleId: string; fromStartsAt: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const was = tripWhen(move.fromStartsAt, detail.trip.timeZone);
@@ -661,7 +678,7 @@ export async function enqueueRefundFailedEmail(
   amount: number,
 ): Promise<{ messageId: string } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your refund hasn't gone through yet" },
@@ -728,7 +745,7 @@ export async function enqueueContactChangedEmail(
   change: { contactChangeId: string; oldEmail: string | null; oldName: string; newEmail: string },
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   // An imported booking's email waits for its batch's release (W3-G2.13, 0049).
-  if (await importedEmailHeld(trx, ctx.tenantId, bookingId)) return null;
+  if (await bookerMailHeld(trx, ctx.tenantId, bookingId)) return null;
   // A booker imported with no email had no old address to tell.
   const oldEmail = change.oldEmail;
   if (!oldEmail) return null;

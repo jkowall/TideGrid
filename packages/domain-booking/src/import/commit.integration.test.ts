@@ -10,8 +10,9 @@ import type {} from "@tidegrid/database/global-setup";
 import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { sendBalanceLink } from "../balance.ts";
+import { openBalancePayment, sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
+import { changeBookerContact } from "../booker-contact.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { adjustCredit } from "../credits.ts";
 import { inviteParticipant } from "../invitations.ts";
@@ -710,6 +711,17 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
           openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
         ),
       ).toEqual({ kind: "not_due" });
+      // No guest card payment of the balance opens while its email is held.
+      const guest = guestContext(D.id);
+      expect(
+        await inTenantTransaction(runtime.db, guest, (trx) =>
+          openBalancePayment(trx, guest, {
+            bookingId: row.id,
+            provider: "fake",
+            minimumAmount: 50,
+          }),
+        ),
+      ).toEqual({ kind: "not_found" });
       await expect(
         inTenantTransaction(runtime.db, owner, (trx) =>
           sql`insert into import_booking_email_opened (tenant_id, booking_id, run_id)
@@ -723,22 +735,53 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
       const opened = await inTenantTransaction(runtime.db, owner, (trx) =>
         openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
       );
-      expect(opened.kind).toBe("opened");
-      const mail = await admin<{ template: string; body: string }[]>`
-        select template, text_body as body from public.email_messages
-         where booking_id = ${row.id} order by created_at, template`;
-      const welcome = mail.find((m) => m.template === "booking_confirmation");
-      expect(welcome?.body).toContain("we'll remind you before then");
-      expect(welcome?.body).toContain("$500.00, due by");
+      // Its booker came with no email: opening sends nothing, and the balance
+      // link has nowhere to go.
+      expect(opened).toEqual({ kind: "opened", queued: 0 });
+      expect(
+        await inTenantTransaction(runtime.db, owner, (trx) => sendBalanceLink(trx, owner, row.id)),
+      ).toEqual({ kind: "no_booker_email" });
       expect(
         await inTenantTransaction(runtime.db, owner, (trx) =>
           openImportedBookingEmail(trx, owner, { runId: row.run_id, bookingId: row.id }),
         ),
       ).toEqual({ kind: "already_open" });
+      // Staff add an address: it gets the welcome with the balance and its due
+      // date, and the balance reminders are set.
+      expect(
+        (
+          await inTenantTransaction(runtime.db, owner, (trx) =>
+            changeBookerContact(trx, owner, {
+              bookingId: row.id,
+              name: "Jo Fixture",
+              email: "jo.found@example.test",
+            }),
+          )
+        ).kind,
+      ).toBe("changed");
+      const mail = await admin<{ template: string; body: string; to: string }[]>`
+        select template, text_body as body, to_email as to from public.email_messages
+         where booking_id = ${row.id} order by created_at, template`;
+      const welcome = mail.find((m) => m.template === "booking_confirmation");
+      expect(welcome?.to).toBe("jo.found@example.test");
+      expect(welcome?.body).toContain("we'll remind you before then");
+      expect(welcome?.body).toContain("$500.00, due by");
+      expect(mail.some((m) => m.template === "booking_balance_reminder")).toBe(true);
+      expect(mail.some((m) => m.template === "booking_manage_link")).toBe(false);
       expect(
         (await inTenantTransaction(runtime.db, owner, (trx) => sendBalanceLink(trx, owner, row.id)))
           .kind,
       ).toBe("enqueued");
+      // And the guest may pay what is owed online, as on any charter.
+      expect(
+        await inTenantTransaction(runtime.db, guest, (trx) =>
+          openBalancePayment(trx, guest, {
+            bookingId: row.id,
+            provider: "fake",
+            minimumAmount: 50,
+          }),
+        ),
+      ).toMatchObject({ kind: "opened", amount: 50000 });
     }
     // Money staff record in TideGrid counts in a later batch: a check the
     // legacy system also logged during cutover is not taken a second time.

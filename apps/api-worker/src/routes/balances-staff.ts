@@ -132,7 +132,7 @@ export function registerBalanceStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or booking (booking_not_found)"),
       409: errorBody(
-        "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported and its batch's email is not released yet (booking_imported)",
+        "Nothing is owed (nothing_owed), email is off here (booking_email_off), the booking was imported and its batch's email is not released yet (booking_imported), or the guest has no email address (booker_email_missing)",
       ),
       422: errorBody("idempotency_key_reused"),
       429: errorBody("Three links went out in the last hour (balance_link_rate_limited)"),
@@ -178,6 +178,12 @@ export function registerBalanceStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
               409,
               "booking_imported",
               "This booking was imported from an earlier system, and its email waits until the import batch is released",
+            );
+          case "no_booker_email":
+            throw new ApiError(
+              409,
+              "booker_email_missing",
+              "This booking has no email address for the guest. Add one first",
             );
           case "rate_limited":
             throw new ApiError(

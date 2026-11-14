@@ -34,8 +34,10 @@ import {
   revokeGuestSessions,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
+import { enqueueBalanceReminders } from "./balance.ts";
 import {
   enqueueBalanceEmail,
+  enqueueConfirmationEmail,
   enqueueContactChangedEmail,
   enqueueManageLinkEmail,
   enqueueReminderEmail,
@@ -266,7 +268,17 @@ export async function changeBookerContact(
       oldName: before.booker_name,
       newEmail: email,
     });
-    await enqueueManageLinkEmail(trx, ctx, input.bookingId, `contact.${contactChangeId}`);
+    if (before.booker_email === null) {
+      // A booker imported with no address (W3-G2.13, 0049): their first
+      // address gets what opening the booking would have sent, the welcome
+      // with its link, the trip reminder, and any balance reminders. Each
+      // composer sends nothing while the booking's email is still held.
+      await enqueueConfirmationEmail(trx, ctx, input.bookingId);
+      await enqueueReminderEmail(trx, ctx, input.bookingId);
+      await enqueueBalanceReminders(trx, ctx, input.bookingId);
+    } else {
+      await enqueueManageLinkEmail(trx, ctx, input.bookingId, `contact.${contactChangeId}`);
+    }
   }
 
   await record(trx, ctx, {

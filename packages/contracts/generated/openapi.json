@@ -42848,7 +42848,7 @@
             }
           },
           "409": {
-            "description": "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported and its batch's email is not released yet (booking_imported)",
+            "description": "Nothing is owed (nothing_owed), email is off here (booking_email_off), the booking was imported and its batch's email is not released yet (booking_imported), or the guest has no email address (booker_email_missing)",
             "content": {
               "application/json": {
                 "schema": {

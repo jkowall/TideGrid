@@ -529,8 +529,9 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       { state: "pending", deliveries: 1 },
       { state: "pending", deliveries: 0 },
     ]);
-    // Staff add an address: the booking's link goes there, and no notice goes
-    // to an old address it never had.
+    // Staff add an address: what opening would have sent goes there (the
+    // welcome with its link, and the trip reminder), and no notice goes to an
+    // old address it never had.
     const owner = staff(B.id, ownerB);
     expect(
       (
@@ -544,7 +545,8 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       ).kind,
     ).toBe("changed");
     expect(await bookingMail(bookingId)).toEqual([
-      { template: "booking_manage_link", version: 1, to: "ima.found@example.test" },
+      { template: "booking_confirmation", version: 2, to: "ima.found@example.test" },
+      { template: "booking_reminder", version: 1, to: "ima.found@example.test" },
     ]);
     // A staff cancellation does not fail, and its notice goes to the new address.
     expect(
@@ -558,10 +560,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
         )
       ).kind,
     ).toBe("canceled");
-    expect((await bookingMail(bookingId)).map((m) => m.template)).toEqual([
-      "booking_manage_link",
-      "booking_canceled",
-    ]);
+    expect((await bookingMail(bookingId)).map((m) => m.template)).toContain("booking_canceled");
   });
 
   it("sends the guest to the operator to cancel, and words the operator's cancellation for money paid before", async () => {

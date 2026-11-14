@@ -199,7 +199,9 @@ export type SendBalanceLinkResult =
   | { kind: "nothing_owed" }
   | { kind: "rate_limited"; limit: number }
   /** An imported booking whose email is not open yet (W3-G2.13, 0049). */
-  | { kind: "imported_booking" };
+  | { kind: "imported_booking" }
+  /** An imported booking whose booker has no email address yet. */
+  | { kind: "no_booker_email" };
 
 /**
  * Email the booker the balance link now, at staff's request: at most three an
@@ -234,8 +236,13 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
-  // An imported booking whose email is not open yet (W3-G2.13, 0049).
-  if (!done) return { kind: "imported_booking" };
+  // An imported booking whose email is not open yet (W3-G2.13, 0049), or
+  // one imported with no address.
+  if (!done) {
+    return (await importedEmailHeld(trx, ctx.tenantId, bookingId))
+      ? { kind: "imported_booking" }
+      : { kind: "no_booker_email" };
+  }
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
     subjectType: "booking",
