@@ -1942,15 +1942,16 @@ export interface ImportWaiverStatusesTable {
   created_at: Stamped;
 }
 
-/** An owner's release of a batch's held waiver email (0048). Append-only, once a batch. */
+/** The customer and amount an opening balance's ledger row recorded (0051). Append-only. */
 export interface ImportCreditsTable {
-  record_id: string;
-  tenant_id: Generated<string>;
-  customer_record_id: string;
-  amount: number;
-  created_at: Generated<Date>;
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  customer_record_id: Fixed<string>;
+  amount: Fixed<number>;
+  created_at: Stamped;
 }
 
+/** An owner's release of a batch's held waiver email (0048). Append-only, once a batch. */
 export interface ImportEmailReleasesTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
