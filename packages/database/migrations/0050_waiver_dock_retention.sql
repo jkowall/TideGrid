@@ -17,9 +17,11 @@
 --    changes.
 --
 -- Both run only inside app.waiver_dock_cleanup, which marks its own
--- transaction. Every other UPDATE and DELETE still raises for every role, and
--- the runtime still holds neither. The cron calls it with the delivery
--- cleanup.
+-- transaction. Every other UPDATE and DELETE still raises, and the runtime
+-- holds neither privilege. As with 0023's mark, a role that does hold them
+-- (the owner) could set the mark itself; the guard then still allows only a
+-- delete or a redaction of a row over 30 days old. The cron calls it as its
+-- own step.
 
 -- 1. The guard ------------------------------------------------------------------------
 
@@ -53,8 +55,10 @@ DROP TRIGGER waiver_dock_lookups_append_only ON public.waiver_dock_lookups;
 CREATE TRIGGER waiver_dock_lookups_cleanup_only BEFORE UPDATE OR DELETE ON public.waiver_dock_lookups
   FOR EACH ROW EXECUTE FUNCTION app.guard_waiver_dock_lookup_change();
 
--- For the cleanup's scan across tenants.
-CREATE INDEX waiver_dock_lookups_created_idx ON public.waiver_dock_lookups (created_at);
+-- For the cleanup's scan across tenants: rows not yet redacted, so a row kept
+-- for its signing is not read again on every run.
+CREATE INDEX waiver_dock_lookups_cleanup_idx ON public.waiver_dock_lookups (created_at)
+  WHERE client_key <> 'redacted';
 
 -- 2. The cleanup ----------------------------------------------------------------------
 
@@ -77,6 +81,7 @@ BEGIN
     SELECT k.tenant_id, k.id
       FROM public.waiver_dock_lookups k
      WHERE k.created_at < pg_catalog.now() - interval '30 days'
+       AND k.client_key <> 'redacted'
        AND NOT EXISTS (SELECT 1 FROM public.waiver_assisted_links a
                         WHERE a.tenant_id = k.tenant_id AND a.dock_lookup_id = k.id)
      ORDER BY k.created_at
@@ -95,6 +100,8 @@ BEGIN
       FROM public.waiver_dock_lookups k
      WHERE k.created_at < pg_catalog.now() - interval '30 days'
        AND k.client_key <> 'redacted'
+       AND EXISTS (SELECT 1 FROM public.waiver_assisted_links a
+                    WHERE a.tenant_id = k.tenant_id AND a.dock_lookup_id = k.id)
      ORDER BY k.created_at
      LIMIT v_limit
        FOR UPDATE OF k SKIP LOCKED

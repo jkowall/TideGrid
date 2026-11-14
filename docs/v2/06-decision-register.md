@@ -8,9 +8,9 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
-### 2026-11-14: an imported credit matches what its file row said (W3-G2.13 part C follow-up)
+### 2026-11-14: an imported credit matches what its commit recorded (W3-G2.13 part C follow-up)
 
-Follow-up to part C (`0046`), which let an imported credit name its ledger row but did not record which customer or how much that row gave. Migration `0051` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Hardening only, no new behavior and no choice for the owner: the commit records the customer and amount beside the ledger row, and the database refuses an imported credit of another amount or on another account. The per-email credit cap is still checked by the commit only (part C's other follow-up).
+Follow-up to part C (`0046`), which let an imported credit name its ledger row but did not record which customer or how much that row gave. Migration `0051` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Hardening only, no new behavior and no choice for the owner: the commit records the customer and amount beside the ledger row, and the database refuses an imported credit of another amount or on another account. The database cannot read the file, so this binds the credit to what the commit recorded, once per row. The per-email credit cap is still checked by the commit only (part C's other follow-up).
 
 ### 2026-11-14: how long the dock QR keeps its lookups (W3-G2.15-rest follow-up; coordinator defaults pending owner confirmation)
 
@@ -19,7 +19,7 @@ Follow-up to the dock QR lookup (`0043`), which kept every try, with the guest's
 - **D1: 30 days.** A try at the dock lookup is kept 30 days, matching how long an abandoned checkout keeps its booker (W3-G2.2b D2). The lookup's limits look back at most 24 hours, so nothing they need is lost.
 - **D2: tries that started no signing are deleted.** Every miss, and a match nobody signed from, is removed after 30 days.
 - **D3: a try that started a signing stays, without its address.** The signing link names it, so the row stays, but its network address is replaced with `redacted`. The signature's own evidence keeps what it recorded when the guest signed.
-- **D4: the cron does it.** It runs with the delivery cleanup, a bounded number of rows a run. No audit row: this is housekeeping.
+- **D4: the cron does it.** It runs as its own step, a bounded number of rows a run. No audit row: this is housekeeping.
 
 ### 2026-11-14: imported bookings' own email and online balance (W3-G2.13 follow-ups; coordinator defaults pending owner confirmation)
 

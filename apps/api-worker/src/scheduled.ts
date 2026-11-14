@@ -1,4 +1,9 @@
-import { createDb, publishOutbox, runDeliveryCleanup } from "@tidegrid/database";
+import {
+  createDb,
+  publishOutbox,
+  runDeliveryCleanup,
+  runDockLookupCleanup,
+} from "@tidegrid/database";
 import { sweepCheckouts, sweepReconciliation } from "@tidegrid/domain-booking";
 import {
   type CustomHostnameProvider,
@@ -65,11 +70,13 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    event sent too often without a delivery. Skipped when no OUTBOX_QUEUE
  *    binding is configured, which today is every deployed configuration.
  * 6. Cleanup (W3-G2.3) removes completed idempotency keys and unused quotes
- *    a week past their expiry, through app.delivery_cleanup, and dock QR
- *    lookups more than 30 days old, through app.waiver_dock_cleanup (0050).
+ *    a week past their expiry, through app.delivery_cleanup.
  * 7. Retention (W3-G2.2b) replaces the booker's name and email on abandoned
  *    checkouts older than 30 days (coordinator default D2) with a fixed
  *    redaction, up to 500 a run, and records one audit event per tenant.
+ * 8. Dock QR lookups (0050) more than 30 days old: those that started no
+ *    signing are deleted, and the rest have their client address redacted,
+ *    through app.waiver_dock_cleanup.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -504,8 +511,7 @@ export async function runScheduled(
       }
     }
 
-    // 6. Cleanup (W3-G2.3): expired idempotency keys and unused quotes, and
-    // dock QR lookups more than 30 days old (0050).
+    // 6. Cleanup (W3-G2.3): expired idempotency keys and unused quotes.
     const cleanupLog = createLogger({ ...base, "event.name": "delivery_cleanup" }, options.log);
     started = Date.now();
     try {
@@ -513,8 +519,6 @@ export async function runScheduled(
       cleanupLog.info("delivery_cleanup", {
         "tidegrid.delivery_cleanup.idempotency_keys_deleted": report.idempotencyKeysDeleted,
         "tidegrid.delivery_cleanup.quotes_deleted": report.quotesDeleted,
-        "tidegrid.delivery_cleanup.dock_lookups_deleted": report.dockLookupsDeleted,
-        "tidegrid.delivery_cleanup.dock_lookups_redacted": report.dockLookupsRedacted,
         duration_ms: Date.now() - started,
       });
     } catch (error) {
@@ -538,6 +542,24 @@ export async function runScheduled(
       });
     } catch (error) {
       retentionLog.error("retention_failed", {
+        ...errorAttributes(error),
+        duration_ms: Date.now() - started,
+      });
+      throw error;
+    }
+
+    // 8. Dock QR lookups (0050): removed or redacted after 30 days.
+    const dockLog = createLogger({ ...base, "event.name": "dock_lookup_cleanup" }, options.log);
+    started = Date.now();
+    try {
+      const report = await runDockLookupCleanup(handle.db);
+      dockLog.info("dock_lookup_cleanup", {
+        "tidegrid.dock_lookup_cleanup.deleted_count": report.deleted,
+        "tidegrid.dock_lookup_cleanup.redacted_count": report.redacted,
+        duration_ms: Date.now() - started,
+      });
+    } catch (error) {
+      dockLog.error("dock_lookup_cleanup_failed", {
         ...errorAttributes(error),
         duration_ms: Date.now() - started,
       });

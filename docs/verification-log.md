@@ -4,7 +4,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-14
 
-### An imported credit matches what its file row said (W3-G2.13 part C follow-up), built November 14, 2026
+### An imported credit matches what its commit recorded (W3-G2.13 part C follow-up), built November 14, 2026
 
 Goal branch `claude/project-thread-mf1bwl`, migration `0051_import_credit_binding.sql`. Synthetic data only; no provider call, no deploy.
 
@@ -15,7 +15,8 @@ Goal branch `claude/project-thread-mf1bwl`, migration `0051_import_credit_bindin
 
 Goal branch `claude/project-thread-mf1bwl`, migration `0050_waiver_dock_retention.sql`. Synthetic data only; no provider call, no deploy.
 
-- **Built.** The cron's cleanup deletes dock lookups more than 30 days old that started no signing, and redacts the network address on those that did. No other change to a lookup is possible for any role.
+- **Built.** A new cron step deletes dock lookups more than 30 days old that started no signing, and redacts the network address on those that did, logging both counts. The runtime can make no other change to a lookup.
+- **Review.** Independent review (second model) of this and the next two entries: the new log counts were dropped by the logger's allowlist (added), the redaction also touched rows about to be deleted and rescanned kept rows each run (now only rows a signing names, with a partial index), a failing dock cleanup would have lost the delivery cleanup's log line (now its own step), and the register overstated what the credit binding proves (reworded).
 - **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `dock-lookup.integration.test.ts` in `domain-waivers` (under 30 days nothing changes; the runtime and the owner cannot update or delete outside the cleanup; a month on, the miss and the unused match are gone and the signed-from match stays with its address redacted; a second run changes nothing); the full integration suite; `pnpm check`.
 - **Still open.** Coordinator defaults D1 to D4 await the owner.
 
