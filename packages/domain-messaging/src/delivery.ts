@@ -270,6 +270,9 @@ type Claimed =
  * - its booking, purpose, participant, and subject saw a link revoked after
  *   the message was written, as `recipient_changed`, `completed`, `withdrawn`,
  *   or `booking_canceled`: what it asks for is over, or goes elsewhere now.
+ *   "Written" is the row's own insert time (`written_at`, 0052), not its
+ *   transaction's start: a command that waited behind a correction wrote
+ *   its email after the correction, to the new address.
  *   `staff` and `superseded` revocations of the scope do not count: a newer
  *   email, or an operator closing old links, leaves a later message standing.
  */
@@ -293,7 +296,7 @@ async function staleness(
                and l.subject_ref is not distinct from m.subject_ref
                and l.revoked_reason in ('recipient_changed', 'completed', 'withdrawn',
                                         'booking_canceled')
-               and l.revoked_at > m.created_at
+               and l.revoked_at > coalesce(m.written_at, m.created_at)
              order by l.revoked_at, l.id limit 1) as scope
       from email_messages m
      where m.tenant_id = ${tenantId} and m.id = ${messageId}`.execute(trx);

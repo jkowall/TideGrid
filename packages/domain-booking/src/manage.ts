@@ -260,6 +260,17 @@ export async function renewManageLink(
   } catch {
     return { kind: "not_found" };
   }
+  // The booking first, then the link's checks: a correction that commits
+  // while this waits has ended the old address's links, and its own lock
+  // (the checkout, then the booking) is released only once it has.
+  const { rows: named } = await sql<{ booking_id: string }>`
+    select booking_id from guest_access_links
+     where tenant_id = ${ctx.tenantId} and token_hash = ${tokenHash}
+       and purpose = 'booking_manage'`.execute(trx);
+  const named0 = named[0]?.booking_id;
+  if (!named0) return { kind: "not_found" };
+  await sql`select id from bookings where tenant_id = ${ctx.tenantId} and id = ${named0}
+              for no key update`.execute(trx);
   const { rows } = await sql<{ booking_id: string }>`
     select booking_id from guest_access_links
      where tenant_id = ${ctx.tenantId} and token_hash = ${tokenHash}

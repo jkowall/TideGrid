@@ -946,6 +946,8 @@ export interface EmailMessagesTable {
   sent_at: Stamp;
   failed_at: Stamp;
   canceled_at: Stamp;
+  /** The row's own insert time (0052); null on rows written before it. */
+  written_at: Stamp;
   updated_at: Stamped;
 }
 

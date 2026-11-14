@@ -29,6 +29,7 @@ import {
   openManageSessionFromCheckout,
   previewCancellation,
   renewManageLink,
+  requestManageLink,
 } from "./index.ts";
 import { manageSession } from "./manage.ts";
 import {
@@ -566,6 +567,81 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
       renewManageLink(trx, c, { token: oldLink, requestKey: randomUUID() }),
     );
     expect(renewed).toEqual({ kind: "not_found" });
+  });
+
+  it("delivers email a command wrote after waiting behind a correction, to the new address (0052)", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Slow Asker", email: "slow.old@example.test" },
+    });
+    // The confirmation's link exists, so the correction revokes one.
+    await deliver(A);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const begun = new Promise<void>((r) => {
+      started = r;
+    });
+    // A link request whose transaction starts before the correction and
+    // writes after it commits.
+    const asker = guestContext(A.id);
+    const requestKey = `slow-${randomUUID()}`;
+    const pending = inTenantTransaction(runtime.db, asker, async (trx) => {
+      await sql`select now()`.execute(trx);
+      started();
+      await gate;
+      return requestManageLink(trx, asker, { bookingId: booked.bookingId, requestKey });
+    });
+    await begun;
+    const done = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Slow Asker",
+      email: "slow.new@example.test",
+    });
+    expect(done.kind).toBe("changed");
+    release();
+    expect((await pending).kind).toBe("enqueued");
+    await deliver(A);
+    const rows = await messages(booked.bookingId);
+    const asked = rows.find((m) => m.dedupe_key.includes(requestKey));
+    expect(asked).toMatchObject({ to_email: "slow.new@example.test", state: "sent" });
+  });
+
+  it("renews nothing from an old link whose renewal waited behind the correction", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Racing Inbox", email: "race.old@example.test" },
+    });
+    await deliver(A);
+    const [confirmation] = await mailTo(A, "race.old@example.test");
+    const oldLink = manageToken(confirmation?.html) as string;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let held!: () => void;
+    const holding = new Promise<void>((r) => {
+      held = r;
+    });
+    const staff = staffContext(A.id);
+    const desk = inTenantTransaction(runtime.db, staff, async (trx) => {
+      const result = await changeBookerContact(trx, staff, {
+        bookingId: booked.bookingId,
+        name: "Racing Inbox",
+        email: "race.new@example.test",
+      });
+      held();
+      await gate;
+      return result;
+    });
+    await holding;
+    const renewal = as(guestContext(A.id), (trx, c) =>
+      renewManageLink(trx, c, { token: oldLink, requestKey: randomUUID() }),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    expect((await desk).kind).toBe("changed");
+    expect(await renewal).toEqual({ kind: "not_found" });
   });
 
   it("refuses a guest correction whose session staff ended while it waited", async () => {
