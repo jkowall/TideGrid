@@ -638,7 +638,15 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     const renewal = as(guestContext(A.id), (trx, c) =>
       renewManageLink(trx, c, { token: oldLink, requestKey: randomUUID() }),
     );
-    await new Promise((r) => setTimeout(r, 100));
+    // Release the correction only once the renewal waits on the booking's
+    // lock, so the test cannot pass by the renewal simply arriving late.
+    for (let tries = 0; ; tries += 1) {
+      const [row] = await admin<{ n: number }[]>`
+        select count(distinct pid)::int as n from pg_locks where not granted`;
+      if ((row?.n ?? 0) >= 1) break;
+      if (tries > 400) throw new Error("the renewal never waited on the booking's lock");
+      await new Promise((r) => setTimeout(r, 25));
+    }
     release();
     expect((await desk).kind).toBe("changed");
     expect(await renewal).toEqual({ kind: "not_found" });

@@ -10,6 +10,8 @@ Goal branch `claude/project-thread-mf1bwl`, migration `0052_email_written_at.sql
 
 - **Built.** Delivery decides whether a link email is stale by when its row was written (`written_at`), not when its transaction began, so a command that waited behind a correction of the booker's email delivers what it wrote to the new address. Renewing from an old management link locks the booking before checking the link, so a renewal that waited behind a correction renews nothing.
 - **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `booker-contact.integration.test.ts` in `domain-booking`, two new race cases, each shown to fail without its fix (the link request was canceled as stale; the renewal was enqueued) and to pass with it; the full integration suite; `pnpm check`.
+- **Review.** Independent review (second model) found no defect; it reverted each fix and saw its test fail. On its advice the renewal race test now waits until the renewal is blocked on the booking's lock instead of sleeping, an outdated comment in the correction command is reworded, and the database README describes `written_at`. It also noted an older, separate gap: a cancellation's link revocation is stamped with its transaction's start, so an email written by a command that committed just before the cancellation took the booking's lock might still be delivered with a link that no longer works (reasoned from the code, not reproduced; the link itself is refused).
+- **Still open.** The older gap above, for a later change: stamp link revocations with the clock time, or drop the time bound when a cancellation withdraws pending emails.
 
 ### An imported credit matches what its commit recorded (W3-G2.13 part C follow-up), built November 14, 2026
 
