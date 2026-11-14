@@ -6,7 +6,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ### Email freshness in write order, and renewal behind a correction (W3-G2.11-rest follow-ups), built November 14, 2026
 
-Goal branch `claude/project-thread-mf1bwl`, migration `0052_email_written_at.sql`, on main `5d2bff3`. Synthetic data only; no provider call, no deploy.
+Goal branch `claude/project-thread-mf1bwl`, migration `0052_email_written_at.sql`, on main `42a1384`. Synthetic data only; no provider call, no deploy.
 
 - **Built.** Delivery decides whether a link email is stale by when its row was written (`written_at`), not when its transaction began, so a command that waited behind a correction of the booker's email delivers what it wrote to the new address. Renewing from an old management link locks the booking before checking the link, so a renewal that waited behind a correction renews nothing.
 - **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `booker-contact.integration.test.ts` in `domain-booking`, two new race cases, each shown to fail without its fix (the link request was canceled as stale; the renewal was enqueued) and to pass with it; the full integration suite; `pnpm check`.
