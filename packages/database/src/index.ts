@@ -43,6 +43,18 @@ export {
   runFairSweep,
 } from "./fair-sweep.ts";
 export {
+  blindIndex,
+  FieldDecryptError,
+  type FieldKeyring,
+  FieldKeyringError,
+  type FieldPlace,
+  newFieldKeyringSecret,
+  openField,
+  parseFieldKeyring,
+  sealedKeyId,
+  sealField,
+} from "./field-crypto.ts";
+export {
   type ClaimResult,
   canonicalJson,
   claimIdempotencyKey,

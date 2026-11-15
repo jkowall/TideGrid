@@ -224,7 +224,7 @@ export async function resendWaiverForBooker(
   if (!(await lockBookingForWaivers(trx, ctx.tenantId, input.bookingId))) {
     return refuse("not_found");
   }
-  const booking = await listBookingWaivers(trx, ctx.tenantId, input.bookingId);
+  const booking = await listBookingWaivers(trx, ctx.tenantId, input.bookingId, deps.fields);
   const person = booking?.participants.find((p) => p.position === input.position);
   if (!booking || !person) return refuse("not_found");
   // The place is what the page sent; the name says it is still the person shown.

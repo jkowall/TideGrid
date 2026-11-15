@@ -137,6 +137,8 @@ export {
   expectedSigner,
   getSigningView,
   loadEvidenceDocument,
+  openEvidenceFields,
+  type SealedEvidenceFields,
   type SignedSummary,
   type SignField,
   type SignInput,
@@ -146,6 +148,7 @@ export {
   signWaiver,
   WaiverDocumentMismatchError,
   WaiverDocumentMissingError,
+  WaiverEvidenceSealedError,
 } from "./signing.ts";
 export {
   type BookingWaivers,

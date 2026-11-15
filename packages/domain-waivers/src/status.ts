@@ -8,6 +8,8 @@
  * participants and its messages are read through their modules' table
  * contracts, in one query per call; nothing here writes them.
  */
+
+import type { FieldKeyring } from "@tidegrid/database";
 import {
   type GuardianRelationship,
   isUuid,
@@ -29,6 +31,7 @@ import {
   REMINDER_SLOTS,
 } from "./reminders.ts";
 import { maskEmail } from "./render.ts";
+import { openEvidenceFields } from "./signing.ts";
 import { findApplicableVersion } from "./templates.ts";
 
 /** How a participant's waiver stands, as the console shows it: always an icon and a label. */
@@ -162,6 +165,8 @@ interface Row {
   evidence_id: string | null;
   signed_at: Date | null;
   signer_name: string | null;
+  /** A sealed row's personal fields (0054); signer_name is read from it. */
+  personal_sealed: string | null;
   guardian_relationship: GuardianRelationship | null;
   access_method: WaiverAccessMethod | null;
   generation: number | null;
@@ -200,6 +205,7 @@ async function rows(
   trx: TenantTransaction,
   tenantId: string,
   filter: { bookingId: string } | { tripId: string },
+  fields: FieldKeyring | undefined,
 ): Promise<Row[]> {
   const where =
     "bookingId" in filter
@@ -210,8 +216,8 @@ async function rows(
            o.product_id, p.id as participant_id, p.position, p.full_name, p.is_minor,
            r.id as request_id, r.state, r.revoked_reason, r.required_signer,
            t.name as template_name, r.template_version, r.created_at as assigned_at,
-           e.id as evidence_id, e.signed_at, e.signer_name, e.guardian_relationship,
-           e.access_method,
+           e.id as evidence_id, e.signed_at, e.signer_name, e.personal_sealed,
+           e.guardian_relationship, e.access_method,
            d.generation, d.kind, d.recipient_email, d.created_at as queued_at, d.send_after,
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
@@ -274,6 +280,17 @@ async function rows(
       left join import_waiver_statuses lw on lw.tenant_id = b.tenant_id and lw.participant_id = p.id
      where b.tenant_id = ${tenantId} and ${where}
      order by b.confirmed_at, b.id, p.position`.execute(trx);
+  for (const row of found) {
+    if (row.personal_sealed && row.evidence_id) {
+      const opened = await openEvidenceFields(
+        fields,
+        tenantId,
+        row.evidence_id,
+        row.personal_sealed,
+      );
+      row.signer_name = opened.signerName;
+    }
+  }
   return found;
 }
 
@@ -452,9 +469,10 @@ export async function listBookingWaivers(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
+  fields?: FieldKeyring,
 ): Promise<BookingWaivers | null> {
   if (!isUuid(bookingId)) return null;
-  const [booking] = await assemble(trx, tenantId, await rows(trx, tenantId, { bookingId }));
+  const [booking] = await assemble(trx, tenantId, await rows(trx, tenantId, { bookingId }, fields));
   return booking ?? null;
 }
 
@@ -478,6 +496,7 @@ export async function listTripWaivers(
   trx: TenantTransaction,
   tenantId: string,
   tripId: string,
+  fields?: FieldKeyring,
 ): Promise<TripWaivers | null> {
   if (!isUuid(tripId)) return null;
   const trip = await trx
@@ -487,7 +506,7 @@ export async function listTripWaivers(
     .where("id", "=", tripId)
     .executeTakeFirst();
   if (!trip) return null;
-  const bookings = await assemble(trx, tenantId, await rows(trx, tenantId, { tripId }));
+  const bookings = await assemble(trx, tenantId, await rows(trx, tenantId, { tripId }, fields));
   const all = bookings.flatMap((b) => b.participants);
   return {
     tripId,
@@ -541,8 +560,9 @@ export async function listGuestBookingWaivers(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
+  fields?: FieldKeyring,
 ): Promise<GuestBookingWaivers | null> {
-  const booking = await listBookingWaivers(trx, tenantId, bookingId);
+  const booking = await listBookingWaivers(trx, tenantId, bookingId, fields);
   if (!booking) return null;
   return {
     applies:

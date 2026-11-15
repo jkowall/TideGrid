@@ -7,7 +7,7 @@
  * route is tried from both tenants, with each role.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { createDb, inTenantTransaction } from "@tidegrid/database";
+import { createDb, inTenantTransaction, newFieldKeyringSecret } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import { guestContext, TEST_FAKE_SECRET } from "@tidegrid/domain-booking/testing";
@@ -1044,6 +1044,60 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
                           where e.request_id = r.id) as evidence
           from public.waiver_requests r where r.id = ${q.annRequest}`;
       expect(state).toEqual([{ state: "pending", evidence: 0 }]);
+    } finally {
+      overrides = {};
+    }
+  });
+
+  it("seals a signature's personal fields with the field keyring, reads them back for staff and the export, and refuses to sign in staging without keys (W3-OPS-4)", async () => {
+    const C = await tenant("ops4b");
+    tripIndex = 0;
+    const keys = newFieldKeyringSecret();
+    try {
+      overrides = { FIELD_ENCRYPTION_KEYS: keys };
+      const p = await party(C);
+      const session = await openSession(C, p.annToken);
+      const signed = await request("POST", "/v1/public/waiver-sessions/current/signature", {
+        origin: guestOf(C),
+        bearer: session.sessionSecret,
+        body: signature(session),
+      });
+      expect(signed.status).toBe(201);
+      const [row] = await admin<
+        { id: string; signer_name: string | null; personal_sealed: string }[]
+      >`
+        select id, signer_name, personal_sealed from public.waiver_evidence
+         where request_id = ${p.annRequest}`;
+      expect(row?.signer_name).toBeNull();
+      expect(row?.personal_sealed).toMatch(/^tgf1:k1:/);
+      const staff = await request(
+        "GET",
+        `${staffBase(C.id)}/bookings/${p.booked.bookingId}/waivers`,
+        { as: C.owner },
+      );
+      expect(JSON.stringify(staff.json)).toContain("Ann Adult");
+      const exported = await request("GET", `${staffBase(C.id)}/export`, { as: C.owner });
+      expect(exported.status).toBe(200);
+      const evidence = (
+        exported.json.sections as Record<string, { rows: Record<string, unknown>[] }>
+      ).waiver_evidence?.rows.find((r) => r.id === row?.id);
+      expect(evidence).toMatchObject({ signer_name: "Ann Adult", participant_name: "Ann Adult" });
+      expect(evidence).not.toHaveProperty("personal_sealed");
+      expect(evidence).not.toHaveProperty("source_ip");
+
+      // Staging with a bucket but no keys: nothing is signed.
+      overrides = { ENVIRONMENT: "staging", WAIVER_EVIDENCE: new MemoryR2() };
+      const q = await party(C);
+      const second = await openSession(C, q.annToken);
+      const refused = await request("POST", "/v1/public/waiver-sessions/current/signature", {
+        origin: guestOf(C),
+        bearer: second.sessionSecret,
+        body: signature(second),
+      });
+      expect([refused.status, refused.json.error?.code]).toEqual([
+        503,
+        "waiver_storage_unavailable",
+      ]);
     } finally {
       overrides = {};
     }

@@ -4,7 +4,7 @@
  * API wires it to the participant model (participants.ts). Email and its
  * links go through the messaging module's declared calls.
  */
-import type { TenantTransaction } from "@tidegrid/database";
+import type { FieldKeyring, TenantTransaction } from "@tidegrid/database";
 
 /** A participant as waivers see one. */
 export interface WaiverParticipant {
@@ -51,4 +51,10 @@ export interface WaiverDeps {
   participants: ParticipantDirectory;
   /** Absent: the PDF is kept in the evidence row (demo, local, preview). */
   documents?: EvidenceDocumentStore;
+  /**
+   * The field keyring (W3-OPS-4, 0054). Present: new evidence seals its
+   * personal fields. Absent: they are written plain (demo, local, preview),
+   * and a sealed row cannot be read.
+   */
+  fields?: FieldKeyring;
 }
