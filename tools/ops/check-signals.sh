@@ -18,7 +18,13 @@ trap 'rm -f "$err"' EXIT
 
 if ! out=$(PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=30000" \
   psql -X -A -t -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$here/signals.sql" 2> "$err"); then
-  grep -E 'ERROR|FATAL|error:' "$err" | head -3 | cut -c1-200 >&2 || true
+  # A fixed class only: psql's own text can carry an address or a role name,
+  # and this log is public.
+  if grep -qiE 'password|authentication' "$err"; then why=auth
+  elif grep -qiE 'timeout|canceling statement' "$err"; then why=timeout
+  elif grep -qiE 'connection|could not connect|could not translate|server closed' "$err"; then why=connect
+  else why=query; fi
+  echo "signals: database error class $why" >&2
   echo "signals: ALERT database_unreadable"
   exit 2
 fi

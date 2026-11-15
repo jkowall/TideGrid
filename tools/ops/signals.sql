@@ -49,5 +49,7 @@ select format('dead_letters_open|%s|0', count(*))
 select format('email_account_fault|%s|0', count(*))
   from public.email_messages
  where last_error_code in ('provider_quota_exceeded', 'provider_account_suspended')
-   and last_attempt_at > now() - interval '1 hour'
+   -- updated_at, not last_attempt_at: an account fault gives the first
+   -- attempt back, which clears last_attempt_at (migration 0019).
+   and updated_at > now() - interval '1 hour'
    and state in ('queued', 'sending');

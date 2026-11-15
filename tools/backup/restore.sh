@@ -68,12 +68,23 @@ age --decrypt --identity "$identity" --output "$work/backup.dump" "$backup"
 [ "$(manifest_value dumpSha256)" = "$(tg_sha256 "$work/backup.dump")" ] || tg_die "the decrypted dump's sha256 does not match its manifest"
 decrypted=$(date -u +%s)
 
-# Roles first.
+# Roles first. A role that bypassed row-level security on the source gets
+# that right again (it needs a superuser to grant): SECURITY DEFINER functions
+# it owns, such as the hostname and sign-in lookups, read tables the runtime
+# role cannot. With --no-owner the restoring role owns those functions, so it
+# must bypass row-level security itself.
+bypass_roles=" $(manifest_value bypassRoles | tr '\n' ' ') "
+if [ "$no_owner" = 1 ]; then
+  me_bypass=$(tg_psql "$TARGET_DATABASE_URL" -c "select rolsuper or rolbypassrls from pg_roles where rolname = current_user")
+  [ "$me_bypass" = t ] || tg_die "with --no-owner the restoring role owns the SECURITY DEFINER functions and must bypass row-level security"
+fi
 while read -r role; do
   [ -n "$role" ] || continue
   [[ "$role" =~ ^[a-z_][a-z0-9_]*$ ]] || tg_die "unexpected role name in the manifest"
-  psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -v role="$role" <<'SQL'
-select format('create role %I nologin', :'role')
+  rights=nologin
+  [ "$no_owner" = 0 ] && [[ "$bypass_roles" == *" $role "* ]] && rights="nologin bypassrls"
+  psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -v role="$role" -v rights="$rights" <<'SQL'
+select format('create role %I %s', :'role', :'rights')
  where not exists (select 1 from pg_roles where rolname = :'role') \gexec
 SQL
 done < <(manifest_value roles)

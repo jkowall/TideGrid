@@ -12,11 +12,14 @@ Checks:
                digest (with --expect-exact), or at least present (without it,
                for a point-in-time branch whose instant differs from the
                manifest's)
-  rls          every table that forced row-level security still does
+  rls          every table that had row-level security on and forced still does
+  definers     every SECURITY DEFINER function belongs to a role that bypasses
+               row-level security (they read tables the runtime role cannot)
   policies     every row-level security policy is the same, word for word
   grants       the runtime role holds exactly the same table privileges
   no-tenant    the runtime role tidegrid_app, with no tenant set, sees no row
-               in any table the manifest says forced row-level security
+               in any table the manifest says forced row-level security and
+               it can read (whole table or any column)
   two-tenant   with one tenant set, the runtime role sees only that tenant's
                rows (the tenants table by id, the rest by tenant_id), and
                sees at least one of them
@@ -60,9 +63,20 @@ select format('no-tenant|%s', coalesce(sum((xpath('/row/n/text()', query_to_xml(
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
  where n.nspname in ('public', 'app') and c.relkind in ('r', 'p')
    and format('%s.%s', n.nspname, c.relname) = any(:'forced'::text[])
-   and has_table_privilege('tidegrid_app', c.oid, 'SELECT');
+   and has_any_column_privilege('tidegrid_app', c.oid, 'SELECT');
 reset role;
 rollback;
+"""
+
+# SECURITY DEFINER functions whose owner cannot bypass row-level security.
+# Migration 0002's hostname and sign-in lookups need a bypassing owner.
+DEFINERS_SQL = """
+select format('definers|%s|%s', count(*),
+         count(*) filter (where not (r.rolsuper or r.rolbypassrls)))
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  join pg_roles r on r.oid = p.proowner
+ where n.nspname in ('public', 'app') and p.prosecdef;
 """
 
 TENANTS_SQL = "select id from public.tenants order by created_at, id limit 2;"
@@ -84,7 +98,7 @@ with t as materialized (
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
    where n.nspname in ('public', 'app') and c.relkind in ('r', 'p')
    and format('%s.%s', n.nspname, c.relname) = any(:'forced'::text[])
-     and has_table_privilege('tidegrid_app', c.oid, 'SELECT')
+     and has_any_column_privilege('tidegrid_app', c.oid, 'SELECT')
      and exists (select 1 from pg_attribute a
                   where a.attrelid = c.oid and not a.attisdropped
                     and (a.attname = 'tenant_id' or (c.oid = 'public.tenants'::regclass and a.attname = 'id')))
@@ -175,6 +189,13 @@ def main():
     lost = sorted(n for n, t in expected.items() if t["forceRls"] and not facts.get(n, {}).get("forceRls"))
     forced = sum(1 for t in facts.values() if t["forceRls"])
     check("rls", not lost, f"{forced} tables force row-level security; lost on {lost or 'none'}")
+
+    definers = psql(url, DEFINERS_SQL)[0].split("|")
+    check(
+        "definers",
+        int(definers[1]) > 0 and definers[2] == "0",
+        f"{definers[1]} SECURITY DEFINER functions, {definers[2]} owned by a role that cannot bypass row-level security",
+    )
 
     security = {}
     for line in psql(url, SECURITY_FACTS_SQL):

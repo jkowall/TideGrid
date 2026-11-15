@@ -112,6 +112,9 @@ jobs:
             "create policy drill_leak on public.boats for select using (true)"
             "create policy drill_leak_w on public.boats for insert with check (true)"
             "revoke select on public.boats from tidegrid_app"
+            "alter table public.boats disable row level security"
+            "create policy drill_leak_cols on public.staff_users for select using (true)"
+            "create role drill_plain nologin; do \$\$ declare f regprocedure; begin select p.oid::regprocedure into f from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'app') and p.prosecdef limit 1; execute format('alter function %s owner to drill_plain', f); end \$\$"
           )
           for i in "${!tampers[@]}"; do
             psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database tamper_$i template restored"

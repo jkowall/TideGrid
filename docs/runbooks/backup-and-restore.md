@@ -72,7 +72,7 @@ This is the drill that proves the real key opens a real backup. On your Mac, wit
 
 ### A bad change (point-in-time)
 
-1. Stop new writes so nothing lands on top. TideGrid has no maintenance switch yet (a follow-up), so for now, in the Cloudflare dashboard, remove the API Worker's custom domain (every request then stops) and its cron trigger. Put both back after the cutover.
+1. Stop new writes so nothing lands on top. TideGrid has no maintenance switch yet (a follow-up), so for now, in the Cloudflare dashboard: remove the API Worker's custom domain and its cron trigger; remove the staff console's custom domain too, because the console reaches the API through a direct Worker link, not the domain; and pause any queue consumer on the API Worker. Then wait five minutes so work already running finishes. Put everything back after the cutover.
 2. In the Neon console, Branches, main, Restore, choose a moment just before the bad change, restore to a **new branch** (never in place first).
 3. Check the new branch: `TARGET_DATABASE_URL='<new branch URL>' python3 -I tools/backup/verify.py --manifest <the latest backup's manifest>`. Then look at the rows the bad change touched.
 4. Reconcile against Stripe and the email provider for the window between the restore moment and now: payments taken, refunds made, and emails sent in that window exist outside the database. List them before cutting over.

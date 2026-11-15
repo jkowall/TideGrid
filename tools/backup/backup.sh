@@ -101,6 +101,9 @@ server_version=$(tg_psql "$DATABASE_URL" -c "show server_version_num")
 tg_psql "$DATABASE_URL" -c "select rolname from pg_roles where rolname !~ '^pg_' order by 1" > "$work/roles.txt"
 grep -Eqx 'tidegrid_app' "$work/roles.txt" || tg_die "the runtime role tidegrid_app is missing"
 grep -Evqx '[a-z_][a-z0-9_]*' "$work/roles.txt" && tg_die "a role name has characters the manifest does not allow"
+# Roles that bypass row-level security. A restore recreates them with that
+# right, because SECURITY DEFINER functions they own depend on it.
+tg_psql "$DATABASE_URL" -c "select rolname from pg_roles where rolname !~ '^pg_' and (rolsuper or rolbypassrls) order by 1" > "$work/bypass.txt"
 dump_started=$(date -u +%s)
 pg_dump --dbname="$DATABASE_URL" --snapshot="$snapshot" --format=custom --compress=6 \
   --file="$work/$base.dump"
@@ -145,6 +148,7 @@ table_count=$(wc -l < "$work/tables.txt" | tr -d ' ')
   printf '  "lastMigration": "%s",\n' "$(tail -1 "$work/migrations.txt")"
   awk -F'|' '{printf "  \"%s\": {\"count\": %s, \"digest\": \"%s\"},\n", $1, $2, $3}' "$work/security.txt"
   printf '  "roles": [%s],\n' "$(awk 'NR>1{printf ", "} {printf "\"%s\"", $0}' "$work/roles.txt")"
+  printf '  "bypassRoles": [%s],\n' "$(awk 'NR>1{printf ", "} {printf "\"%s\"", $0}' "$work/bypass.txt")"
   printf '  "migrations": [\n'
   awk 'NR>1{printf ",\n"} {printf "    \"%s\"", $0} END{printf "\n"}' "$work/migrations.txt"
   printf '  ],\n'
