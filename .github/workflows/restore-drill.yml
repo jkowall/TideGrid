@@ -195,6 +195,11 @@ jobs:
           echo "branch=$id" >> "$GITHUB_OUTPUT"
           url=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["connectionString"])' "$RUNNER_TEMP/source.json")
           tg_mask_url "$url"
+          # The first query waits for the branch's compute to start.
+          for i in $(seq 1 30); do
+            tg_psql "$url" -c "select 1" >/dev/null 2>&1 && break
+            sleep 2
+          done
           t1=$(date -u +%s)
           age-keygen -o "$RUNNER_TEMP/drill.key" 2>/dev/null
           DATABASE_URL="$url" BACKUP_AGE_RECIPIENT="$(age-keygen -y "$RUNNER_TEMP/drill.key")" \

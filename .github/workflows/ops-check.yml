@@ -139,7 +139,9 @@ jobs:
               gh issue create --label ops-alert --title "Ops check failed:$failed" --body "$body"
             else
               # One comment per change in what fails, not one an hour.
-              last=$(gh issue view "$open" --json body,comments --jq '([.body] + [.comments[].body]) | last | split("\n") | .[0]')
+              # Only this workflow's own posts start with "Failed:"; a person's
+              # reply in between must not count as a change.
+              last=$(gh issue view "$open" --json body,comments --jq '([.body] + [.comments[].body]) | map(select(startswith("Failed:"))) | last // "" | split("\n") | .[0]')
               if [ "$last" != "$summary" ]; then
                 gh issue comment "$open" --body "$body"
                 gh issue edit "$open" --title "Ops check failed:$failed"
