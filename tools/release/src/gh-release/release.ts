@@ -387,6 +387,30 @@ export async function workerHealthy(
     );
     say(deps, `  ${host}: ${ok ? "200" : "not serving"}`);
     if (ok !== true) return false;
+    // The page itself is a static asset that never runs the Worker. A
+    // tenant's manifest runs it and asks the API through GuestGateway, so a
+    // broken Worker or binding shows here.
+    if (!host.endsWith(".book.tidegrid.us")) continue;
+    const manifest = await poll(
+      deps,
+      async () => {
+        try {
+          const res = await deps.fetch(`https://${host}/manifest.webmanifest`, {
+            redirect: "manual",
+            headers,
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (res.status !== 200) return null;
+          const body = (await res.json()) as { name?: unknown };
+          return typeof body.name === "string" ? true : null;
+        } catch {
+          return null;
+        }
+      },
+      { intervalMs: 5_000, timeoutMs },
+    );
+    say(deps, `  ${host}/manifest.webmanifest: ${manifest ? "200" : "failing"}`);
+    if (manifest !== true) return false;
   }
   return true;
 }
@@ -492,8 +516,12 @@ async function deploy(deps: GhDeps, worker: GhWorker, specs: string[], message: 
   await wrangler(deps, worker, ["versions", "deploy", ...specs, "--message", message, "--yes"]);
 }
 
-/** Put `shares` back exactly and confirm. Returns whether the deployment now matches. */
-async function restore(deps: GhDeps, worker: GhWorker, shares: VersionShare[], msg: string) {
+/**
+ * Move traffic to exactly `shares` and say whether that is what is live now.
+ * Used for every move, forward and back: wrangler can move traffic and still
+ * exit non-zero, so the deployment decides, not the exit code.
+ */
+async function moveTo(deps: GhDeps, worker: GhWorker, shares: VersionShare[], msg: string) {
   try {
     await deploy(
       deps,
@@ -504,12 +532,12 @@ async function restore(deps: GhDeps, worker: GhWorker, shares: VersionShare[], m
   } catch (e) {
     // wrangler can move traffic and still exit non-zero (its settings sync
     // runs after the deployment, cli.js:360766), so the deployment decides.
-    say(deps, `rollback command error: ${(e as Error).message}; reading what is live`);
+    say(deps, `traffic command error: ${(e as Error).message}; reading what is live`);
   }
   try {
     return sameShares(await currentDeployment(deps, worker), shares);
   } catch (e) {
-    say(deps, `could not read the deployment after the rollback: ${(e as Error).message}`);
+    say(deps, `could not read the deployment after the move: ${(e as Error).message}`);
     return false;
   }
 }
@@ -650,7 +678,7 @@ export async function releaseWorker(deps: GhDeps, o: ReleaseOptions): Promise<vo
 
   const fail = async (why: string): Promise<never> => {
     say(deps, `FAILED: ${why}. Putting ${oldId} back at 100%`);
-    const back = await restore(
+    const back = await moveTo(
       deps,
       worker,
       before,
@@ -677,10 +705,12 @@ export async function releaseWorker(deps: GhDeps, o: ReleaseOptions): Promise<vo
 
   // 4: traffic.
   if (o.traffic === "ten-percent-first") {
-    try {
-      await deploy(deps, worker, [`${newId}@10%`, `${oldId}@90%`], `10% ${o.sha.slice(0, 12)}`);
-    } catch (e) {
-      return fail(`the 10% step failed: ${(e as Error).message}`);
+    const ten = [
+      { id: newId, percentage: 10 },
+      { id: oldId, percentage: 90 },
+    ];
+    if (!(await moveTo(deps, worker, ten, `10% ${o.sha.slice(0, 12)}`))) {
+      return fail("the 10% step did not take");
     }
     if (!(await workerHealthy(deps, worker, o.buildId, { versionId: newId }))) {
       return fail("the new version failed its checks at 10%");
@@ -696,10 +726,10 @@ export async function releaseWorker(deps: GhDeps, o: ReleaseOptions): Promise<vo
       }
     }
   }
-  try {
-    await deploy(deps, worker, [`${newId}@100%`], `release ${o.sha.slice(0, 12)}`);
-  } catch (e) {
-    return fail(`moving to 100% failed: ${(e as Error).message}`);
+  if (
+    !(await moveTo(deps, worker, [{ id: newId, percentage: 100 }], `release ${o.sha.slice(0, 12)}`))
+  ) {
+    return fail("moving to 100% did not take");
   }
 
   // 5: the result.
@@ -762,7 +792,7 @@ export async function rollbackWorker(
   }
   if (sameShares(target, before)) throw new GhRefusal(`${name} already serves that`);
   say(deps, `== ${name}: back to ${target.map((s) => `${s.id}@${s.percentage}%`).join(", ")}`);
-  const ok = await restore(
+  const ok = await moveTo(
     deps,
     worker,
     target,

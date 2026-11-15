@@ -108,13 +108,38 @@ function realDeps(): GhDeps {
     exec: (cmd, args, { cwd, env }) =>
       new Promise((done, fail) => {
         // stdout is captured for the few JSON listings; stderr is the job log.
-        const child = spawn(cmd, [...args], { cwd, env, stdio: ["ignore", "pipe", "inherit"] });
+        // Each command has a deadline, so a hung wrangler call fails in time
+        // for the rollback to run well inside the job's own time limit. The
+        // child leads its own process group, and the whole group is killed.
+        const child = spawn(cmd, [...args], {
+          cwd,
+          env,
+          stdio: ["ignore", "pipe", "inherit"],
+          detached: true,
+        });
+        const limitMs = cmd === "pnpm" && args[1] === "wrangler" ? 5 * 60_000 : 10 * 60_000;
+        const timer = setTimeout(() => {
+          console.log(
+            `ERROR: ${cmd} ${args.slice(0, 3).join(" ")} ran past ${limitMs / 60_000} minutes; stopped`,
+          );
+          try {
+            if (child.pid) process.kill(-child.pid, "SIGKILL");
+          } catch {
+            child.kill("SIGKILL");
+          }
+        }, limitMs);
         let stdout = "";
         child.stdout.on("data", (d: Buffer) => {
           stdout += d.toString("utf8");
         });
-        child.on("error", fail);
-        child.on("close", (code) => done({ code: code ?? 1, stdout }));
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          fail(e);
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          done({ code: code ?? 124, stdout });
+        });
       }),
     fetch: (input, init) => globalThis.fetch(input, init),
     env: process.env,

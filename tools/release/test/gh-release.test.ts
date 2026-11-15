@@ -56,6 +56,8 @@ interface World {
   failDeployOf?: string;
   /** Make `versions upload` fail (for example under --strict). */
   uploadFails?: boolean;
+  /** The new version serves its static pages but its Worker fails. */
+  newManifestBroken?: boolean;
   cfStatus: number;
   dbLatest: string;
   calls: string[];
@@ -247,6 +249,10 @@ function deps(w: World, worker: GhWorker, env: Env = releaseEnv): GhDeps {
             })
           : new Response("", { status: 500 });
       }
+      if (input.endsWith("/manifest.webmanifest")) {
+        const ok = healthy && !(w.newManifestBroken && id === NEW);
+        return ok ? json({ name: "Harbor" }) : new Response("", { status: 502 });
+      }
       return new Response("", { status: healthy ? 200 : 503 });
     },
   };
@@ -429,6 +435,30 @@ describe("gh-release release", () => {
     expect(w.calls[2]).toBe("node scripts/check-precache.mjs");
     expect(w.calls.find((c) => c.includes("upload"))).not.toContain("BUILD_ID");
     expect(w.fetched.some((f) => f.url === "https://demo.tidegrid.us/")).toBe(true);
+    expect(ledger(w)[0].outcome).toBe("released");
+  });
+
+  it("a guest version whose Worker fails never reaches 100%, even when its pages load", async () => {
+    const w = world({ newManifestBroken: true });
+    await expect(
+      releaseWorker(deps(w, "guest"), opts("guest", { traffic: "ten-percent-first" })),
+    ).rejects.toThrow(/at 10%.*rolled back/);
+    expect(current(w)).toEqual([{ id: OLD, percentage: 100 }]);
+    expect(
+      w.fetched.some((f) => f.url === "https://demo-harbor.book.tidegrid.us/manifest.webmanifest"),
+    ).toBe(true);
+  });
+
+  it("a traffic move that exits 1 but took is not rolled back", async () => {
+    const w = world();
+    const d = deps(w, "api");
+    const real = d.exec;
+    d.exec = async (cmd, args, o) => {
+      const r = await real(cmd, args, o);
+      return args.includes("deploy") ? { ...r, code: 1 } : r;
+    };
+    await releaseWorker(d, opts("api"));
+    expect(current(w)).toEqual([{ id: NEW, percentage: 100 }]);
     expect(ledger(w)[0].outcome).toBe("released");
   });
 
