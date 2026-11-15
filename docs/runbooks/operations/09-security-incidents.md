@@ -57,7 +57,7 @@ How to rotate each one:
 | `EMAIL_ALLOWED_RECIPIENTS` | API Worker secret | Not a credential; a leak reveals addresses only |
 | `EMAIL_EVENTS_ACCOUNT_ID` | API Worker secret | An identifier, not a credential |
 | `CF_SAAS_API_TOKEN` | API Worker secret | Roll the token in Cloudflare; put the new one |
-| Cloudflare API token for releases or Terraform | GitHub environment secrets; owner's private location | Roll it in Cloudflare; update GitHub |
+| Cloudflare API token for releases or OpenTofu | GitHub environment secrets; owner's private location | Roll it in Cloudflare; update GitHub |
 | R2 state bucket keys | GitHub `infra-staging` secrets | Roll in Cloudflare R2; update GitHub |
 | GitHub tokens | Owner's account | Revoke in GitHub settings |
 | Android upload key | Owner's Mac | Ask Google Play to reset the upload key ([guide 10](10-native-apps.md)) |

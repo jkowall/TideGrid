@@ -1,12 +1,12 @@
 # Staging: migrate, deploy, and gather evidence
 
-Staging is the rehearsal copy of TideGrid: the `staging` branch of the Neon project, the `tidegrid-api-staging` Worker on `api-staging.tidegrid.us`, and the `tidegrid-console-staging` Worker on `console-staging.tidegrid.us`. Terraform built its storage, queues, and alerts (docs/runbooks/terraform-apply.md). This runbook covers what runs on it. It holds synthetic data only.
+Staging is the rehearsal copy of TideGrid: the `staging` branch of the Neon project, the `tidegrid-api-staging` Worker on `api-staging.tidegrid.us`, and the `tidegrid-console-staging` Worker on `console-staging.tidegrid.us`. OpenTofu built its storage, queues, and alerts (docs/runbooks/terraform-apply.md). This runbook covers what runs on it. It holds synthetic data only.
 
 Everything here runs from GitHub, through the `staging` workflow (`.github/workflows/staging.yml`). Start it from main with a full SHA that is on main. Each run waits for the owner's approval on the `infra-staging` environment, then does one of three things.
 
 ## Owner setup before the first deploy
 
-The `CLOUDFLARE_API_TOKEN` on `infra-staging` was made for Terraform. Deploying Workers needs more. Edit that token in the Cloudflare dashboard (My Profile, API Tokens) and add:
+The `CLOUDFLARE_API_TOKEN` on `infra-staging` was made for OpenTofu. Deploying Workers needs more. Edit that token in the Cloudflare dashboard (My Profile, API Tokens) and add:
 
 - Account: Workers Scripts Edit, Hyperdrive Edit.
 - Zone `tidegrid.us`: Workers Routes Edit and DNS Edit (the staging hosts are Worker custom domains).

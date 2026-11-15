@@ -47,7 +47,7 @@ The sweep never waits on a lock. A checkout another request is holding is skippe
 
 The outbox holds events other parts of the system need, written in the same transaction as the change. When a queue is bound, the cron publishes due events to it and the consumer runs each handler once. Handler results are recorded per event, so a duplicate, a retry, or a replay never runs a handler twice. Delivery is at least once: an effect outside the database may repeat if the Worker dies before its commit. Details: [database README, delivery foundation](../../../packages/database/README.md#delivery-foundation-0023).
 
-**Today no deployed setup binds the outbox queue**, so this section applies once one is created (Terraform plans it). Until then, events wait in the outbox and nothing is lost.
+**Today no deployed setup binds the outbox queue**, so this section applies once one is created (OpenTofu plans it). Until then, events wait in the outbox and nothing is lost.
 
 ### An event keeps failing (dead letter)
 

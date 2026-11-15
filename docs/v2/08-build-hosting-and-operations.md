@@ -20,7 +20,7 @@ The current V2 design defines the tenant boundary, transactional authority, and 
 | Database connection | Cloudflare Hyperdrive to the direct Neon endpoint with Hyperdrive query caching disabled | Hyperdrive supplies pooling without stacking Neon's PgBouncer pool | Connection and race tests required |
 | Async delivery | PostgreSQL outbox plus Cloudflare Queues and a DLQ | PostgreSQL retains intent when queue delivery fails or repeats | Failure test required |
 | Object storage | Private R2 buckets | Stores waiver evidence, approved brand assets, generated documents, and independent logical backups | Security and restore test required |
-| Infrastructure as code | Terraform with reviewed Cloudflare modules and a pinned Neon API or provider wrapper | Reproducible environments reduce console drift | Plan-only before the gate |
+| Infrastructure as code | OpenTofu with reviewed Cloudflare modules and a pinned Neon API or provider wrapper | Reproducible environments reduce console drift | Plan-only before the gate |
 | CI/CD | GitHub Actions, Wrangler versions, Neon branches, and EAS workflows | One control plane can retain test, build, deployment, and submission evidence | Prototype workflows allowed |
 | Telemetry | Workers Logs and traces, Neon metrics, synthetic journeys, and OpenTelemetry export | Covers customer journeys and provider failures without adding application servers | Destination choice open |
 
@@ -128,11 +128,11 @@ Neither preview nor staging may send messages to a real customer, create live ch
 
 ## Infrastructure and configuration ownership
 
-Terraform owns Cloudflare zones and stable routes, queues and DLQs, R2 buckets, Hyperdrive configurations, service tokens, alert destinations, and custom-hostname plumbing. A pinned Neon provider or a small reviewed Neon API wrapper owns projects, branches, compute policy, roles, and restore-window settings. Terraform outputs the resource identifiers needed by each environment, but it does not deploy Worker scripts or attach their version bindings. TideGrid must not place secret values in Terraform state.
+OpenTofu owns Cloudflare zones and stable routes, queues and DLQs, R2 buckets, Hyperdrive configurations, service tokens, alert destinations, and custom-hostname plumbing. A pinned Neon provider or a small reviewed Neon API wrapper owns projects, branches, compute policy, roles, and restore-window settings. OpenTofu outputs the resource identifiers needed by each environment, but it does not deploy Worker scripts or attach their version bindings. TideGrid must not place secret values in OpenTofu state.
 
-Wrangler owns each Worker version's code, static assets, compatibility date and flags, limits, and binding declarations. Environment-specific Wrangler configuration references the Terraform-created resource identifiers. GitHub Actions verifies that every declared binding resolves before upload. Terraform and Wrangler must never manage the same Worker script, version, binding, route, or provider resource.
+Wrangler owns each Worker version's code, static assets, compatibility date and flags, limits, and binding declarations. Environment-specific Wrangler configuration references the OpenTofu-created resource identifiers. GitHub Actions verifies that every declared binding resolves before upload. OpenTofu and Wrangler must never manage the same Worker script, version, binding, route, or provider resource.
 
-Store encrypted Terraform state in a remote backend with locking and version history. GitHub Actions produces a plan for each infrastructure change. The sole TideGrid owner approves production apply. Console changes serve incident response only; the owner records the change and imports it into code after the incident.
+Store encrypted OpenTofu state in a remote backend with locking and version history. GitHub Actions produces a plan for each infrastructure change. The sole TideGrid owner approves production apply. Console changes serve incident response only; the owner records the change and imports it into code after the incident.
 
 Use these credential boundaries:
 
@@ -140,7 +140,7 @@ Use these credential boundaries:
 - GitHub environment secrets hold restricted deployment, migration, backup, and provisioning credentials.
 - EAS and each operator's store account hold native signing and submission credentials under least-privilege access.
 - A company password manager holds break-glass credentials, backup-key recovery material, and account-recovery codes. The owner enrolls two hardware security keys and stores them separately.
-- Source code, tenant manifests, logs, Terraform state, and client bundles contain no credential values.
+- Source code, tenant manifests, logs, OpenTofu state, and client bundles contain no credential values.
 
 Cloudflare Secrets Store remains in open beta as of September 2026. Do not make it the only custody system for a production root or recovery key until Cloudflare publishes production terms that TideGrid accepts.
 
@@ -341,7 +341,7 @@ Retain these artifacts for each production web or backend release:
 - SBOM, license report, security scan, and approved exceptions;
 - tenant-config schema version plus the hash of each enabled non-secret manifest;
 - migration list, schema compatibility statement, plan output, backfill status, and control totals;
-- Worker version IDs, web asset hashes, binding inventory, and Terraform plan/apply record;
+- Worker version IDs, web asset hashes, binding inventory, and OpenTofu plan/apply record;
 - automated test, concurrency, tenant-isolation, provider-sandbox, and synthetic results;
 - approver, traffic steps, monitoring evidence, incident links, and final outcome.
 

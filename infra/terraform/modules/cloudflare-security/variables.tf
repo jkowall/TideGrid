@@ -15,7 +15,7 @@ variable "name_prefix" {
 
 variable "manage_zone_rules" {
   description = <<-EOT
-    Whether Terraform owns this zone's custom firewall and rate limit rules.
+    Whether OpenTofu owns this zone's custom firewall and rate limit rules.
     Each zone has one ruleset per phase, so owning it replaces any rules made
     in the dashboard. Production (its own zone) sets true. Staging shares the
     preview's tidegrid.us zone and leaves it false, so a staging plan never
@@ -64,7 +64,7 @@ variable "turnstile_domains" {
 
 variable "create_turnstile_widget" {
   description = <<-EOT
-    The widget's secret key is returned by Cloudflare and kept in Terraform
+    The widget's secret key is returned by Cloudflare and kept in OpenTofu
     state, which the hosting plan forbids unless the owner allows secrets in
     state (D1). The environment passes allow_secrets_in_state. While false,
     the owner creates the widget in the dashboard and stores its secret as

@@ -1,6 +1,6 @@
 # Backup and restore runbook (W3-OPS-6)
 
-**Status.** Written on 2026-11-15. The tooling, the workflows, and the Terraform change are on main. Nothing is switched on: the daily backup needs the one-time setup below, and no live database has been backed up by it yet. The [hosting plan](../v2/08-build-hosting-and-operations.md#backup-and-disaster-recovery) sets the targets; the [decision register](../v2/06-decision-register.md) records the choices.
+**Status.** Written on 2026-11-15. The tooling, the workflows, and the OpenTofu change are on main. Nothing is switched on: the daily backup needs the one-time setup below, and no live database has been backed up by it yet. The [hosting plan](../v2/08-build-hosting-and-operations.md#backup-and-disaster-recovery) sets the targets; the [decision register](../v2/06-decision-register.md) records the choices.
 
 ## What protects the data
 
@@ -8,7 +8,7 @@ Two separate controls, for two different failures.
 
 | Failure | What brings the data back | How much can be lost | Where it lives |
 |---|---|---|---|
-| A bad change by the app, an operator, or a migration | Neon's point-in-time restore: a new branch of the database as it was at any moment in the history window | Up to about 5 minutes of work, in practice none | Inside Neon. Production keeps 30 days of history (Terraform `history_retention_seconds`); the free plan keeps far less |
+| A bad change by the app, an operator, or a migration | Neon's point-in-time restore: a new branch of the database as it was at any moment in the history window | Up to about 5 minutes of work, in practice none | Inside Neon. Production keeps 30 days of history (OpenTofu `history_retention_seconds`); the free plan keeps far less |
 | Neon itself is lost: the project, the account, or the region | The daily encrypted logical backup in the backups R2 bucket | Up to one day of work (24-hour planning target) | Cloudflare R2, encrypted with a key that is not in Neon or Cloudflare |
 
 A daily backup cannot get back the last day after a total Neon loss. The [RPO acceptance](../v2/drafts/rpo-acceptance.md) asks each pilot operator to accept that in writing before launch.
@@ -18,14 +18,14 @@ A daily backup cannot get back the last day after a total Neon loss. The [RPO ac
 - [`tools/backup/`](../../tools/backup/README.md): `backup.sh`, `restore.sh`, `verify.py`, `backup-age.sh`.
 - [`.github/workflows/backup.yml`](../../.github/workflows/backup.yml): the daily backup at 07:17 UTC, off until `BACKUP_ENABLED` is `true`.
 - [`.github/workflows/restore-drill.yml`](../../.github/workflows/restore-drill.yml): a round trip on every change to the tooling, and the Neon drills by hand.
-- Terraform ([environment module](../../infra/terraform/modules/environment/main.tf)): the backups bucket expires objects after 35 days in production and, new here, locks each one for 7 days so the token that writes backups cannot delete recent ones.
+- OpenTofu ([environment module](../../infra/terraform/modules/environment/main.tf)): the backups bucket expires objects after 35 days in production and, new here, locks each one for 7 days so the token that writes backups cannot delete recent ones.
 
 ## One-time setup (owner)
 
 Do this once for the environment to back up. Nothing here costs money on the current plans except R2 storage, which is a few cents a month at pilot size.
 
 1. **Make the key pair, offline.** On your Mac: `brew install age`, then `age-keygen -o tidegrid-backup.key`. It prints the public key (`age1...`). Keep the private key file in two places outside Neon and Cloudflare, for example your password manager and an encrypted USB stick. Never commit it, paste it into a chat, or add it to GitHub. Losing it means losing every backup made with it.
-2. **The bucket.** The Terraform backups bucket (`tidegrid-<environment>-backups`) through the [apply runbook](terraform-apply.md). Until production exists, a bucket in the existing account is enough for staging or the demo database.
+2. **The bucket.** The OpenTofu backups bucket (`tidegrid-<environment>-backups`) through the [apply runbook](terraform-apply.md). Until production exists, a bucket in the existing account is enough for staging or the demo database.
 3. **A write token for that bucket only.** Cloudflare dashboard, R2, Manage API tokens, Create: permission Object Read and Write, applied to the backups bucket only. Note the access key id, the secret, and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`).
 4. **The GitHub environment.** Settings, Environments, New environment `backup`. Deployment branches: `main` only. No required reviewer (a scheduled run cannot wait for one). Secrets: `BACKUP_DATABASE_URL` (the direct, unpooled owner URL of the database to back up; the host must not contain `-pooler`), `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`. Variables: `BACKUP_AGE_RECIPIENT` (the public key from step 1) and `BACKUP_LABEL` (for example `production`).
 5. **One manual run.** Actions, backup, Run workflow, from `main`. It should end green with a summary line naming the tables, rows, and last migration.

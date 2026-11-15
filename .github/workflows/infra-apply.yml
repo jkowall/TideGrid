@@ -1,6 +1,7 @@
 name: infra-apply
 # Added 2026-11-10 (owner request: "you can set those up anytime you want on
-# cloudflare"). Plans and applies one Terraform environment from GitHub, so no
+# cloudflare"). Plans and applies one OpenTofu environment from GitHub
+# (switched from Terraform 2026-11-15; same state files in R2), so no
 # laptop holds state or credentials. Staging only for now. Each run waits
 # twice for the owner's approval on the environment: once before the plan
 # reads any secret, and once more before the saved plan is applied. See
@@ -35,8 +36,7 @@ defaults:
     shell: bash
 
 env:
-  TERRAFORM_VERSION: 1.13.5
-  TERRAFORM_SHA256: 0dbe3fcc268eb670801af6a6456799d1ae26e72e73797f6c6167e18aafd1fd9a
+  TOFU_VERSION: 1.13.9
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
   ROOT: infra/terraform/environments/${{ inputs.environment }}
@@ -59,7 +59,7 @@ jobs:
             echo "::error::committed state, tfvars, or backend settings: $bad"; exit 1
           fi
           if grep -rnE 'resource +"neon_role"' infra/terraform; then
-            echo "::error::Terraform must not create a Neon role"; exit 1
+            echo "::error::OpenTofu config must not create a Neon role"; exit 1
           fi
           if grep -rnE 'resource +"cloudflare_(workers_script|worker_version|workers_deployment|worker|workers_custom_domain|queue_consumer)"' infra/terraform; then
             echo "::error::Worker scripts, versions, deployments, custom domains, and queue consumers belong to Wrangler"; exit 1
@@ -101,13 +101,12 @@ jobs:
             printf 'TF_VAR_alert_email_destinations=["%s"]\n' "$ALERT_EMAIL" >> "$GITHUB_ENV"
           fi
 
-      - name: Install Terraform
-        run: |
-          zip="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-          curl -fsSLo "$RUNNER_TEMP/$zip" "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/${zip}"
-          echo "${TERRAFORM_SHA256}  $RUNNER_TEMP/$zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/terraform"
-          echo "$RUNNER_TEMP/terraform" >> "$GITHUB_PATH"
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          # No wrapper: later steps redirect tofu output into files.
+          tofu_wrapper: false
 
       - name: Init against the state bucket in Cloudflare R2
         # Owner decision 2026-11-10 (replaces D2): state lives
@@ -129,15 +128,15 @@ jobs:
           skip_metadata_api_check     = true
           skip_s3_checksum            = true
           EOF
-          terraform -chdir="$ROOT" init -backend-config="$RUNNER_TEMP/backend.hcl"
+          tofu -chdir="$ROOT" init -backend-config="$RUNNER_TEMP/backend.hcl"
 
       - name: Plan
-        run: terraform -chdir="$ROOT" plan -lock-timeout=5m -out="$RUNNER_TEMP/env.tfplan" > /dev/null
+        run: tofu -chdir="$ROOT" plan -lock-timeout=5m -out="$RUNNER_TEMP/env.tfplan" > /dev/null
 
       - name: Summary for the owner (names and actions only, no values)
         id: summary
         run: |
-          terraform -chdir="$ROOT" show -json "$RUNNER_TEMP/env.tfplan" > "$RUNNER_TEMP/plan.json"
+          tofu -chdir="$ROOT" show -json "$RUNNER_TEMP/env.tfplan" > "$RUNNER_TEMP/plan.json"
           jq -r '.resource_changes[] | select(.mode == "managed") | select(.change.actions != ["no-op"]) | "\(.change.actions | join("+"))\t\(.address)"' \
             "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/changes.txt"
           # Output changes count too, so an output-only plan still applies.
@@ -188,13 +187,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Terraform
-        run: |
-          zip="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-          curl -fsSLo "$RUNNER_TEMP/$zip" "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/${zip}"
-          echo "${TERRAFORM_SHA256}  $RUNNER_TEMP/$zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/terraform"
-          echo "$RUNNER_TEMP/terraform" >> "$GITHUB_PATH"
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          # No wrapper: later steps redirect tofu output into files.
+          tofu_wrapper: false
 
       - uses: actions/download-artifact@v7
         with:
@@ -217,7 +215,7 @@ jobs:
           skip_metadata_api_check     = true
           skip_s3_checksum            = true
           EOF
-          terraform -chdir="$ROOT" init -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.hcl"
+          tofu -chdir="$ROOT" init -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.hcl"
 
       - name: Copy the current state before changing it (R2 has no version history)
         env:
@@ -246,7 +244,7 @@ jobs:
             --endpoint-url "$r2" --region auto --only-show-errors
 
       - name: Apply the saved plan
-        run: terraform -chdir="$ROOT" apply -lock-timeout=5m "$RUNNER_TEMP/plan/env.tfplan"
+        run: tofu -chdir="$ROOT" apply -lock-timeout=5m "$RUNNER_TEMP/plan/env.tfplan"
 
       - name: What Wrangler needs (names only)
         run: |
@@ -256,6 +254,6 @@ jobs:
             echo "Queue and bucket names for the Wrangler configuration:"
             echo
             echo '```'
-            terraform -chdir="$ROOT" output -json wrangler_inputs | jq '{queue_names, dead_letter_queue_names, bucket_names}'
+            tofu -chdir="$ROOT" output -json wrangler_inputs | jq '{queue_names, dead_letter_queue_names, bucket_names}'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -66,7 +66,7 @@ variable "branches" {
   description = <<-EOT
     Long-lived branches besides the default branch, keyed by branch name, for
     example a staging branch. Expiring per-PR branches stay with the database
-    package's neon:branch tool, not Terraform. compute adds a read-write
+    package's neon:branch tool, not OpenTofu. compute adds a read-write
     endpoint with its own autoscaling and scale-to-zero settings.
   EOT
   type = map(object({

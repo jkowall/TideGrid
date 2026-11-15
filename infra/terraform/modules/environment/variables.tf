@@ -10,12 +10,12 @@ variable "environment" {
 
 variable "allow_secrets_in_state" {
   description = <<-EOT
-    The hosting plan says Terraform state holds no secret values. Three
+    The hosting plan says OpenTofu state holds no secret values. Three
     resources cannot meet that: a Hyperdrive configuration (its origin
     password), an account API token (its value), and a new Neon project (its
     default role password). They are created only when this is true, which
     needs the owner's decision. While it is false, those three stay as they
-    are made today, outside Terraform.
+    are made today, outside OpenTofu.
   EOT
   type        = bool
   default     = false
@@ -30,7 +30,7 @@ variable "cloudflare_account_id" {
 
 variable "zone" {
   description = <<-EOT
-    The product zone. create = true makes Terraform own the zone (production,
+    The product zone. create = true makes OpenTofu own the zone (production,
     in its dedicated account). create = false only reads the existing zone id
     (staging on the shared tidegrid.us zone), so a staging plan can never touch
     a live zone's settings.
@@ -48,7 +48,7 @@ variable "zone" {
 }
 
 variable "routes" {
-  description = "Worker routes Terraform owns. See the routes module: never a route Wrangler also declares."
+  description = "Worker routes OpenTofu owns. See the routes module: never a route Wrangler also declares."
   type = map(object({
     pattern = string
     script  = string
@@ -166,7 +166,7 @@ variable "neon_project_id" {
 }
 
 variable "neon_project" {
-  description = "Settings for a Neon project Terraform creates. See the neon module. Used only with allow_secrets_in_state and no neon_project_id: an existing project id always wins, so turning D1 on never replaces a live database."
+  description = "Settings for a Neon project OpenTofu creates. See the neon module. Used only with allow_secrets_in_state and no neon_project_id: an existing project id always wins, so turning D1 on never replaces a live database."
   type = object({
     name                      = string
     org_id                    = optional(string)

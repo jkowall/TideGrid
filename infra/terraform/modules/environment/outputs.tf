@@ -7,7 +7,7 @@ output "zone_id" {
 }
 
 output "zone_name_servers" {
-  description = "Name servers of a zone Terraform created, for delegating the domain. Null otherwise."
+  description = "Name servers of a zone OpenTofu created, for delegating the domain. Null otherwise."
   value       = one(module.zone[*].name_servers)
 }
 
@@ -27,7 +27,7 @@ output "bucket_names" {
 }
 
 output "hyperdrive_id" {
-  description = "Hyperdrive configuration id, or null while it stays outside Terraform."
+  description = "Hyperdrive configuration id, or null while it stays outside OpenTofu."
   value       = one(module.hyperdrive[*].hyperdrive_id)
 }
 
