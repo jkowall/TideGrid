@@ -3,7 +3,8 @@
  *
  *   pnpm --silent --filter @tidegrid/release gh-release schema-check [--tree-last 0052_name.sql]
  *   pnpm --silent --filter @tidegrid/release gh-release release --worker api --sha <full> \
- *     --build-id <short> --traffic all-at-once|ten-percent-first --soak <seconds> --ledger <file>
+ *     --build-id <short> --traffic all-at-once|ten-percent-first --soak <seconds> --ledger <file> \
+ *     [--tree <checkout of the commit>]
  *   pnpm --silent --filter @tidegrid/release gh-release rollback --worker api --to previous|<version id> --ledger <file>
  *
  * Exit codes: 0 done, 1 a check failed after acting, 2 usage, 3 refused
@@ -56,7 +57,7 @@ export async function ghMain(argv: readonly string[], deps: GhDeps): Promise<num
       return 0;
     }
     if (name === "release") {
-      onlyFlags(args, ["worker", "sha", "build-id", "traffic", "soak", "ledger"]);
+      onlyFlags(args, ["worker", "sha", "build-id", "traffic", "soak", "ledger", "tree"]);
       const traffic = required(args, "traffic");
       if (traffic !== "all-at-once" && traffic !== "ten-percent-first") {
         throw new GhRefusal("--traffic is all-at-once or ten-percent-first");
@@ -65,7 +66,11 @@ export async function ghMain(argv: readonly string[], deps: GhDeps): Promise<num
       if (!Number.isInteger(soak) || soak < 0 || soak > 3600) {
         throw new GhRefusal("--soak is whole seconds from 0 to 3600");
       }
-      await releaseWorker(deps, {
+      // --tree: the checkout of the commit being released. The tooling runs
+      // from main's checkout, so a release always uses today's checks.
+      const tree = flag(args, "tree");
+      const target = tree ? { ...deps, repoRoot: resolve(tree) } : deps;
+      await releaseWorker(target, {
         worker: worker(args),
         sha: required(args, "sha"),
         buildId: required(args, "build-id"),

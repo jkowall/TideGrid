@@ -54,6 +54,8 @@ interface World {
   newBroken: boolean;
   /** Fail `versions deploy` calls whose first spec starts with this. */
   failDeployOf?: string;
+  /** Make `versions upload` fail (for example under --strict). */
+  uploadFails?: boolean;
   cfStatus: number;
   dbLatest: string;
   calls: string[];
@@ -147,7 +149,13 @@ function deps(w: World, worker: GhWorker, env: Env = releaseEnv): GhDeps {
     exec: async (cmd, args, { env }) => {
       w.calls.push(`${cmd} ${args.join(" ")}`);
       expect(env.SOMETHING_ELSE).toBeUndefined();
-      if (cmd !== "pnpm" || args[1] !== "wrangler") return { code: 0, stdout: "" };
+      if (cmd !== "pnpm" || args[1] !== "wrangler") {
+        // Builds never see the Cloudflare token.
+        expect(env.CLOUDFLARE_API_TOKEN).toBeUndefined();
+        expect(env.CLOUDFLARE_ACCOUNT_ID).toBeUndefined();
+        return { code: 0, stdout: "" };
+      }
+      expect(env.CLOUDFLARE_API_TOKEN).toBeDefined();
       const a = args.slice(2);
       if (a[0] === "deployments" && a[1] === "status") {
         return {
@@ -167,6 +175,8 @@ function deps(w: World, worker: GhWorker, env: Env = releaseEnv): GhDeps {
         };
       }
       if (a[0] === "versions" && a[1] === "upload") {
+        expect(a).toContain("--strict");
+        if (w.uploadFails) return { code: 1, stdout: "" };
         const out = env.WRANGLER_OUTPUT_FILE_PATH as string;
         w.files.set(
           out,
@@ -281,13 +291,40 @@ describe("gh-release parsing", () => {
     expect(() => parseUploadOutput("")).toThrow();
   });
 
-  it("finds the deployment before the current one", () => {
-    const list = JSON.stringify([
-      { versions: [{ version_id: OLDER, percentage: 100 }] },
-      { versions: [{ version_id: OLD, percentage: 100 }] },
-    ]);
-    expect(previousDeployment(list)).toEqual([{ id: OLDER, percentage: 100 }]);
-    expect(previousDeployment(JSON.stringify([{ versions: [] }]))).toBeNull();
+  it("previous is the version that served before the current one first went live", () => {
+    const list = (...ds: [string, number][][]) =>
+      JSON.stringify(
+        ds.map((d) => ({
+          versions: d.map(([version_id, percentage]) => ({ version_id, percentage })),
+        })),
+      );
+    const at100 = (id: string) => [{ id, percentage: 100 }];
+    expect(previousDeployment(list([[OLDER, 100]], [[OLD, 100]]), at100(OLD))).toEqual(
+      at100(OLDER),
+    );
+    // After a 10% release, not the split.
+    expect(
+      previousDeployment(
+        list(
+          [[OLD, 100]],
+          [
+            [NEW, 10],
+            [OLD, 90],
+          ],
+          [[NEW, 100]],
+        ),
+        at100(NEW),
+      ),
+    ).toEqual(at100(OLD));
+    // After an automatic rollback, not the release that failed.
+    expect(
+      previousDeployment(
+        list([[OLDER, 100]], [[OLD, 100]], [[NEW, 100]], [[OLD, 100]]),
+        at100(OLD),
+      ),
+    ).toEqual(at100(OLDER));
+    expect(previousDeployment(list([[OLD, 100]]), at100(OLD))).toBeNull();
+    expect(previousDeployment(list([[OLD, 100]]), [{ id: OLD, percentage: 50 }])).toBeNull();
   });
 
   it("refuses a plain route and a wrong name", () => {
@@ -467,6 +504,45 @@ describe("gh-release release", () => {
     const w = world({ newBroken: true, failDeployOf: OLD });
     await expect(releaseWorker(deps(w, "api"), opts("api"))).rejects.toThrow(/did not take/);
     expect(ledger(w)[0].outcome).toBe("rollback_failed");
+  });
+});
+
+describe("gh-release review fixes", () => {
+  it("a rollback whose command exits 1 after taking effect is recorded as taken", async () => {
+    const w = world({ newBroken: true });
+    const d = deps(w, "api");
+    const real = d.exec;
+    d.exec = async (cmd, args, o) => {
+      const r = await real(cmd, args, o);
+      return args.includes("deploy") && args.some((x) => x.startsWith(OLD)) ? { ...r, code: 1 } : r;
+    };
+    await expect(releaseWorker(d, opts("api"))).rejects.toThrow(/; rolled back/);
+    expect(current(w)).toEqual([{ id: OLD, percentage: 100 }]);
+    expect(ledger(w)[0].outcome).toBe("rolled_back");
+  });
+
+  it("an upload that fails writes a ledger line and moves nothing", async () => {
+    const w = world({ uploadFails: true });
+    await expect(releaseWorker(deps(w, "api"), opts("api"))).rejects.toThrow(/upload failed/);
+    expect(current(w)).toEqual([{ id: OLD, percentage: 100 }]);
+    expect(ledger(w)[0]).toMatchObject({ outcome: "failed_before_traffic" });
+  });
+
+  it("rollback to previous after a 10% release goes to the old version, not the split", async () => {
+    const w = world();
+    await releaseWorker(
+      deps(w, "api"),
+      opts("api", { traffic: "ten-percent-first", soakSeconds: 0 }),
+    );
+    await rollbackWorker(deps(w, "api"), "api", "previous", "/ledger.ndjson");
+    expect(current(w)).toEqual([{ id: OLD, percentage: 100 }]);
+  });
+
+  it("rollback to previous after an automatic rollback does not bring back the failed version", async () => {
+    const w = world({ newBroken: true });
+    await expect(releaseWorker(deps(w, "api"), opts("api"))).rejects.toThrow(/rolled back/);
+    await rollbackWorker(deps(w, "api"), "api", "previous", "/ledger.ndjson");
+    expect(current(w)).toEqual([{ id: OLDER, percentage: 100 }]);
   });
 });
 

@@ -81,6 +81,14 @@ export function childEnv(deps: GhDeps, extra: Record<string, string> = {}): Env 
   return { ...env, ...extra };
 }
 
+/** A build child's environment: like childEnv, without the Cloudflare names. */
+export function buildEnv(deps: GhDeps): Env {
+  const env = childEnv(deps);
+  delete env.CLOUDFLARE_API_TOKEN;
+  delete env.CLOUDFLARE_ACCOUNT_ID;
+  return env;
+}
+
 /** Build-time inputs that would bake a local setting into a release bundle. */
 export const buildLeakNames = [
   "VITE_API_BASE",

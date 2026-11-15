@@ -37,7 +37,7 @@ on:
         default: all-at-once
         required: true
       soak_minutes:
-        description: "release with ten-percent-first: minutes at 10% before 100%"
+        description: "release with ten-percent-first: minutes at 10% before 100% (0 to 30; 45 in all across Workers)"
         required: false
         default: "10"
       rollback_to:
@@ -83,6 +83,7 @@ jobs:
           WANT: ${{ inputs.sha }}
           WORKERS: ${{ inputs.workers }}
           SOAK: ${{ inputs.soak_minutes }}
+          TRAFFIC: ${{ inputs.traffic }}
           TO: ${{ inputs.rollback_to }}
         run: |
           if [ "$GITHUB_REF" != refs/heads/main ]; then
@@ -104,8 +105,14 @@ jobs:
             echo "rollback $list to $TO"
             exit 0
           fi
-          if ! printf '%s' "$SOAK" | grep -Eqx '[0-9]{1,2}' || [ "$SOAK" -gt 60 ]; then
-            echo "::error::soak_minutes is a whole number from 0 to 60"; exit 1
+          if ! printf '%s' "$SOAK" | grep -Eqx '0|[1-9][0-9]?' || [ "$SOAK" -gt 30 ]; then
+            echo "::error::soak_minutes is a whole number from 0 to 30"; exit 1
+          fi
+          # Every soak must fit well inside the release job's 120 minutes: a
+          # job killed mid-soak would leave a Worker on a 10% split.
+          count=$(echo $list | wc -w)
+          if [ "$TRAFFIC" = ten-percent-first ] && [ $((SOAK * count)) -gt 45 ]; then
+            echo "::error::$count Workers at $SOAK minutes each is over 45 minutes of soak; release fewer at once or shorten the soak"; exit 1
           fi
           if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
             echo "::error::give the full 40-character SHA"; exit 1
@@ -153,21 +160,31 @@ jobs:
   release:
     needs: gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Long enough for three Workers with the longest soak the gate allows.
+    timeout-minutes: 120
     # Required reviewer: the owner. Deployment branches: main only. Holds the
     # secret CLOUDFLARE_API_TOKEN and the variable CLOUDFLARE_ACCOUNT_ID. See
     # the runbook for the token's permissions.
     environment: production
     steps:
+      # The release tooling (src/gh-release) always comes from the workflow's
+      # own commit on main, so an older SHA is released with today's checks.
       - uses: actions/checkout@v7
         with:
-          # A rollback deploys an earlier version and builds nothing, so it
-          # runs main's tooling.
-          ref: ${{ inputs.action == 'release' && inputs.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # The commit being released, in its own directory. Only its apps are
+      # built and uploaded.
+      - uses: actions/checkout@v7
+        if: inputs.action == 'release'
+        with:
+          ref: ${{ inputs.sha }}
+          path: release-target
           fetch-depth: 0
           persist-credentials: false
       - name: Still the approved commit, still on main
         if: inputs.action == 'release'
+        working-directory: release-target
         env:
           WANT: ${{ inputs.sha }}
         run: |
@@ -182,6 +199,9 @@ jobs:
           cache: pnpm
       # Dependencies install before any secret is in an environment.
       - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        if: inputs.action == 'release'
+        working-directory: release-target
       - name: Release
         if: inputs.action == 'release'
         env:
@@ -192,19 +212,21 @@ jobs:
           SOAK: ${{ inputs.soak_minutes }}
           WORKERS: ${{ needs.gate.outputs.workers }}
         run: |
-          # The same build id nov1 gives (git describe), so the API's health
-          # reports the commit.
-          build_id=$(git describe --always "$SHA")
+          tree="$GITHUB_WORKSPACE/release-target"
+          # The short SHA, as nov1's git describe gives while the repository
+          # has no tags, so the API's health reports the commit.
+          build_id=$(git -C "$tree" rev-parse --short "$SHA")
+          last=$(ls "$tree/packages/database/migrations" | grep -E '^[0-9]{4}_.+\.sql$' | LC_ALL=C sort | tail -1)
           ledger="$RUNNER_TEMP/release-ledger.ndjson"
           : > "$ledger"
           echo "## Release $SHA" >> "$GITHUB_STEP_SUMMARY"
           for w in $WORKERS; do
             if [ "$w" = api ]; then
               # Again here: the approval may have come long after the gate.
-              pnpm --silent --filter @tidegrid/release gh-release schema-check
+              pnpm --silent --filter @tidegrid/release gh-release schema-check --tree-last "$last"
             fi
             pnpm --silent --filter @tidegrid/release gh-release release \
-              --worker "$w" --sha "$SHA" --build-id "$build_id" \
+              --worker "$w" --sha "$SHA" --build-id "$build_id" --tree "$tree" \
               --traffic "$TRAFFIC" --soak "$((SOAK * 60))" --ledger "$ledger"
           done
       - name: Roll back

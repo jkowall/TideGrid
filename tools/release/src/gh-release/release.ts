@@ -26,7 +26,15 @@
  */
 import { join } from "node:path";
 import { parseJsonc } from "../phase.ts";
-import { buildLeakNames, childEnv, type GhDeps, GhFailure, GhRefusal, say } from "./deps.ts";
+import {
+  buildEnv,
+  buildLeakNames,
+  childEnv,
+  type GhDeps,
+  GhFailure,
+  GhRefusal,
+  say,
+} from "./deps.ts";
 
 export type GhWorker = "api" | "console" | "guest";
 export const ghWorkers: readonly GhWorker[] = ["api", "console", "guest"];
@@ -234,11 +242,16 @@ export async function currentDeployment(deps: GhDeps, worker: GhWorker): Promise
 }
 
 /**
- * The versions of the deployment before the current one, from
- * `deployments list --json` (oldest first, cli.js:361001). Ids and
- * percentages only; the listing also carries author emails, dropped here.
+ * The rollback target for `previous`: the version that served alone at 100%
+ * just before the current version first went live. Read from
+ * `deployments list --json` (oldest first, cli.js:361001); ids and
+ * percentages only, the author emails are dropped.
+ *
+ * Walking back from where the current version first appeared skips its own
+ * 10% step and, after an automatic rollback, the failed release, so
+ * `previous` never brings back a split or the version that just failed.
  */
-export function previousDeployment(stdout: string): VersionShare[] | null {
+export function previousDeployment(stdout: string, current: VersionShare[]): VersionShare[] | null {
   const start = stdout.search(/[[{]/);
   let list: unknown;
   try {
@@ -246,18 +259,20 @@ export function previousDeployment(stdout: string): VersionShare[] | null {
   } catch {
     throw new GhFailure("wrangler deployments list did not print JSON");
   }
-  if (!Array.isArray(list) || list.length < 2) return null;
-  const prev = list[list.length - 2] as {
-    versions?: { version_id?: unknown; percentage?: unknown }[];
-  };
-  const shares = (prev.versions ?? []).map((v) => ({
-    id: String(v.version_id ?? ""),
-    percentage: Number(v.percentage),
-  }));
-  if (shares.length === 0 || shares.some((s) => !uuid.test(s.id) || Number.isNaN(s.percentage))) {
-    throw new GhFailure("wrangler deployments list has an unreadable version");
+  if (!Array.isArray(list)) throw new GhFailure("wrangler deployments list is not a list");
+  const deployments = list.map((d) =>
+    ((d as { versions?: { version_id?: unknown; percentage?: unknown }[] }).versions ?? []).map(
+      (v) => ({ id: String(v.version_id ?? ""), percentage: Number(v.percentage) }),
+    ),
+  );
+  const currentId = single(current);
+  if (!currentId) return null;
+  const first = deployments.findIndex((d) => d.some((s) => s.id === currentId));
+  for (let i = (first < 0 ? deployments.length : first) - 1; i >= 0; i--) {
+    const id = single(deployments[i] as VersionShare[]);
+    if (id && uuid.test(id) && id !== currentId) return [{ id, percentage: 100 }];
   }
-  return shares;
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -486,10 +501,15 @@ async function restore(deps: GhDeps, worker: GhWorker, shares: VersionShare[], m
       shares.map((s) => `${s.id}@${s.percentage}%`),
       msg,
     );
-    const now = await currentDeployment(deps, worker);
-    return sameShares(now, shares);
   } catch (e) {
-    say(deps, `rollback error: ${(e as Error).message}`);
+    // wrangler can move traffic and still exit non-zero (its settings sync
+    // runs after the deployment, cli.js:360766), so the deployment decides.
+    say(deps, `rollback command error: ${(e as Error).message}; reading what is live`);
+  }
+  try {
+    return sameShares(await currentDeployment(deps, worker), shares);
+  } catch (e) {
+    say(deps, `could not read the deployment after the rollback: ${(e as Error).message}`);
     return false;
   }
 }
@@ -536,10 +556,46 @@ async function build(deps: GhDeps, worker: GhWorker): Promise<void> {
   for (const [cmd, args] of steps[worker]) {
     const { code } = await deps.exec(cmd, args, {
       cwd: join(deps.repoRoot, workerInfo[worker].dir),
-      env: childEnv(deps),
+      // The build never sees the Cloudflare token: only wrangler gets it.
+      env: buildEnv(deps),
     });
     if (code !== 0) throw new GhFailure(`${worker} build failed: ${cmd} ${args.join(" ")}`);
   }
+}
+
+async function buildAndUpload(
+  deps: GhDeps,
+  o: ReleaseOptions,
+  oldId: string,
+  url: string,
+): Promise<string> {
+  const { worker } = o;
+  await build(deps, worker);
+  const outFile = deps.tempPath(`wrangler-${worker}.ndjson`);
+  const message =
+    `release ${o.sha} ${url === "local" ? "" : `run ${deps.env.GITHUB_RUN_ID}`}`.trim();
+  await wrangler(
+    deps,
+    worker,
+    [
+      "versions",
+      "upload",
+      // Without --strict, wrangler in CI silently overrides changes made in
+      // the dashboard since the last upload (getDeployConfirmFunction,
+      // cli.js:180514). With it, the upload stops and nothing moves.
+      "--strict",
+      "--tag",
+      o.sha.slice(0, 12),
+      "--message",
+      message,
+      ...(worker === "api" ? ["--var", `BUILD_ID:${o.buildId}`] : []),
+    ],
+    { WRANGLER_OUTPUT_FILE_PATH: outFile },
+  );
+  const newId = parseUploadOutput(deps.readFile(outFile));
+  if (newId === oldId) throw new GhFailure("the upload returned the live version id");
+  say(deps, `uploaded ${newId} (no traffic yet)`);
+  return newId;
 }
 
 export async function releaseWorker(deps: GhDeps, o: ReleaseOptions): Promise<void> {
@@ -572,27 +628,25 @@ export async function releaseWorker(deps: GhDeps, o: ReleaseOptions): Promise<vo
   say(deps, `live: ${oldId} at 100%; custom domains and schedules match the tree`);
 
   // 3: build and upload. Nothing serves the new version yet.
-  await build(deps, worker);
-  const outFile = deps.tempPath(`wrangler-${worker}.ndjson`);
-  const message =
-    `release ${o.sha} ${url === "local" ? "" : `run ${deps.env.GITHUB_RUN_ID}`}`.trim();
-  await wrangler(
-    deps,
-    worker,
-    [
-      "versions",
-      "upload",
-      "--tag",
-      o.sha.slice(0, 12),
-      "--message",
-      message,
-      ...(worker === "api" ? ["--var", `BUILD_ID:${o.buildId}`] : []),
-    ],
-    { WRANGLER_OUTPUT_FILE_PATH: outFile },
-  );
-  const newId = parseUploadOutput(deps.readFile(outFile));
-  if (newId === oldId) throw new GhFailure("the upload returned the live version id");
-  say(deps, `uploaded ${newId} (no traffic yet)`);
+  let newId: string;
+  try {
+    newId = await buildAndUpload(deps, o, oldId, url);
+  } catch (e) {
+    writeLedger(deps, o.ledgerPath, {
+      kind: "release",
+      worker: name,
+      sha: o.sha,
+      build_id: o.buildId,
+      traffic: o.traffic,
+      before,
+      after: before,
+      outcome: "failed_before_traffic",
+      note: `${(e as Error).message}; no traffic moved`,
+      run_url: url,
+      at: at(),
+    });
+    throw e;
+  }
 
   const fail = async (why: string): Promise<never> => {
     say(deps, `FAILED: ${why}. Putting ${oldId} back at 100%`);
@@ -697,6 +751,7 @@ export async function rollbackWorker(
   if (to === "previous") {
     const prev = previousDeployment(
       await wrangler(deps, worker, ["deployments", "list", "--json"]),
+      before,
     );
     if (!prev) throw new GhRefusal(`${name} has no earlier deployment to go back to`);
     target = prev;
