@@ -40,7 +40,8 @@ Run from a clean checkout of `main` at the commit to apply, on the owner's machi
 4. `tofu -chdir=infra/terraform/environments/<environment> plan -out=<private dir>/<environment>.tfplan`.
 5. Read the plan. Check: no destroy or replace on a protected resource; no Neon role; no Worker script; no resource Wrangler already declares; the counts match what the change meant to do.
 6. Owner go for this plan. Record the commit, the environment, and the plan's add, change, and destroy counts.
-7. `tofu -chdir=infra/terraform/environments/<environment> apply <private dir>/<environment>.tfplan`.
+7. Save a copy of the current state first (`tofu -chdir=infra/terraform/environments/<environment> state pull`, uploaded to `backups/<environment>/` in the state bucket), as the `infra-apply` workflow does.
+   `tofu -chdir=infra/terraform/environments/<environment> apply <private dir>/<environment>.tfplan`.
 8. `tofu -chdir=infra/terraform/environments/<environment> output wrangler_inputs` and put the names and ids into that environment's Wrangler configuration in a reviewed pull request. Wrangler must not bind a resource before it exists, so the Wrangler change merges after the apply.
 9. Delete the plan file. Record the evidence (commit, counts, time, no ids or hosts) in the [verification log](../verification-log.md).
 
