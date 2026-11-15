@@ -1,5 +1,5 @@
 # Cloudflare for SaaS plumbing only. Each operator's custom hostname is created
-# by TideGrid's hostname tooling at onboarding time, never by Terraform:
+# by TideGrid's hostname tooling at onboarding time, never by OpenTofu:
 # operators must not create infrastructure (hosting plan). The guest Worker
 # answers custom hostnames through a catch-all route or custom domain that
 # Wrangler or the routes module owns, never both.

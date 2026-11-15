@@ -30,7 +30,7 @@ variable "origin" {
 variable "origin_password" {
   description = <<-EOT
     Password of the origin role. Passed only through TF_VAR_ from the owner's
-    private location at plan time. Terraform stores it in state, so the
+    private location at plan time. OpenTofu stores it in state, so the
     environment roots create this module only when allow_secrets_in_state is
     true (see infra/terraform/README.md).
   EOT

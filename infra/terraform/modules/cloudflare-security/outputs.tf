@@ -4,11 +4,11 @@ output "turnstile_site_key" {
 }
 
 output "firewall_ruleset_id" {
-  description = "The zone's custom firewall ruleset, or null when Terraform does not own it."
+  description = "The zone's custom firewall ruleset, or null when OpenTofu does not own it."
   value       = one(cloudflare_ruleset.firewall[*].id)
 }
 
 output "rate_limit_ruleset_id" {
-  description = "The zone's rate limit ruleset, or null when Terraform does not own it."
+  description = "The zone's rate limit ruleset, or null when OpenTofu does not own it."
   value       = one(cloudflare_ruleset.rate_limits[*].id)
 }

@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # Required reviewer: the owner. Holds CLOUDFLARE_API_TOKEN, NEON_API_KEY,
-    # CLOUDFLARE_ACCOUNT_ID, NEON_PROJECT_ID, and ALERT_EMAIL (the Terraform
+    # CLOUDFLARE_ACCOUNT_ID, NEON_PROJECT_ID, and ALERT_EMAIL (the OpenTofu
     # credentials that built staging).
     environment: infra-staging
     env:

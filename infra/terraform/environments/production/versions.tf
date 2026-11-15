@@ -15,7 +15,7 @@ terraform {
   # Remote state only. The backend's settings (bucket, key, region, the KMS
   # key, use_lockfile = true, encrypt = true) come from a backend.hcl file in
   # the owner's private location, passed as
-  # terraform init -backend-config=<that file>. The repository never holds
+  # tofu init -backend-config=<that file>. The repository never holds
   # state or backend.hcl. CI runs init with -backend=false and never reads
   # state. See infra/terraform/README.md.
   backend "s3" {}

@@ -36,7 +36,7 @@ defaults:
     shell: bash
 
 env:
-  TOFU_VERSION: latest
+  TOFU_VERSION: 1.13.9
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
   ROOT: infra/terraform/environments/${{ inputs.environment }}

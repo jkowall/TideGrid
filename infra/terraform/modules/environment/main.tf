@@ -1,5 +1,5 @@
 # One TideGrid environment: the Cloudflare resources the hosting plan gives to
-# Terraform, plus the Neon side. Worker scripts, versions, and bindings stay
+# OpenTofu, plus the Neon side. Worker scripts, versions, and bindings stay
 # with Wrangler; this module only outputs the identifiers Wrangler needs.
 
 locals {

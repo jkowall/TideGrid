@@ -8,6 +8,10 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: OpenTofu replaces Terraform for infrastructure as code (owner decision)
+
+The owner asked on 2026-11-15 to switch from Terraform to OpenTofu. The `infra` and `infra-apply` workflows install OpenTofu 1.13.9 with `opentofu/setup-opentofu` and run `tofu`; the configuration, provider versions, and the R2 state bucket are unchanged. The [hosting plan](08-build-hosting-and-operations.md) and runbooks now say OpenTofu. Folder, bucket, and lock file names keep "terraform" so nothing live moves. The first OpenTofu plan of staging must show no changes before any OpenTofu apply. Details in [infra/terraform/README.md](../../infra/terraform/README.md#opentofu-instead-of-terraform-2026-11-15).
+
 ### 2026-11-15: W3-OPS-3, releases from GitHub and pilot-standard CI/CD (coordinator defaults pending owner confirmation)
 
 The owner asked on 2026-11-11 to stop typing confirmations back and to move releases into GitHub, and said on 2026-11-15 to finish the remaining work. The new `release` workflow releases the API, console, and guest site from `main` after one owner approval on the GitHub `production` environment ([runbook](../runbooks/release-from-github.md)). It has never run: it waits on a Cloudflare token and the environment, which only the owner can create. No migration. `nov1` on the Mac stays as the fallback. Coordinator defaults, pending owner confirmation:

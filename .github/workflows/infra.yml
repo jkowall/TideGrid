@@ -31,7 +31,7 @@ defaults:
 
 env:
   # Pinned OpenTofu release, installed by opentofu/setup-opentofu.
-  TOFU_VERSION: latest
+  TOFU_VERSION: 1.13.9
   TF_IN_AUTOMATION: "1"
   TF_INPUT: "0"
   TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
@@ -52,7 +52,7 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           # No wrapper: later steps redirect tofu output into files.
           tofu_wrapper: false
-      - run: tofu version && mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR" && tofu version
 
       - name: Repository guards
         # State, backend settings, and variable files can hold secrets or

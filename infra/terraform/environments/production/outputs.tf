@@ -11,7 +11,7 @@ output "wrangler_inputs" {
 }
 
 output "zone" {
-  description = "Zone id and, for a zone Terraform created, its name servers. Keep both out of the repository."
+  description = "Zone id and, for a zone OpenTofu created, its name servers. Keep both out of the repository."
   value = {
     id           = module.environment.zone_id
     name_servers = module.environment.zone_name_servers
