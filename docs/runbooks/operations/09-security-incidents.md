@@ -19,13 +19,13 @@ One operator's staff or guests saw another operator's data, or a request reached
 | Evidence | Private incident record; screenshots; audit rows by id |
 | Limit | Data already shown cannot be unseen |
 | Communication | TideGrid owner tells both operator owners once confirmed; operators tell guests as the agreement requires |
-| Closed when | The cause is found and fixed, the isolation probe passes, and both operators have been told |
+| Closed when | The cause is found and fixed, a test that reproduces it passes, and both operators have been told |
 
 **Critical**, even if only suspected. The response target is one business hour.
 
 1. Ask the reporter for the exact page and time. A screenshot is best.
 2. Rule out the simple cases: one person who is staff at two operators and switched between them; a guest who booked with two operators; demo data.
-3. Run the isolation probe: `nov1 isolation --profile preview --api https://api.tidegrid.us --hosts <two operator hosts> --live --go A5`. It expects only 404s and `leak false`.
+3. Reproduce it on staging with the same role and steps, never on the live operators. Note: `nov1 isolation` probes only the public reads of the two demo operators and creates a held checkout, so it is not a check for this case.
 4. If a leak is real, stop the path: roll back the release that introduced it ([guide 5](05-releases-and-rollback.md)), or turn off the feature, or close sales for the affected operators.
 5. Ask an agent session to find the cause with the evidence. The database's row-level security is the backstop; a leak means both the query's own tenant filter and that backstop failed, or the leak is outside the database (a cache, a hostname, an email).
 6. A fix ships with a two-operator test that would have caught it.
@@ -52,7 +52,7 @@ How to rotate each one:
 | Runtime database password (`DATABASE_URL`, Hyperdrive) | API Worker secret, Hyperdrive config | `pnpm --filter @tidegrid/database app-role:password -- --neon-main` (the owner, on purpose), then update Hyperdrive. Breaks the API until both match: do it in a quiet window |
 | Neon admin URL and API key | Owner's private location; GitHub `neon-main` environment | Reset in the Neon console; update the GitHub secret |
 | `STRIPE_WEBHOOK_SECRET` | API Worker secret | [Guide 3](03-payments.md#rotating-the-webhook-secret) |
-| Stripe secret key | API Worker secret | Roll the key in Stripe; `nov1 secrets ... --put STRIPE_SECRET_KEY` |
+| Stripe secret key | API Worker secret | Roll the key in Stripe; `nov1 secrets stripe --put STRIPE_SECRET_KEY --phase <current> --live --go A13`, typed |
 | `FAKE_PAYMENT_WEBHOOK_SECRET` | API Worker secret (preview only) | `nov1 secrets ... --generate FAKE_PAYMENT_WEBHOOK_SECRET` |
 | `EMAIL_ALLOWED_RECIPIENTS` | API Worker secret | Not a credential; a leak reveals addresses only |
 | `EMAIL_EVENTS_ACCOUNT_ID` | API Worker secret | An identifier, not a credential |
@@ -78,7 +78,7 @@ A staff member lost a laptop or phone, or a guest says someone else has their bo
 
 1. A management link and its sessions are tied to the booker's email. If the guest's email account itself was taken, staff correct the booker's email on the booking to a new address the guest gives: on an email change, every unused link is closed and every other session ends.
 2. Guest sessions last one hour. Staff can send a waiver request again from the booking.
-3. A guest's phone app keeps sessions in the phone's secure storage for one hour only.
+3. The demo phone app drops a stored booking session once it expires (one hour).
 
 ## Malicious upload
 

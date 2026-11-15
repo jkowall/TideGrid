@@ -22,7 +22,7 @@ Setting up a new operator (a tenant), publishing its brand, adding and removing 
 1. Agree the slug, legal name, time zone, locations, boats, and brand (logo, colors, contact details) with the operator owner. Keep the signed setup form in the private location.
 2. On staging: create the tenant, publish its first brand version, and add the operator owner as the first owner member.
 3. Publishing a brand must take the per-tenant brand lock first, as the seed does, so two publishes never race ([database README](../../../packages/database/README.md#brand-configuration)).
-4. Check the platform name `<slug>.book.tidegrid.us` shows the brand. Run the isolation probe (`nov1 isolation`) across this operator and one other.
+4. Check the platform name `<slug>.book.tidegrid.us` shows the brand, and that it shows no other operator's trips. (`nov1 isolation` only works on the demo operators' products today, and it creates a quote and a held checkout.)
 5. Repeat on production under the owner's go.
 6. Set up the operator's payment account ([guide 3](03-payments.md#connecting-an-operators-stripe-account)) and, if they want one, their custom name ([guide 1](01-custom-hostnames.md)).
 
@@ -41,7 +41,7 @@ Setting up a new operator (a tenant), publishing its brand, adding and removing 
 | Communication | Operator owner tells the new staff member to sign in the same day |
 | Closed when | The person signs in with a second step and sees the right role |
 
-1. The operator owner (or the TideGrid owner through a support grant, if the operator asks) invites the person with their role: `owner`, `booking_staff`, or `finance` (read-only money). API: `POST /v1/staff/tenants/{tenantId}/members`.
+1. The operator owner invites the person with their role: `owner`, `booking_staff`, or `finance` (read-only money). API: `POST /v1/staff/tenants/{tenantId}/members`.
 2. In the same sitting, the TideGrid owner adds the exact address to the console's Access policy for the login method that person uses, as the [staff sign-in runbook](../staff-sign-in-access.md#steps-cloudflare-zero-trust-dashboard) says. Never a whole domain.
 3. The person signs in, sets up Cloudflare's second step, and accepts the invitation.
 
@@ -62,7 +62,7 @@ Urgent when the person left on bad terms or a device was lost.
 
 1. Remove their address from the Access policy.
 2. Disable the membership: `POST /v1/staff/tenants/{tenantId}/members/{userId}/status`. Disabling revokes their open sessions at once.
-3. To change a role, the operator owner disables the old membership and invites again with the new role, or asks the TideGrid owner to.
+3. **Gap:** there is no way to change a member's role yet. Inviting an existing member again is refused (`member_exists`). Until a role change exists, disable the membership and ask an agent session for a reviewed fix.
 4. If a device was lost, also follow [guide 9](09-security-incidents.md#lost-device-or-token).
 
 ## TideGrid support access

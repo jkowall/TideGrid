@@ -2,7 +2,7 @@
 
 Building an operator's branded iOS and Android app, testing it with testers, sending it to the stores, answering review, releasing it in steps, and blocking an old version that is no longer safe.
 
-**Status today.** The demo guest app is on TestFlight and Google Play internal testing only (build 1). Store submission, review, and public release are Wave 5 and the Native pilot gate. The Native add-on never blocks an operator's Core live gate: the web booking site works without it. The full process, including each operator's account packet, is in [native app factory and store submission](../../v2/09-native-app-factory-and-store-submission.md). This guide is the short version for when something goes wrong.
+**Status today.** The demo guest app is on TestFlight and Google Play internal testing only. Store submission, review, and public release are Wave 5 and the Native pilot gate. The Native add-on never blocks an operator's Core live gate: the web booking site works without it. The full process, including each operator's account packet, is in [native app factory and store submission](../../v2/09-native-app-factory-and-store-submission.md). This guide is the short version for when something goes wrong.
 
 **Builds run on the owner's Mac** with Xcode and Android Studio, not a cloud build service ([guest-native README](../../../apps/guest-native/README.md#builds-for-testers)). Signing keys stay on that Mac. The operator owns their store accounts and has the final say on release.
 

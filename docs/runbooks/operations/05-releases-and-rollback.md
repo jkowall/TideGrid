@@ -54,7 +54,7 @@ If any step fails, decide in ten minutes: fix forward fast, or roll back.
 **High**; **Critical** if no one can book or pay.
 
 1. Roll back only the Worker that is wrong: `nov1 release <api|console|guest> --phase <phase> --rollback --live --go <gate>`. It names the version it goes back to and asks you to type the Worker name and the version's first 8 characters.
-2. If wrangler asks whether to roll back although secrets changed, answer yes. Declining aborts but still prints success.
+2. If wrangler asks whether to roll back although secrets changed, answer yes. Declining aborts but still exits as if it worked.
 3. The tool counts the rollback done only when the old version alone is live.
 4. After an API rollback, a secret change fails until the next real release. Do not change secrets in between unless the incident needs it; the Nov 1 runbook's P3 rollback has the path if so.
 5. Fix the cause on `main` and release again normally.
@@ -65,7 +65,7 @@ If any step fails, decide in ten minutes: fix forward fast, or roll back.
 
 Installed copies of the guest site keep a service worker and a cache.
 
-1. Rebuild and release the guest site with `GUEST_SW_KILL_SWITCH=1` set and `--kill-switch`. That release unregisters the service worker and clears caches on the next visit.
+1. Release the guest site with `--kill-switch` (the tool sets `GUEST_SW_KILL_SWITCH=1` for that build). That release unregisters the service worker and clears caches on the next visit.
 2. After the bad version is gone from every phone that matters (allow a day), release a normal guest build.
 
 ## A release is half done

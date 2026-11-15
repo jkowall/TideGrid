@@ -52,7 +52,7 @@ Do this on a schedule, and at once if the secret may have leaked ([guide 9](09-s
 | Closed when | Deliveries succeed with the new secret and the old one is removed in Stripe |
 
 1. In Stripe, roll the endpoint's signing secret with an overlap period. While both are active, Stripe signs with both, and the API accepts any matching signature ([payments README](../../../packages/domain-payments/README.md#webhook-signatures)).
-2. Put the new value: `nov1 secrets <set> --put STRIPE_WEBHOOK_SECRET`. Type it at the prompt; never into a file for live mode.
+2. Put the new value: `nov1 secrets stripe --put STRIPE_WEBHOOK_SECRET --phase <current> --live --go A13`. Type it at the prompt; never into a file for live mode.
 3. Send a test event from Stripe and check it is accepted.
 4. End the overlap in Stripe.
 
@@ -97,7 +97,7 @@ This is a **Critical** incident if TideGrid shows a succeeded payment with no bo
 1. Read `GET .../refund-exceptions`. The reasons: `unsettled` (no final answer 24 hours after asking), `lookup_refused`, `failed_after_success`, `succeeded_after_failure`.
 2. `unsettled`: the sweep asks the provider again every hour with the same key. Check the operator's Stripe dashboard for the refund. If Stripe shows it done, wait for the event; Stripe resends it.
 3. `failed_after_success` or `succeeded_after_failure`: the guest may have been told the wrong thing. The operator tells the guest what actually happened.
-4. If the operator refunds by cash or check instead, staff record it as an external settlement on the booking.
+4. If the operator refunds by cash or check instead, an owner records it as an external settlement through `POST .../bookings/{bookingId}/external-settlements` (no console screen yet).
 
 ## A dispute (chargeback) opens
 

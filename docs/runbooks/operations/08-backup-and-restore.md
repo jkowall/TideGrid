@@ -60,7 +60,7 @@ Run this after a point-in-time restore or a full restore, before sales reopen. T
 | Closed when | Every item in the gap is matched, re-entered, refunded, or written off with the operator's agreement |
 
 1. **Payments.** In each operator's Stripe dashboard, list payments, refunds, and disputes in the gap. For each, find the TideGrid booking. Stripe resends recent webhook events; replaying them from Stripe's dashboard lets the inbox record what was missed. A payment with no booking becomes a late-payment refund or a manual booking, the operator's choice.
-2. **Bookings.** Compare the operator's manual log and the money report. Re-enter missing bookings from the console.
+2. **Bookings.** Compare the operator's manual log and the money report. Re-enter missing bookings from the console where it can take them. Bookings paid outside TideGrid have no console path yet and stay on the log.
 3. **Email.** Guests may have received email for bookings that no longer exist. The operator tells them. Messages that were queued but not sent before the restore point will send again; check the email backlog before turning email back on.
 4. **Waivers.** Signed waivers in the gap are gone from TideGrid. Send new requests for those guests.
 5. **Imports and hostnames.** Check any import batch saved in the gap, and any hostname change.

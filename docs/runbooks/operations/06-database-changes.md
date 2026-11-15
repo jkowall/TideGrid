@@ -85,7 +85,7 @@ For a bad change to data, from the app, an operator, or a migration, inside Neon
 | Safe first action | Restore to a **new branch**, never over main. Look before switching |
 | Customer impact check | List what changed since the chosen point: bookings, payments, refunds, waivers, email |
 | Evidence | Incident record: chosen time, branch, checks run, cutover time |
-| Limit | Writes after the chosen point are not on the restored branch. They must be re-entered or reconciled. Neon's free plan keeps a short history; check the window before relying on it |
+| Limit | Writes after the chosen point are not on the restored branch. They must be re-entered or reconciled. Check Neon's history window for the current plan before relying on it (the hosting plan targets 30 days in production) |
 | Communication | TideGrid owner tells operators sales are paused and to use the manual fallback |
 | Closed when | The checks below pass on the restored data, the API points at it, and every write in the gap is accounted for |
 
@@ -94,13 +94,13 @@ For a bad change to data, from the app, an operator, or a migration, inside Neon
 3. Check the branch: health query, the migration list, one known booking per operator, and the day's control totals.
 4. List the writes on main after that time (new bookings, payments, refunds, signed waivers). These are what the restore would lose.
 5. Decide with the operator owners: re-enter them by hand after cutover, or fix forward on main instead. If payments are in the gap, reconcile against Stripe after cutover ([guide 8](08-backup-and-restore.md#reconciling-after-any-restore)).
-6. Cutover, with the owner's go: close sales, then use Neon's restore on main to the same time. Neon keeps main's state from before the restore as a backup branch, so the gap's writes can still be read there. Release nothing new. Check health.
+6. Cutover, with the owner's go: close sales, then use Neon's restore on main to the same time. Check in Neon's documentation that main's state from before the restore is kept as a backup branch, so the gap's writes can still be read. Release nothing new. Check health.
 7. Run the [reconciliation](08-backup-and-restore.md#reconciling-after-any-restore) and re-enter the gap.
 8. Reopen sales.
 
 ## Things never to do on Neon main
 
-- Run an integration test suite or `app-role:password` against it. The Neon main guard refuses both, because rotating the runtime role's password breaks the API's database connection.
+- Run an integration test suite against it, or `app-role:password` except on purpose with `--neon-main` during a planned rotation ([guide 9](09-security-incidents.md#leaked-secret)). Rotating the runtime role's password breaks the API's database connection until Hyperdrive is updated.
 - Create `tidegrid_app` from the Neon console. It must only come from migration 0001.
 - Delete rows by hand. The runtime has no DELETE for a reason; state changes are appends.
 - Run `nov1 db migrate` and the `neon-migrate` workflow at the same time.

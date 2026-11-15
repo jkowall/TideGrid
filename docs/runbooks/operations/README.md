@@ -75,7 +75,7 @@ Both slots come back before the pilots end. When they do, add the alert names to
 ## The first fifteen minutes, for any incident
 
 1. **Write down the time** (UTC) and what was reported, by whom (role), and the booking references involved. Start the record now; see [Evidence](#evidence-and-the-incident-record).
-2. **Check health.** Open `https://api.tidegrid.us/v1/health`. It answers the release version, `database` (`ok` or `error`), and the last applied migration. A `degraded` answer with `database: error` is a database incident (guide 6 or 8).
+2. **Check health.** Open `https://api.tidegrid.us/v1/health`. It answers the release version, `database` (`ok`, `error`, or `unconfigured`), and the last applied migration. A `degraded` answer with `database: error` is a database incident (guide 6 or 8).
 3. **Pick a severity** from the table above.
 4. **Stop the harm, not the cause.** Use the smallest switch from the table below that stops more people being affected. Fix the cause after.
 5. **Tell the operator owner** what you know, what they should do now (usually: "use the manual fallback for new sales"), and when you will update them next.
@@ -87,7 +87,7 @@ Each of these needs the owner's go. Each is undone by doing the opposite.
 
 | Problem | Switch | Guide |
 |---|---|---|
-| Email is going wrong for everyone | Delete the `EMAIL_ALLOWED_RECIPIENTS` secret. Mail stays queued and is not sent | [4](04-guest-messages.md) |
+| Email is going to the wrong people | Put `EMAIL_ALLOWED_RECIPIENTS` to the owner's own inbox only. Everyone else's mail then fails unsent. Do not delete it: in production an empty list means "send to anyone" | [4](04-guest-messages.md) |
 | One operator's sending domain is refused | Nothing to switch: only that operator's mail waits | [4](04-guest-messages.md) |
 | A bad release | Roll the Worker back to the last good version | [5](05-releases-and-rollback.md) |
 | The guest site's offline cache serves a broken page | Release the guest site with the service worker kill switch | [5](05-releases-and-rollback.md) |
@@ -108,13 +108,13 @@ Every pilot operator keeps a paper-and-phone way to run the day when TideGrid is
 1. **Close sales.** Who closes online sales on a trip, and how (the trip's actions on the console Calendar page), and what the operator's website or phone message says instead.
 2. **The latest roster.** Each evening, booking staff save the next day's rosters and day export from the console (Roster page, and the Bookings page's day export). Keep the files where the dock can reach them without TideGrid.
 3. **Manual changes.** A paper or spreadsheet log for walk-ups, cancellations, and changes taken while TideGrid is down: time, booking reference if any, guest name, party size, what changed, and money taken.
-4. **Money.** Take cash, check, or the operator's own card terminal. Record each in the log. After recovery, staff enter them as external payments on the booking.
+4. **Money.** Take cash, check, or the operator's own card terminal. Record each in the log. **Gap:** the console has no way yet to enter a booking paid outside TideGrid (staff bookings take a card checkout, and the external payments route has no screen). Until one exists, these stay in the operator's log, and the operator closes those seats on TideGrid when it comes back.
 5. **Waivers.** Paper waivers for anyone who could not sign online. The operator keeps the paper. TideGrid records a legacy waiver status later only if the operator asks.
 6. **Contacting guests.** The operator's own phone and email, using the roster file.
 
-**Rehearsal.** Once before the first live booking, then every quarter. The TideGrid owner says "TideGrid is down" at a chosen time on a quiet day. The operator runs one departure's check-in from the saved roster, takes one test walk-up on paper, and enters it in the console afterwards. Write down how long each step took and what was missing. The rehearsal passes when the departure could have left on time.
+**Rehearsal.** Once before the first live booking, then every quarter. The TideGrid owner says "TideGrid is down" at a chosen time on a quiet day. The operator runs one departure's check-in from the saved roster and takes one test walk-up on paper. Write down how long each step took and what was missing. The rehearsal passes when the departure could have left on time.
 
-**After an outage**, staff enter the manual log into the console, oldest first. The TideGrid owner checks the day's control totals on the Bookings page match the log.
+**After an outage**, staff enter changes the console can take (cancellations, corrected contacts, closed sales) from the manual log, oldest first. The TideGrid owner compares the day's control totals on the Bookings page with the log and lists the difference that stays on paper.
 
 ## Talking to people
 
@@ -143,7 +143,7 @@ An incident is closed when all of these are true:
 
 1. The guide's "Closed when" test passes.
 2. Every booking reference in the record has been checked and is right.
-3. The operator owner has been told it is over and has entered any manual log.
+3. The operator owner has been told it is over and has entered what the console can take from the manual log.
 4. Follow-up work is written down (an issue or a tracker item), with an owner.
 5. For Critical incidents: a short written review within five business days. What happened, why, and what changes.
 

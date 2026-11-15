@@ -47,7 +47,7 @@ Guests report no confirmation; the Email card shows messages stuck as "Queued" p
 |---|---|
 | Owner | TideGrid owner |
 | Approval | Owner go for the switch |
-| Safe first action | **The switch:** `nov1 secrets <set> --delete EMAIL_ALLOWED_RECIPIENTS --live --go A7`. With no allowlist, nothing sends; messages stay queued or fail as `recipient_not_allowed` |
+| Safe first action | **The switch:** narrow the allowlist to the owner's own inbox: `nov1 secrets email --put EMAIL_ALLOWED_RECIPIENTS --phase <current> --live --go A7`, typing that one address. Every other message then fails unsent as `recipient_not_allowed`. Never delete the secret in production: there an empty list means "send to anyone". Outside production, deleting it turns email off |
 | Customer impact check | The affected message ids and booking references from the Email cards |
 | Evidence | Incident record; audit rows |
 | Limit | Sent email cannot be recalled. Links in it can be closed |
@@ -59,7 +59,7 @@ Guests report no confirmation; the Email card shows messages stuck as "Queued" p
 1. Use the switch first.
 2. Find what was sent: the Email cards of affected bookings.
 3. If links went to the wrong person, close them: correcting the booker's contact on the booking closes the old links and sends new ones to the right address.
-4. Fix the cause in a pull request, release it, then put the allowlist back under the owner's go.
+4. Fix the cause in a pull request, release it, then put the full allowlist back under the owner's go. Messages that failed while narrowed are resent from each booking's Email card.
 
 ## One guest did not get an email
 
@@ -89,4 +89,4 @@ Only that operator's mail waits; everyone else's keeps going.
 
 ## Setting up the bounce and spam event queue
 
-Owner steps, not yet done. Create the Cloudflare queue with a retry limit and a dead-letter queue, subscribe it to Email Sending events, bind it to the API Worker, and put the `EMAIL_EVENTS_ACCOUNT_ID` secret. The [messaging README](../../../packages/domain-messaging/README.md#email-events-w1-email-events) lists what the consumer checks. Until it runs, staff cannot see bounces, and the product scope counts that as a Core live gate blocker.
+Owner steps, not yet done. Create the Cloudflare queue with a retry limit and a dead-letter queue, subscribe it to Email Sending events, bind it to the API Worker, and put the `EMAIL_EVENTS_ACCOUNT_ID` secret. No `nov1` secret set includes that name yet, so it needs adding to the release tool or a reviewed wrangler step. The [messaging README](../../../packages/domain-messaging/README.md#email-events-w1-email-events) lists what the consumer checks. Until it runs, staff cannot see bounces, and the product scope counts that as a Core live gate blocker.
