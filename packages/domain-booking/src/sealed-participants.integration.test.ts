@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   bindFieldPolicy,
   createDb,
+  emailToken,
   type FieldKeyring,
   FieldKeyringError,
   inTenantTransaction,
@@ -249,5 +250,51 @@ describe.skipIf(!env)("sealed participants (W3-OPS-4, 0056)", () => {
     ).catch((e: { code?: string }) => e.code);
     // No UPDATE grant on the token: it is written once, with the message.
     expect(wrong).toBe("42501");
+  });
+
+  it("refuses an invitation to a sealed minor without the guardian's token, or with another", async () => {
+    const run = randomUUID().slice(0, 8);
+    const { bookingId } = await confirmBooking(sealed.db, payments, A, trips.shared(), 2);
+    const guardian = `gail-${run}@example.test`;
+    const adult = `oli-${run}@example.test`;
+    await put(bookingId, 1, {
+      name: "Kit Kid",
+      isMinor: true,
+      guardian: { name: "Gail Guardian", email: guardian },
+    });
+    await put(bookingId, 2, { name: "Oli Other", isMinor: false, email: adult });
+    const invited = await as(guestContext(A.id), (trx, c) =>
+      inviteParticipant(trx, c, { bookingId, position: 1 }),
+    );
+    expect(invited).toMatchObject({ kind: "invited", recipient: "guardian" });
+    const [msg] = await admin<{ id: string; to_email_index: string | null }[]>`
+      select id, to_email_index from public.email_messages
+       where booking_id = ${bookingId} and link_purpose = 'participant_profile'`;
+    if (!msg) throw new Error("no invitation");
+    expect(msg.to_email_index).toBe(await emailToken(keyring, A.id, guardian));
+
+    // The same invitation again, written with each token: as tidegrid_app.
+    const copy = (index: string | null) =>
+      as(guestContext(A.id), (trx) =>
+        sql`insert into email_messages (tenant_id, dedupe_key, template, template_version,
+              booking_id, participant_id, to_email, to_email_index, to_name, from_name, reply_to,
+              subject, html_body, text_body, link_purpose, link_path, link_ttl_seconds, link_slot)
+            select tenant_id, 'participant.invitation:' || participant_id || ':' || gen_random_uuid(),
+                   template, template_version, booking_id, participant_id, to_email, ${index},
+                   to_name, from_name, reply_to, subject, html_body, text_body, link_purpose,
+                   link_path, link_ttl_seconds, link_slot
+              from email_messages where tenant_id = ${A.id} and id = ${msg.id}`.execute(trx),
+      ).then(
+        () => "accepted",
+        (e: { constraint_name?: string }) => e.constraint_name ?? String(e),
+      );
+    expect(await copy(null)).toBe("email_messages_profile_recipient");
+    // Another adult's address in the same party, and a stranger's.
+    expect(await copy(await emailToken(keyring, A.id, adult))).toBe(
+      "email_messages_profile_recipient",
+    );
+    expect(await copy("0".repeat(64))).toBe("email_messages_profile_recipient");
+    // The guardian's token, the one the minor's invitation goes to.
+    expect(await copy(await emailToken(keyring, A.id, guardian))).toBe("accepted");
   });
 });
