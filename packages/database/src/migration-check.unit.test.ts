@@ -50,6 +50,68 @@ describe("migration safety check", () => {
     expect(rules("DELETE FROM public.bookings WHERE false;")).toEqual(["data_change"]);
   });
 
+  it("catches the shapes a reviewer found slipping through", () => {
+    // COLUMN is optional in PostgreSQL.
+    expect(rules("ALTER TABLE public.bookings ALTER party TYPE bigint;")).toEqual([
+      "column_type_change",
+    ]);
+    expect(rules("ALTER TABLE public.bookings ALTER note SET NOT NULL;")).toEqual(["set_not_null"]);
+    expect(rules("ALTER TABLE public.bookings ADD at timestamptz DEFAULT now();")).toEqual([
+      "volatile_default",
+    ]);
+    // An inline CHECK or REFERENCES on a new column checks every row.
+    expect(
+      rules("ALTER TABLE public.bookings ADD COLUMN note text CHECK (length(note) < 100);"),
+    ).toEqual(["constraint_without_not_valid"]);
+    expect(
+      rules("ALTER TABLE public.bookings ADD COLUMN t uuid REFERENCES public.things (id);"),
+    ).toEqual(["constraint_without_not_valid"]);
+    // NOT VALID on one subcommand does not cover another.
+    expect(
+      rules(
+        "ALTER TABLE public.bookings ADD CONSTRAINT c CHECK (p > 0), ADD CONSTRAINT d CHECK (p < 100) NOT VALID;",
+      ),
+    ).toEqual(["constraint_without_not_valid"]);
+    // Quoted names are the same table.
+    expect(rules('CREATE INDEX b_p ON public."bookings" (party);')).toEqual([
+      "index_not_concurrent",
+    ]);
+    // A data-changing CTE.
+    expect(
+      rules("WITH ids AS (SELECT id FROM public.bookings) UPDATE public.bookings SET p = 1;"),
+    ).toEqual(["data_change"]);
+    expect(
+      rules("WITH gone AS (DELETE FROM public.bookings RETURNING id) SELECT count(*) FROM gone;"),
+    ).toEqual(["data_change"]);
+    // A DO block runs now, so its body is judged; a function body is not.
+    expect(rules("DO $$ BEGIN TRUNCATE TABLE public.bookings CASCADE; END $$;")).toEqual([
+      "data_change",
+    ]);
+    expect(
+      rules("DO $$ BEGIN IF true THEN ALTER TABLE public.bookings DROP COLUMN x; END IF; END $$;"),
+    ).toEqual(["drop_or_rename"]);
+    // IF NOT EXISTS, another schema, or a later CREATE does not make a table new.
+    expect(
+      rules(
+        "CREATE TABLE IF NOT EXISTS public.bookings (id int); ALTER TABLE public.bookings ALTER x TYPE bigint;",
+      ),
+    ).toEqual(["column_type_change"]);
+    expect(
+      rules(
+        "CREATE TABLE scratch.bookings (id int); ALTER TABLE public.bookings ALTER x TYPE bigint;",
+      ),
+    ).toEqual(["column_type_change"]);
+    expect(
+      rules("ALTER TABLE public.t ALTER x TYPE bigint; CREATE TABLE public.t (x int);"),
+    ).toEqual(["column_type_change"]);
+    // Still fine: a new table's own steps, and DROP DEFAULT / DROP NOT NULL.
+    expect(
+      rules(
+        "CREATE TABLE app.n (id int); ALTER TABLE app.n ALTER id SET NOT NULL, ADD CONSTRAINT c CHECK (id > 0); ALTER TABLE public.bookings ALTER x DROP DEFAULT, ALTER y DROP NOT NULL;",
+      ),
+    ).toEqual([]);
+  });
+
   it("an allow comment with a reason lets one rule through, and only that one", () => {
     const sql = `-- migration-check: allow data_change only 3 rows exist per tenant
       UPDATE public.tenants SET x = 1;
@@ -66,7 +128,8 @@ describe("migration safety check", () => {
 
   it("strips comments, strings, and dollar bodies", () => {
     expect(stripSql("a -- x\nb /* y */ 'it''s' $t$ z $t$ c")).toBe("a \nb   ''  $body$  c");
-    expect(targetTable('ALTER TABLE ONLY public."Bookings" ADD x')).toBe("bookings");
+    expect(targetTable('ALTER TABLE ONLY public."Bookings" ADD x')).toBe("public.bookings");
+    expect(targetTable("CREATE INDEX i ON bookings (x)")).toBe("public.bookings");
     expect(fileNumber("0053_x.sql")).toBe(53);
     expect(fileNumber("README.md")).toBeNull();
   });

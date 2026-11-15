@@ -7,9 +7,12 @@
  *   -- migration-check: allow <rule> <reason>
  *
  * Applies to files numbered from `checkedFrom` on; earlier files are merged
- * and forward-only, so they are not re-judged. Function bodies and DO blocks
- * (dollar-quoted text) are skipped: they run later, row by row, under the
- * application's own limits. Comments and string literals are skipped too.
+ * and forward-only, so they are not re-judged. Function bodies (dollar-quoted
+ * text) are skipped: they run later, row by row, under the application's own
+ * limits. DO blocks run during the migration, so their bodies are checked.
+ * Comments and string literals are skipped. A table is exempt from the
+ * locking rules only when the same file created it earlier with a plain
+ * CREATE TABLE (not IF NOT EXISTS), matched by schema and name.
  *
  *   pnpm --filter @tidegrid/database migration:check [file ...]
  */
@@ -47,42 +50,78 @@ interface Rule {
   skipNewTables?: boolean;
 }
 
-/** The table a statement alters or indexes, without schema, lower case. */
+/** Strip quotes and lower-case a (possibly schema-qualified) name; unqualified means public. */
+export function qualifiedName(name: string): string {
+  const parts = name.split(".").map((p) => p.replace(/"/g, "").toLowerCase());
+  return parts.length > 1 ? parts.slice(-2).join(".") : `public.${parts[0]}`;
+}
+
+/** The table a statement alters or indexes, schema-qualified, quotes removed, lower case. */
 export function targetTable(statement: string): string | null {
   const m =
-    /\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)/i.exec(statement) ??
-    /\bcreate\s+(?:unique\s+)?index\b[\s\S]*?\bon\s+(?:only\s+)?([\w."]+)/i.exec(statement);
-  return m ? bareName(m[1] as string) : null;
+    /\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?((?:"[^"]+"|[\w$]+)(?:\.(?:"[^"]+"|[\w$]+))?)/i.exec(
+      statement,
+    ) ??
+    /\bcreate\s+(?:unique\s+)?index\b[\s\S]*?\bon\s+(?:only\s+)?((?:"[^"]+"|[\w$]+)(?:\.(?:"[^"]+"|[\w$]+))?)/i.exec(
+      statement,
+    );
+  return m ? qualifiedName(m[1] as string) : null;
 }
 
-function bareName(name: string): string {
-  return (name.split(".").at(-1) ?? name).replace(/"/g, "").toLowerCase();
+/**
+ * Tables this statement creates. CREATE TABLE IF NOT EXISTS is not counted:
+ * the table may already exist and hold rows.
+ */
+function createdTable(statement: string): string | null {
+  const m =
+    /^\s*create\s+(?:unlogged\s+)?table\s+(?!if\s+not\s+exists\b)((?:"[^"]+"|[\w$]+)(?:\.(?:"[^"]+"|[\w$]+))?)/i.exec(
+      statement,
+    );
+  return m ? qualifiedName(m[1] as string) : null;
 }
 
-function createdTables(statements: string[]): Set<string> {
-  const names = new Set<string>();
-  for (const s of statements) {
-    const m = /^\s*create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?([\w."]+)/i.exec(s);
-    if (m) names.add(bareName(m[1] as string));
+const largeSet = new Set(largeTables.map((t) => `public.${t}`));
+
+/** Split on commas outside parentheses: the subcommands of one ALTER TABLE. */
+function topLevelParts(statement: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of statement) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else cur += ch;
   }
-  return names;
+  parts.push(cur);
+  return parts;
 }
 
-const large = `(?:\\w+\\.)?(?:${largeTables.join("|")})\\b`;
+const alterCol = String.raw`\balter\s+(?:column\s+)?(?!constraint\b)[\w"]+\s+`;
 
 const rules: Rule[] = [
   {
     rule: "column_type_change",
     skipNewTables: true,
-    test: (s) => /\balter\s+table\b[\s\S]*\balter\s+column\b[\s\S]*\btype\b/i.test(s),
+    test: (s) =>
+      /\balter\s+table\b/i.test(s) &&
+      new RegExp(`${alterCol}(?:set\\s+data\\s+)?type\\b`, "i").test(s),
     message:
       "changing a column's type rewrites the table under an exclusive lock; add a new column, backfill, then switch (expand and contract)",
   },
   {
     rule: "volatile_default",
     test: (s) =>
-      /\badd\s+column\b[\s\S]*\bdefault\s+(?:now|clock_timestamp|random|gen_random_uuid|uuid_generate_v4)\s*\(/i.test(
-        s,
+      /\balter\s+table\b/i.test(s) &&
+      topLevelParts(s).some(
+        (p) =>
+          /\badd\b/i.test(p) &&
+          !/\badd\s+constraint\b/i.test(p) &&
+          /\bdefault\s+(?:now|clock_timestamp|random|gen_random_uuid|uuid_generate_v4|timeofday|statement_timestamp)\s*\(/i.test(
+            p,
+          ),
       ),
     message:
       "a new column with a volatile default rewrites every row; add it without a default, then backfill in batches",
@@ -90,7 +129,8 @@ const rules: Rule[] = [
   {
     rule: "set_not_null",
     skipNewTables: true,
-    test: (s) => /\balter\s+column\b[\s\S]*\bset\s+not\s+null\b/i.test(s),
+    test: (s) =>
+      /\balter\s+table\b/i.test(s) && new RegExp(`${alterCol}set\\s+not\\s+null\\b`, "i").test(s),
     message:
       "SET NOT NULL scans the whole table under an exclusive lock; add a CHECK (...) NOT VALID, validate it, then set NOT NULL",
   },
@@ -98,20 +138,28 @@ const rules: Rule[] = [
     rule: "constraint_without_not_valid",
     skipNewTables: true,
     test: (s) =>
-      /\badd\s+(?:constraint\s+\w+\s+)?(?:foreign\s+key|check)\b/i.test(s) &&
       /\balter\s+table\b/i.test(s) &&
-      !/\bnot\s+valid\b/i.test(s),
+      topLevelParts(s).some((p) => {
+        // ADD CONSTRAINT ... CHECK / FOREIGN KEY, or an unnamed one, each judged on its own.
+        if (/\badd\s+(?:constraint\s+[\w"]+\s+)?(?:foreign\s+key|check)\b/i.test(p))
+          return !/\bnot\s+valid\b/i.test(p);
+        // A new column with an inline CHECK or REFERENCES checks every existing row.
+        if (/\badd\b/i.test(p) && !/\badd\s+constraint\b/i.test(p))
+          return /\b(?:check\s*\(|references\b)/i.test(p);
+        return false;
+      }),
     message:
-      "adding a foreign key or check to an existing table scans it under lock; add it NOT VALID, then VALIDATE CONSTRAINT in a later file",
+      "adding a foreign key or check to an existing table scans it under lock; add it as its own constraint NOT VALID, then VALIDATE CONSTRAINT in a later file",
   },
   {
     rule: "index_not_concurrent",
     skipNewTables: true,
-    test: (s) =>
-      new RegExp(
-        `\\bcreate\\s+(?:unique\\s+)?index\\b(?![\\s\\S]*\\bconcurrently\\b)[\\s\\S]*\\bon\\s+(?:only\\s+)?${large}`,
-        "i",
-      ).test(s),
+    test: (s) => {
+      if (!/^\s*create\s+(?:unique\s+)?index\b/i.test(s) || /\bconcurrently\b/i.test(s))
+        return false;
+      const t = targetTable(s);
+      return t !== null && largeSet.has(t);
+    },
     message:
       "an index on a pilot-volume table blocks writes while it builds; use CREATE INDEX CONCURRENTLY in a file of its own",
   },
@@ -119,21 +167,31 @@ const rules: Rule[] = [
     rule: "drop_or_rename",
     test: (s) =>
       /\bdrop\s+(?:table|column)\b/i.test(s) ||
-      /\balter\s+table\b[\s\S]*\bdrop\s+(?!constraint\b|default\b|not\s+null\b)\w+/i.test(s) ||
-      /\brename\s+(?:column\s+)?\w+\s+to\b/i.test(s) ||
+      (/\balter\s+table\b/i.test(s) &&
+        topLevelParts(s).some((p) =>
+          /\bdrop\s+(?!constraint\b|default\b|not\s+null\b|identity\b|expression\b)[\w"]+/i.test(p),
+        )) ||
+      /\brename\s+(?:column\s+)?[\w"]+\s+to\b/i.test(s) ||
       /\brename\s+to\b/i.test(s),
     message:
       "dropping or renaming breaks code still running the old shape; this is a contract step, only after no released version uses it",
   },
   {
     rule: "data_change",
-    test: (s) => /^\s*(?:update|delete\s+from|truncate)\b/i.test(s),
+    test: (s) =>
+      /^\s*(?:update|delete\s+from|truncate)\b/i.test(s) ||
+      (/^\s*with\b/i.test(s) && /\b(?:update|delete\s+from|truncate)\b/i.test(s)),
     message:
       "a data change in a migration runs in one transaction over the whole table; backfill in bounded batches outside the migration, or say why it is small",
   },
 ];
 
-/** The SQL with comments, string literals, and dollar-quoted bodies blanked out. */
+/**
+ * The SQL with comments and string literals blanked out. Dollar-quoted bodies
+ * of functions are blanked (they run later, row by row); the body of a DO
+ * block runs now, so it is kept, stripped the same way, with its PL/pgSQL
+ * block words turned into statement breaks so each statement is judged.
+ */
 export function stripSql(sql: string): string {
   let out = "";
   let i = 0;
@@ -154,8 +212,15 @@ export function stripSql(sql: string): string {
     if (dollar) {
       const tag = dollar[0];
       const end = sql.indexOf(tag, i + tag.length);
+      const body = sql.slice(i + tag.length, end < 0 ? sql.length : end);
       i = end < 0 ? sql.length : end + tag.length;
-      out += " $body$ ";
+      if (/\bdo\s*$/i.test(out)) {
+        const inner = stripSql(body).replace(
+          /\b(?:declare|begin|end\s+if|end\s+loop|end|then|else|elsif|loop)\b/gi,
+          ";",
+        );
+        out += ` $body$ ;${inner}; `;
+      } else out += " $body$ ";
       continue;
     }
     if (sql[i] === "'") {
@@ -195,15 +260,21 @@ export function checkMigration(sql: string): Finding[] {
     .split(";")
     .map((s) => s.trim())
     .filter(Boolean);
-  const fresh = createdTables(statements);
-  for (const r of rules) {
-    if (allowed.has(r.rule)) continue;
-    const hit = statements.some((s) => {
-      if (!r.test(s)) return false;
+  const hits = new Set<string>();
+  // Only tables created earlier in this file, by exact schema-qualified name, are exempt.
+  const fresh = new Set<string>();
+  for (const s of statements) {
+    for (const r of rules) {
+      if (allowed.has(r.rule) || hits.has(r.rule) || !r.test(s)) continue;
       const t = r.skipNewTables ? targetTable(s) : null;
-      return !(t && fresh.has(t));
-    });
-    if (hit) findings.push({ rule: r.rule, message: r.message });
+      if (t && fresh.has(t)) continue;
+      hits.add(r.rule);
+    }
+    const created = createdTable(s);
+    if (created) fresh.add(created);
+  }
+  for (const r of rules) {
+    if (hits.has(r.rule)) findings.push({ rule: r.rule, message: r.message });
   }
   return findings;
 }

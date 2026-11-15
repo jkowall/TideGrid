@@ -44,12 +44,48 @@ function excepted(list, key) {
 // 1. Licenses, for every installed package (dev tools included: they build the bundles).
 const byLicense = JSON.parse(run("pnpm", ["licenses", "list", "--json"]));
 const allowed = new Set(policy.licenses.allow);
+/**
+ * Whether an SPDX expression is allowed: "A OR B" when either side is, "A AND
+ * B" when both are, AND binding tighter than OR, parentheses respected. A
+ * WITH exception is judged by its license. Anything unparsable fails.
+ */
 const licenseOk = (expr) => {
-  // An SPDX "A OR B" passes when any choice is allowed; "A AND B" needs both.
-  const e = expr.replace(/^\((.*)\)$/, "$1").trim();
-  if (/ OR /.test(e)) return e.split(/ OR /).some((x) => licenseOk(x));
-  if (/ AND /.test(e)) return e.split(/ AND /).every((x) => licenseOk(x));
-  return allowed.has(e);
+  const tokens = expr.match(/\(|\)|[^\s()]+/g) ?? [];
+  let i = 0;
+  const peek = () => tokens[i];
+  const primary = () => {
+    const t = tokens[i++];
+    if (t === "(") {
+      const v = orExpr();
+      if (tokens[i++] !== ")") throw new Error("unbalanced");
+      return v;
+    }
+    if (t === undefined || t === ")" || /^(AND|OR|WITH)$/.test(t)) throw new Error("bad token");
+    if (peek() === "WITH") i += 2;
+    return allowed.has(t);
+  };
+  const andExpr = () => {
+    let v = primary();
+    while (peek() === "AND") {
+      i++;
+      v = primary() && v;
+    }
+    return v;
+  };
+  const orExpr = () => {
+    let v = andExpr();
+    while (peek() === "OR") {
+      i++;
+      v = andExpr() || v;
+    }
+    return v;
+  };
+  try {
+    const v = orExpr();
+    return i === tokens.length && v;
+  } catch {
+    return false;
+  }
 };
 const packages = [];
 for (const [license, list] of Object.entries(byLicense)) {
@@ -114,6 +150,13 @@ if (!offline) {
     parsed = JSON.parse(text);
   } catch {
     problems.push("pnpm audit did not answer JSON (registry unreachable?)");
+  }
+  // A failed audit can still answer JSON (an error object). Only a real report counts.
+  if (parsed && (parsed.error || typeof parsed.metadata?.vulnerabilities !== "object")) {
+    problems.push(
+      `pnpm audit did not return a report: ${JSON.stringify(parsed.error ?? parsed).slice(0, 300)}`,
+    );
+    parsed = undefined;
   }
   if (parsed) {
     const found = Object.values(parsed.advisories ?? {}).map((a) => ({
