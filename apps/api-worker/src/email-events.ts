@@ -9,9 +9,11 @@ import { contactFieldPolicy } from "./field-keys.ts";
 /**
  * The email events consumer (W1-EMAIL-EVENTS). Cloudflare publishes Email
  * Sending events (delivered, bounced, complained, and so on) to a queue named
- * by an event subscription; this Worker consumes that queue. Nothing in the
- * repository declares the queue, its consumer, or the subscription: the live
- * step is the owner's, and until then this code never runs in a deployment.
+ * by an event subscription; this Worker consumes that queue. Terraform
+ * creates the queue and its dead letter queue (queue key email-events), and
+ * the staging Wrangler environment declares the consumer. The subscription
+ * itself is an owner step in the Cloudflare dashboard; until it exists no
+ * event arrives.
  *
  * Which queue: EMAIL_EVENTS_QUEUE names it. A batch from any other queue is
  * left to the Worker's other consumers (see src/index.ts).

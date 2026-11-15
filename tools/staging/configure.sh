@@ -18,7 +18,8 @@
 #   FIELD_ENCRYPTION_KEYS (a fresh keyring), FAKE_PAYMENT_WEBHOOK_SECRET (32
 #   random bytes). Always set:
 #   EMAIL_ALLOWED_RECIPIENTS = ALERT_EMAIL, so staging mail reaches only the
-#   owner's inbox.
+#   owner's inbox; EMAIL_EVENTS_ACCOUNT_ID = CLOUDFLARE_ACCOUNT_ID, so the
+#   email events consumer accepts this account's bounces.
 # - Not set: TURNSTILE_SECRET_KEY. Staging has no guest site, so no page can
 #   run the widget, and a test secret answers for example.com, which the API
 #   refuses. Without it staging's checkout answers 503 human_check_unavailable
@@ -108,6 +109,8 @@ if ! has FAKE_PAYMENT_WEBHOOK_SECRET; then
   put[FAKE_PAYMENT_WEBHOOK_SECRET]=$hook
 fi
 put[EMAIL_ALLOWED_RECIPIENTS]=$ALERT_EMAIL
+# The account whose Email Sending events the consumer accepts.
+put[EMAIL_EVENTS_ACCOUNT_ID]=$CLOUDFLARE_ACCOUNT_ID
 
 file=$(mktemp "${RUNNER_TEMP:-/tmp}/staging-secrets.XXXXXX")
 trap 'rm -f "$file"' EXIT

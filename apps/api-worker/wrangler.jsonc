@@ -180,6 +180,11 @@
         // yet, so these names do not resolve: a staging link fails instead of
         // reaching production. A staging guest deployment takes this pattern.
         "GUEST_LINK_ORIGIN": "https://{slug}.book-staging.tidegrid.us",
+        // Email bounces and spam complaints (W1-EMAIL-EVENTS): the queue the
+        // Email Sending event subscription publishes to. The consumer also
+        // needs the EMAIL_EVENTS_ACCOUNT_ID secret (tools/staging/configure.sh
+        // sets it); without it every event is retried, then dead-lettered.
+        "EMAIL_EVENTS_QUEUE": "tidegrid-staging-email-events",
         "PUBLIC_CORS": "dynamic"
       },
       "send_email": [
@@ -217,6 +222,14 @@
             "max_batch_size": 10,
             "max_batch_timeout": 5,
             "max_retries": 3
+          },
+          // The email events queue's own dead letter queue has no consumer.
+          {
+            "queue": "tidegrid-staging-email-events",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 10,
+            "dead_letter_queue": "tidegrid-staging-email-events-dlq"
           }
         ]
       }

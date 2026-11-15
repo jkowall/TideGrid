@@ -18,6 +18,11 @@ module "environment" {
 
   queues = {
     outbox = {}
+    # Cloudflare's Email Sending event subscription publishes bounces and
+    # spam complaints here; the API Worker consumes it (src/email-events.ts).
+    # Its dead letter queue has no consumer, so events that keep failing stay
+    # there for 14 days to inspect.
+    email-events = {}
   }
 
   # Staging holds synthetic waivers only, so a short lock is enough to prove
