@@ -8,6 +8,17 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: W3-OPS-7, operating runbooks drafted (coordinator defaults pending owner confirmation)
+
+On 2026-11-15 the owner asked to finish the remaining pilot work ("lets finish it up"), which took in W3-OPS-7, the Core live gate's runbook item. The ten runbooks that [build, hosting, and operations](08-build-hosting-and-operations.md#required-operating-runbooks) requires are drafted in [docs/runbooks/operations](../runbooks/operations/README.md), each with the eight named fields per scenario, the severity targets, ET business-hours support, the operator manual fallback and its rehearsal, and incident roles (roles only). Docs only: no code, no live step, and nothing rehearsed yet. Coordinator defaults, pending owner confirmation:
+
+- **D1: no paging, so manual checks.** With no paging or long-term logs for the paid pilots (2026-11-08), the five-minute synthetic booking is replaced by a written check after each release, and logs worth keeping are copied into the incident record within Workers Logs' seven days.
+- **D2: incident records stay out of the repository.** They can name operators and guests, so they live in the owner's private incident folder; the repository gets ids and times only, in pull requests and the verification log.
+- **D3: rehearsals.** The operator manual fallback is rehearsed once before an operator's first live booking and then quarterly, with the restore drills. A Critical incident gets a written review within five business days.
+- **D4: other work keeps its own runbooks.** Release steps and backup and restore commands belong to the work moving releases into GitHub and the backups work; these guides link to them and keep only the decisions and checks.
+
+Gaps the runbooks name, each to close before the first live booking unless the owner says otherwise: an admin command to create an operator and publish its brand outside the seed; console pages for staff members and support grants; the live queue for email bounce and spam events; the outbox queue binding; an audit row for each staff download of a signed waiver; a minimum app version check before any operator's app is public; the emergency custodian and the independent restore observer.
+
 ### 2026-11-14: W3-G2.5-TAX, staff screens for tax rates (coordinator defaults pending owner confirmation)
 
 Staff endpoints and the console's Tax rates page for the per-location rates of 2026-11-08 ([pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax), [console](../../apps/operator-site/README.md#tax-rates-w3-g25-tax)). No migration. Coordinator defaults, pending owner confirmation:
