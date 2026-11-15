@@ -428,6 +428,10 @@ W3-G2.12-rest. `complimentary_grants` records an owner's decision to waive a sta
 - **Bookings.** `payment_id` may be null, only for source `complimentary` (`bookings_complimentary_payment`); `app.stamp_booking_source` sets that source when a grant exists, and `app.check_booking` requires the grant, an open checkout, a pending order, and the confirmed hold in place of a succeeded payment. `app.check_checkout_session` (replaced) lets such a checkout move to confirmed with no payment.
 - **Cancellations and fees.** `booking_cancellations.payment_id` may be null, exactly when `paid_amount` is 0 (`booking_cancellations_complimentary`); a complimentary booking cancels with remedy none, no refund share, and no override. `app.check_fee_assessment` requires an order total and eligible amount of 0 for one.
 
+## Sealed guest contact details, part 4 (0058)
+
+W3-OPS-4, the last part: 0058 validates the outbox checks 0057 added NOT VALID (the migration safety check's two-step), so every message, old or new, is held to one shape. Audit rows and events were checked and already hold no guest contact details; staff sign-in addresses are staff data and stay plain.
+
 ## Sealed guest contact details, part 3 (0057)
 
 W3-OPS-4, phase 3: the email outbox and every place that matches a guest's address. A message written where the transaction has a keyring keeps `{toEmail, toName, subject, html, text}` in `content_sealed` and leaves `to_name`, `subject`, `html_body`, and `text_body` null (`email_messages_content_place`); the delivery job opens it to send.

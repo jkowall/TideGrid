@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-15
 
+### Every guest contact detail sealed (W3-OPS-4, owner decision), built November 15, 2026
+
+Goal branch `claude/project-thread-kgaejw`, PRs 183 (migration `0055_contact_sealed_bookers.sql`), 185 (`0056_contact_sealed_participants.sql`), 186 (`0057_contact_sealed_email.sql`), and the closing PR (`0058_contact_sealed_validate.sql`). Synthetic data only; no provider call, no deploy, no key created.
+
+- **Built.** With a field keyring bound to the database handle, bookers, credit accounts, imported customers, party members, and the email outbox are written sealed, with keyed tokens for the addresses (and a booker's name words) so the database still matches what it must. Waiver deliveries, reminders, and the do-not-email list store an address key in place of the address. Every reader opens what it shows; the tenant export opens sealed rows into their usual columns.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `sealed-bookers` and `sealed-participants` in `domain-booking`, `sealed-email` in `domain-messaging`, `contact-sealed` and `email-sealed` in `domain-waivers` (rows hold no plain name or address, a handle without the keys cannot read or send, corrections keep their mode, the database refuses mixed shapes and a wrong invitation token, search by whole words and whole address only, a bounce suppresses the key and stops the next email, staff see masked addresses, sealed evidence records the real address), the checkout API suite (503 without the keys), and the export unit tests; the full `pnpm test:integration` for each PR; the migration safety check.
+- **Review.** Automated pull request reviews found a 32-token cap that refused long names (removed), a case-only correction that the database refused (fixed with an exact-name token), a shadowed variable that broke a second credit adjustment (fixed, with a test), missing coverage for the invitation token guard and for waiver status with a sealed party (added), and that the migration check, merged minutes after 0055, judged 0055 (allowed with a reason; 0055 is applied nowhere shared).
+- **Still open.** Coordinator defaults D1 to D7 await the owner, and the keys must exist in staging and production before the first booking there.
+
 ### Security before real data (W3-OPS-4), built November 15, 2026
 
 Goal branch `claude/project-thread-kgaejw`, PRs 174 (migration `0053_waiver_document_storage.sql`), 175 (migration `0054_waiver_evidence_sealed.sql`), 180 (Turnstile, no migration), and the Terraform and register PR. Synthetic data only; no provider call, no deploy, no apply.
