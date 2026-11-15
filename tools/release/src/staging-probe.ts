@@ -233,7 +233,7 @@ export async function assertStagingEndpoint(o: ProbeOptions, t: NeonTarget): Pro
 
 export async function restart(o: ProbeOptions, t: NeonTarget, windowMs = 180_000) {
   await assertStagingEndpoint(o, t);
-  // A connection the Worker already holds through Hyperdrive, before the restart.
+  // A read before the restart, through whatever connection the Worker holds.
   const before = await timed(o, tripsUrl(o), { headers: headers(o) });
   const started = o.now();
   await neon(o, t, `/endpoints/${t.endpointId}/restart`, { method: "POST" });
@@ -265,6 +265,8 @@ export async function restart(o: ProbeOptions, t: NeonTarget, windowMs = 180_000
   return {
     probe: "restart",
     outcome: recoveredMs !== null && after?.outcome === "pass" ? "pass" : "fail",
+    // False when no read failed: the restart was too quick to see from here.
+    sawFailure,
     beforeStatus: before.res.status,
     statuses: Object.fromEntries(statuses),
     firstFailureMs,

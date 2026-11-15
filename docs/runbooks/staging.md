@@ -36,4 +36,4 @@ Creates a throwaway branch of staging (4-hour expiry, deleted at the end), runs 
 
 ## If a run fails
 
-Read the failing step's log. The scripts print a short reason and never a connection string or secret. A failed deploy leaves the previous Worker version serving; rerun deploy for the same or a newer SHA. If the Hyperdrive config or the database password is in doubt, rerun deploy with `rotate` checked.
+Read the failing step's log. The scripts print a short reason and never a connection string or secret. A deploy that fails before the connect step leaves the previous Worker version serving; rerun deploy for the same or a newer SHA. A deploy that fails during the connect step, after the password changed, leaves staging unable to reach its database: rerun deploy with `rotate` checked. Do the same whenever the Hyperdrive config or the database password is in doubt.

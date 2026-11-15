@@ -55,14 +55,25 @@ cfapi() {
 case "$STAGING_HOST" in "$NEON_MAIN_HOST" | *-pooler.*) die "refusing: not staging's direct host" ;; esac
 
 hd_id=$(cfapi GET /hyperdrive/configs | jq -r --arg n "$hd_name" '[.result[] | select(.name == $n)][0].id // empty')
-secrets=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$cf/workers/scripts/$api_script/secrets" |
-  jq -r 'if .success then [.result[].name] | join(" ") else "" end')
+# A failed listing must stop the run: treating it as "no secrets" would
+# replace the field keyring and leave sealed staging data unreadable. Only a
+# Worker that does not exist yet (first deploy) counts as having none.
+listing=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$cf/workers/scripts/$api_script/secrets")
+if [ "$(jq -r '.success // false' <<<"$listing")" = true ]; then
+  secrets=$(jq -r '[.result[].name] | join(" ")' <<<"$listing")
+elif jq -e '[.errors[]?.code] | index(10007)' <<<"$listing" >/dev/null; then
+  secrets=""
+else
+  die "could not list $api_script's secrets: $(jq -c '[.errors[]? | {code, message}]' <<<"$listing" 2>/dev/null || echo unreadable)"
+fi
 has() { [[ " $secrets " == *" $1 "* ]]; }
 
 if [ -z "$hd_id" ] || ! has DATABASE_URL; then rotate=true; fi
 
 declare -A put=()
 if [ "$rotate" = true ]; then
+  # From here until the secrets are set, staging cannot reach its database.
+  # If this run fails in between, rerun deploy with rotate checked.
   password=$(openssl rand -hex 32)
   mask "$password"
   DATABASE_URL="$STAGING_ADMIN_URL" TIDEGRID_APP_PASSWORD="$password" \

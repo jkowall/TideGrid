@@ -49,6 +49,7 @@ case "$url" in postgres://* | postgresql://*) ;; *) die "Neon gave no connection
 case "$url" in *"$main_host"*) die "the connection string names main's host; refusing" ;; esac
 
 mask "$url"
+mask "$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$url")"
 mask "$host"
 mask "$main_host"
 printf 'STAGING_BRANCH_ID=%s\nSTAGING_ENDPOINT_ID=%s\nSTAGING_HOST=%s\nSTAGING_DB=%s\nNEON_MAIN_HOST=%s\nSTAGING_ADMIN_URL=%s\n' \

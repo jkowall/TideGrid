@@ -100,7 +100,8 @@ jobs:
           # Synthetic demo operators only, idempotent.
           pnpm db:seed
           last=$(ls packages/database/migrations | grep -E '^[0-9]{4}_.+\.sql$' | LC_ALL=C sort | tail -1)
-          echo "LAST_MIGRATION=${last%.sql}" >> "$GITHUB_ENV"
+          # Health reports schema_migrations.name, which keeps the .sql suffix.
+          echo "LAST_MIGRATION=$last" >> "$GITHUB_ENV"
           echo "staging migrated through $last" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Deploy the staging API
         if: inputs.action == 'deploy'
@@ -174,17 +175,22 @@ jobs:
           trap 'pnpm --silent --filter @tidegrid/database exec tsx src/neon-branch.ts delete "$branch" || true; rm -f "$out"' EXIT
           url=$(jq -r .connectionString "$out")
           echo "::add-mask::$url"
+          pw=$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$url")
+          [ -n "$pw" ] && echo "::add-mask::$pw"
           echo "throwaway branch $branch from staging" | tee -a "$GITHUB_STEP_SUMMARY"
           set +e
-          DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 TIDEGRID_SEARCH_BENCH=1 CI=true \
-            pnpm test:integration 2>&1 | tee "$RUNNER_TEMP/integration.log"
-          status=${PIPESTATUS[0]}
+          # The suites get only the throwaway branch, not staging's own URL or the Neon key.
+          env -u STAGING_ADMIN_URL -u NEON_API_KEY \
+            DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 TIDEGRID_SEARCH_BENCH=1 CI=true \
+            pnpm test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
+          status=$?
           set -e
-          {
-            echo '```'
-            grep -E 'Test Files|Tests  |B_BENCH|fairness' "$RUNNER_TEMP/integration.log" | cut -c1-400 | head -80
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          # Only the totals, benchmark, and fairness lines are kept: the raw log
+          # stays on the runner, because masking covers the live log only.
+          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness' "$RUNNER_TEMP/integration.raw" \
+            | grep -v -F "${pw:-no-password-to-filter}" | cut -c1-400 > "$RUNNER_TEMP/integration.log" || true
+          rm -f "$RUNNER_TEMP/integration.raw"
+          { echo '```'; head -n 120 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
       - name: Keep the evidence
