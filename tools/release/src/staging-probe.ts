@@ -165,9 +165,14 @@ export async function readAfterWrite(o: ProbeOptions, pairs = 20, gapMs = 2_500)
       headers: headers(o, { "Content-Type": "application/json", "Idempotency-Key": randomUUID() }),
       body: JSON.stringify({ tripId: target.tripId, party: target.party, addOns: [] }),
     });
-    if (w.res.status !== 201) {
-      // A refused write says nothing about consistency; counted apart.
+    if (w.res.status === 429) {
+      // Rate limited before any write: says nothing about consistency.
       writeFailures++;
+      errors.push("write 429");
+      continue;
+    }
+    if (w.res.status !== 201) {
+      // Any other answer may hide a committed write: it fails the probe.
       errors.push(`write ${w.res.status}`);
       continue;
     }
@@ -188,8 +193,8 @@ export async function readAfterWrite(o: ProbeOptions, pairs = 20, gapMs = 2_500)
   }
   return {
     probe: "read-after-write",
-    // Fails on any stale or wrong read. Refused writes only fail it when
-    // fewer than three quarters of the pairs could be checked at all.
+    // Fails on any stale or wrong read and any write error but a rate
+    // limit; rate-limited pairs fail it only past a quarter of the pairs.
     outcome: ok === pairs - writeFailures && ok >= Math.ceil(pairs * 0.75) ? "pass" : "fail",
     pairs,
     ok,

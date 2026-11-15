@@ -101,6 +101,20 @@ describe("staging probes", () => {
     expect(r).toMatchObject({ outcome: "pass", ok: 7, stale: 0, writeFailures: 1 });
   });
 
+  it("fails on a server error from a write", async () => {
+    const o = fakeApi(() => 200);
+    let posts = 0;
+    const broken: ProbeOptions = {
+      ...o,
+      fetch: async (url, init) => {
+        if (init?.method === "POST" && ++posts === 2) return json(500, {});
+        return o.fetch(url, init);
+      },
+    };
+    const r = await readAfterWrite(broken, 8);
+    expect(r).toMatchObject({ outcome: "fail", ok: 7, writeFailures: 0 });
+  });
+
   it("refuses to restart a compute that is not staging's", async () => {
     const o = fakeApi(() => 200);
     const t = { apiKey: "k", project: "p", branchId: "br-s", endpointId: "ep-1" };
