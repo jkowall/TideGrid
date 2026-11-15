@@ -35,6 +35,7 @@ import {
   deliverTenantMessages,
   enqueueMessage,
   ingestEmailEvent,
+  SEALED_ADDRESS_MISMATCH,
 } from "./index.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -69,18 +70,26 @@ describe.skipIf(!env)("sealed email (W3-OPS-4, 0057)", () => {
     return id;
   }
 
-  async function enqueue(tenantId: string, label: string, key = label): Promise<string> {
-    const { messageId } = await inTenant(tenantId, (trx) =>
-      enqueueMessage(trx, ctxFor(tenantId), {
-        dedupeKey: `se.message:${run}-${key}`,
-        template: "se_message",
-        templateVersion: 1,
-        to: { email: addr(label).toUpperCase(), name: "Ana Example" },
-        content: {
-          subject: `Hello Ana ${label}`,
-          blocks: [{ kind: "paragraph", text: "Hi Ana, see you on the dock." }],
-        },
-      }),
+  async function enqueue(
+    tenantId: string,
+    label: string,
+    key = label,
+    db = sealed.db,
+  ): Promise<string> {
+    const { messageId } = await inTenant(
+      tenantId,
+      (trx) =>
+        enqueueMessage(trx, ctxFor(tenantId), {
+          dedupeKey: `se.message:${run}-${key}`,
+          template: "se_message",
+          templateVersion: 1,
+          to: { email: addr(label).toUpperCase(), name: "Ana Example" },
+          content: {
+            subject: `Hello Ana ${label}`,
+            blocks: [{ kind: "paragraph", text: "Hi Ana, see you on the dock." }],
+          },
+        }),
+      db,
     );
     return messageId;
   }
@@ -214,6 +223,73 @@ describe.skipIf(!env)("sealed email (W3-OPS-4, 0057)", () => {
     const next = await enqueue(T, "e3", "e3-next");
     const before = fixture.sends.length;
     const report = await deliver(T, fixture, ["e3"]);
+    expect(report.items).toEqual([
+      expect.objectContaining({ messageId: next, outcome: "failed", code: ADDRESS_SUPPRESSED }),
+    ]);
+    expect(fixture.sends).toHaveLength(before);
+  });
+
+  it("refuses to send a sealed value copied onto another recipient's address key", async () => {
+    const T = await newTenant("e4");
+    const fixture = createCloudflareEmailFixture();
+    const ana = await enqueue(T, "e4a");
+    const ben = await enqueue(T, "e4b");
+    const [a, b] = [await stored(ana), await stored(ben)];
+    // Ben's key and index, Ana's sealed content: the database's shape rules
+    // hold, so only the delivery job can tell.
+    const copy = await inTenant(T, (trx) =>
+      sql<{ id: string }>`insert into email_messages (tenant_id, dedupe_key, template,
+            template_version, to_email, to_email_index, from_name, content_sealed)
+          values (${T}, ${`se.copy:${randomUUID()}`}, 'se_message', 1, ${b.to_email},
+                  ${b.to_email_index}, 'Sealed', ${a.content_sealed})
+          returning id`.execute(trx),
+    ).then((r) => r.rows[0]?.id);
+    const report = await deliver(T, fixture, ["e4a", "e4b"]);
+    expect(report.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ messageId: ana, outcome: "sent" }),
+        expect.objectContaining({ messageId: ben, outcome: "sent" }),
+        expect.objectContaining({
+          messageId: copy,
+          outcome: "failed",
+          code: SEALED_ADDRESS_MISMATCH,
+        }),
+      ]),
+    );
+    expect(fixture.sends).toHaveLength(2);
+    if (!copy) throw new Error("no copy");
+    expect(await stored(copy)).toMatchObject({
+      state: "failed",
+      last_error_code: SEALED_ADDRESS_MISMATCH,
+    });
+  });
+
+  it("applies a suppression recorded before the environment sealed to a sealed message", async () => {
+    const T = await newTenant("e5");
+    const fixture = createCloudflareEmailFixture();
+    // Written plain, sent, and hard bounced: the suppression holds the address.
+    const first = await enqueue(T, "e5", "e5", plain.db);
+    await deliver(T, fixture, ["e5"], plain.db);
+    const sent = await stored(first);
+    if (!sent.provider_message_id) throw new Error("not sent");
+    await ingestEmailEvent(
+      plain.db,
+      { accountId: FIXTURE_ACCOUNT_ID, sendingDomain: FIXTURE_SENDING_DOMAIN },
+      cloudflareEmailEvent("bounced", {
+        messageId: sent.provider_message_id,
+        eventId: `se-legacy-${run}`,
+      }),
+    );
+    expect(
+      await admin<{ address: string }[]>`
+        select address from public.email_suppressions where tenant_id = ${T}`,
+    ).toEqual([{ address: addr("e5") }]);
+
+    // The next message is sealed and keyed; the plain suppression still stops it.
+    const next = await enqueue(T, "e5", "e5-next");
+    expect((await stored(next)).to_email).toMatch(/@sealed\.invalid$/);
+    const before = fixture.sends.length;
+    const report = await deliver(T, fixture, ["e5"]);
     expect(report.items).toEqual([
       expect.objectContaining({ messageId: next, outcome: "failed", code: ADDRESS_SUPPRESSED }),
     ]);

@@ -131,6 +131,8 @@ export {
   type MessageContent,
   type MessageContentRow,
   openMessageContent,
+  SEALED_ADDRESS_MISMATCH,
+  SealedAddressMismatchError,
 } from "./message-content.ts";
 export {
   BALANCE_LINK_TEMPLATE,

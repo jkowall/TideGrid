@@ -70,7 +70,11 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
-import { openMessageContent } from "./message-content.ts";
+import {
+  openMessageContent,
+  SEALED_ADDRESS_MISMATCH,
+  SealedAddressMismatchError,
+} from "./message-content.ts";
 import {
   BALANCE_LINK_TEMPLATE,
   BALANCE_REMINDER_TEMPLATE,
@@ -420,14 +424,15 @@ async function claimOne(
         html_body: string | null;
         text_body: string | null;
         content_sealed: string | null;
+        to_email_index: string | null;
         state: string;
         resend: boolean;
         template: string;
       }
     >`
       select id, attempts, state, template, booking_id, participant_id, subject_ref, to_email, to_name,
-             from_name, reply_to, subject, html_body, text_body, content_sealed, link_purpose, link_path,
-             link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
+             from_name, reply_to, subject, html_body, text_body, content_sealed, to_email_index,
+             link_purpose, link_path, link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
         from email_messages m
        where tenant_id = ${ctx.tenantId}
          and ((state = 'queued' and next_attempt_at <= now())
@@ -619,11 +624,31 @@ async function claimOne(
       await loadEmailBrand(trx, ctx.tenantId),
     );
     // A sealed message (0057) is opened here, for the send only.
-    const { content_sealed: _sealed, ...content } = await openMessageContent(
-      trx,
-      ctx.tenantId,
-      found,
-    );
+    // Its address key must be the opened address's own; a sealed value
+    // copied from another message fails here, never sends.
+    let opened: Awaited<ReturnType<typeof openMessageContent<typeof found>>>;
+    try {
+      opened = await openMessageContent(trx, ctx.tenantId, found);
+    } catch (error) {
+      if (!(error instanceof SealedAddressMismatchError)) throw error;
+      await fail(trx, ctx, found.id, attempt, SEALED_ADDRESS_MISMATCH);
+      return {
+        kind: "failed",
+        messageId: found.id,
+        attempt,
+        code: SEALED_ADDRESS_MISMATCH,
+      } as const;
+    }
+    // A suppression recorded before this environment sealed holds the plain
+    // address; it stops a sealed message to that address too.
+    if (
+      found.content_sealed &&
+      (await isSuppressed(trx, ctx.tenantId, opened.to_email.trim().toLowerCase()))
+    ) {
+      await fail(trx, ctx, found.id, attempt, ADDRESS_SUPPRESSED);
+      return { kind: "failed", messageId: found.id, attempt, code: ADDRESS_SUPPRESSED } as const;
+    }
+    const { content_sealed: _sealed, to_email_index: _index, ...content } = opened;
     const row: ClaimedRow = {
       ...content,
       attempts: attempt,
