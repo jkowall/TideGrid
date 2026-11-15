@@ -1818,6 +1818,27 @@ describe("after a lost answer, the next answer decides", () => {
     expect(new Set(opens.map((c) => JSON.stringify(c.body))).size).toBe(1);
   });
 
+  it("keeps the doubt and the request through a failed human check, which refuses before the key is read", async () => {
+    const calls = stubApi({
+      openCheckout: inOrder(
+        offline,
+        () => refusal(403, "human_check_failed"),
+        (call) => opened(call),
+      ),
+    });
+    renderPage("?t.adult=1");
+    await intoDoubt();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("We couldn't confirm you're not a robot")).toBeTruthy();
+    expect(screen.getByText("We couldn't confirm that your checkout started")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await heading("Payment");
+    const opens = callsTo(calls, "openCheckout");
+    expect(opens).toHaveLength(3);
+    expect(new Set(opens.map((c) => c.headers.get("idempotency-key"))).size).toBe(1);
+    expect(new Set(opens.map((c) => JSON.stringify(c.body))).size).toBe(1);
+  });
+
   it("asks before a link leaves while the checkout is still opening", async () => {
     const answer = held();
     stubApi({ openCheckout: answer.answer });

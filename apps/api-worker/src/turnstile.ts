@@ -8,7 +8,9 @@ import { ApiError } from "./errors.ts";
  * new waiver link (it sends email), and the dock's booking code lookup (it
  * guesses at bookings). The guest site runs the widget and sends its token in
  * the `Turnstile-Token` header; the API checks it with Cloudflare's siteverify
- * before any database work.
+ * before the route's own database work. CORS for an origin this isolate has
+ * not seen may still read the hostname table first; that read has its own
+ * per-address limit and is the same for every public route.
  *
  * - With `TURNSTILE_SECRET_KEY`, every such request needs a token Cloudflare
  *   confirms, for this action, issued on the host the request came from.

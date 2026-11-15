@@ -39,6 +39,7 @@ declare global {
 
 const SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 const tokenTimeoutMs = 60_000;
+const scriptTimeoutMs = 15_000;
 
 let siteKey: string | null = null;
 let loading: Promise<TurnstileApi> | null = null;
@@ -53,15 +54,23 @@ function loadScript(): Promise<TurnstileApi> {
   if (!loading) {
     loading = new Promise<TurnstileApi>((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = SCRIPT;
-      script.async = true;
-      script.onload = () =>
-        window.turnstile ? resolve(window.turnstile) : reject(new Error("no turnstile"));
-      script.onerror = () => {
+      // A failed or stalled load is removed and forgotten, so the next try
+      // loads the script afresh instead of waiting on this one.
+      const fail = (message: string) => {
+        clearTimeout(timer);
         loading = null;
         script.remove();
-        reject(new Error("turnstile did not load"));
+        reject(new Error(message));
       };
+      const timer = setTimeout(() => fail("turnstile load timed out"), scriptTimeoutMs);
+      script.src = SCRIPT;
+      script.async = true;
+      script.onload = () => {
+        if (!window.turnstile) return fail("no turnstile");
+        clearTimeout(timer);
+        resolve(window.turnstile);
+      };
+      script.onerror = () => fail("turnstile did not load");
       document.head.append(script);
     });
   }

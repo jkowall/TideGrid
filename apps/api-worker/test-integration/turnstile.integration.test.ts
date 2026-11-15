@@ -112,7 +112,7 @@ describe.skipIf(!env)("W3-OPS-4: Turnstile on public writes", () => {
     });
   });
 
-  it("guards the dock lookup and opening a checkout before any database work", async () => {
+  it("guards the dock lookup and opening a checkout before the route's own database work", async () => {
     answer = async () => ({ success: true, action: "waiver_renewal", hostname: A.host });
     const dock = await post(
       "/v1/public/waiver-dock/lookups",

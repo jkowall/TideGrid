@@ -50,4 +50,20 @@ describe("Turnstile human check (W3-OPS-4)", () => {
     setHumanCheck({ siteKey: "0x4AAAAAAAtest" });
     await expect(humanToken("checkout")).rejects.toThrow();
   });
+
+  it("gives up on a stalled script load, removes it, and loads afresh on the next try", async () => {
+    vi.useFakeTimers();
+    setHumanCheck({ siteKey: "0x4AAAAAAAtest" });
+    const first = humanToken("checkout");
+    const failed = expect(first).rejects.toThrow(/timed out/);
+    expect(document.querySelectorAll('script[src*="challenges.cloudflare.com"]')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await failed;
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+    const second = humanToken("checkout");
+    second.catch(() => {});
+    expect(document.querySelectorAll('script[src*="challenges.cloudflare.com"]')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(second).rejects.toThrow();
+  });
 });
