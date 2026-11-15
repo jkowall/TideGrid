@@ -7,8 +7,10 @@
 import {
   type AccessPurpose,
   type AccessRevocationReason,
+  contactKeys,
   type EmailMessageState,
   type EmailProviderName,
+  emailToken,
   isUuid,
   type TenantContext,
   type TenantTransaction,
@@ -153,12 +155,17 @@ export async function enqueueMessage(
   const slot = link ? randomSlot() : null;
   const rendered = renderEmail(brand, input.content, { slot });
   const replyTo = brand.contactEmail ? brand.contactEmail.toLowerCase() : null;
+  // The address's blind index token, where the transaction has a field
+  // keyring (0056): how a message is matched to a sealed participant.
+  const keyring = await contactKeys(trx);
+  const toEmailIndex = keyring ? await emailToken(keyring, ctx.tenantId, toEmail) : null;
   const { rows } = await sql<{ id: string }>`
     insert into email_messages (tenant_id, dedupe_key, template, template_version, booking_id,
-      participant_id, subject_ref, to_email, to_name, from_name, reply_to, subject, html_body,
-      text_body, link_purpose, link_path, link_ttl_seconds, link_slot, next_attempt_at)
+      participant_id, subject_ref, to_email, to_email_index, to_name, from_name, reply_to, subject,
+      html_body, text_body, link_purpose, link_path, link_ttl_seconds, link_slot, next_attempt_at)
     values (${ctx.tenantId}, ${input.dedupeKey}, ${input.template}, ${input.templateVersion},
-            ${bookingId}, ${participantId}, ${subjectRef}, ${toEmail}, ${toName}, ${brand.name},
+            ${bookingId}, ${participantId}, ${subjectRef}, ${toEmail}, ${toEmailIndex}, ${toName},
+            ${brand.name},
             ${replyTo}, ${rendered.subject}, ${rendered.html}, ${rendered.text},
             ${link?.purpose ?? null}, ${link?.path ?? null}, ${ttl}, ${slot},
             ${input.notBefore ?? null})

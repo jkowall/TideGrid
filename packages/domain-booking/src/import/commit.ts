@@ -25,6 +25,7 @@ import { sql } from "kysely";
 import { bookerColumns, customerKey } from "../booker.ts";
 import { ensureCreditAccount } from "../credits.ts";
 import { CORE_FEE_BP, feeReversalFor } from "../fee-ledger.ts";
+import { participantContactColumns } from "../participant-contact.ts";
 import { newBookingReference } from "../secrets.ts";
 import { importContentHash, importLookup } from "./dry-run.ts";
 import type { ImportFile } from "./spec.ts";
@@ -653,11 +654,19 @@ async function writePlan(
     }
     const bookingId = bookings.get(p.bookingKey);
     if (!bookingId) throw new Error("a planned participant names a booking not planned");
+    // Sealed where the transaction has a field keyring (0056), as a guest's own.
+    const c = await participantContactColumns(trx, tenantId, {
+      full_name: p.fullName,
+      email: p.email,
+      guardian_name: p.guardianName,
+      guardian_email: p.guardianEmail,
+    });
     const { rows } = await sql<{ id: string }>`
       insert into booking_participants (tenant_id, booking_id, position, full_name, is_minor,
-        email, guardian_name, guardian_email)
-      values (${tenantId}, ${bookingId}, ${p.position}, ${p.fullName}, ${p.isMinor},
-              ${p.email}, ${p.guardianName}, ${p.guardianEmail})
+        email, guardian_name, guardian_email, contact_sealed, email_index, guardian_email_index)
+      values (${tenantId}, ${bookingId}, ${p.position}, ${c.full_name}, ${p.isMinor},
+              ${c.email}, ${c.guardian_name}, ${c.guardian_email}, ${c.contact_sealed},
+              ${c.email_index}, ${c.guardian_email_index})
       returning id`.execute(trx);
     const participantId = rows[0]?.id;
     if (!participantId) throw new Error("an imported participant insert returned no row");

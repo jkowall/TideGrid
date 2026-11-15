@@ -40,6 +40,7 @@ import { openBookers } from "./booker.ts";
 import { importedEmailHeld } from "./emails.ts";
 import { clean, firstName, singleLine, tripWhen } from "./format.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
+import { openParticipantRows } from "./participant-contact.ts";
 import {
   MAX_PARTY_SIZE,
   type ParticipantView,
@@ -90,11 +91,13 @@ export type InviteParticipantResult =
 
 interface InviteeRow {
   id: string;
+  /** Null as stored for a sealed row (0056); always set once opened. */
   full_name: string;
   is_minor: boolean;
   email: string | null;
   guardian_name: string | null;
   guardian_email: string | null;
+  contact_sealed: string | null;
 }
 
 /**
@@ -137,12 +140,12 @@ export async function inviteParticipant(
   }
 
   const { rows: invitees } = await sql<InviteeRow>`
-    select id, full_name, is_minor, email, guardian_name, guardian_email
+    select id, full_name, is_minor, email, guardian_name, guardian_email, contact_sealed
       from booking_participants
      where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
        and position = ${input.position} and removed_at is null
        for no key update`.execute(trx);
-  const invitee = invitees[0];
+  const [invitee] = await openParticipantRows(trx, tenantId, invitees);
   if (!invitee) return { kind: "place_not_named" };
   const recipient = invitee.is_minor ? "guardian" : "participant";
   const address = invitee.is_minor ? invitee.guardian_email : invitee.email;
@@ -381,6 +384,7 @@ export async function getParticipantProfile(
     email: string | null;
     guardian_name: string | null;
     guardian_email: string | null;
+    contact_sealed: string | null;
     created_at: Date | string;
     updated_at: Date | string;
     state: "confirmed" | "canceled";
@@ -395,7 +399,7 @@ export async function getParticipantProfile(
     booker_sealed: string | null;
   }>`
     select pt.id, pt.position, pt.full_name, pt.is_minor, pt.email, pt.guardian_name,
-           pt.guardian_email, pt.created_at, pt.updated_at,
+           pt.guardian_email, pt.contact_sealed, pt.created_at, pt.updated_at,
            b.state, p.name as product_name, t.starts_at, t.time_zone,
            t.starts_at <= now() as departed,
            l.name as location_name, l.meeting_point, l.meeting_instructions, s.booker_name, s.booker_sealed
@@ -413,7 +417,7 @@ export async function getParticipantProfile(
        and g.revoked_at is null and g.expires_at > now()
      where pt.tenant_id = ${tenantId} and pt.booking_id = ${session.bookingId}
        and pt.id = ${session.participantId} and pt.removed_at is null`.execute(trx);
-  const [row] = await openBookers(trx, tenantId, rows);
+  const [row] = await openParticipantRows(trx, tenantId, await openBookers(trx, tenantId, rows));
   if (!row) return null;
   return {
     participant: {

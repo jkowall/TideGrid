@@ -28,6 +28,11 @@ import {
 import { revokeAccessLinks, revokeGuestSessions } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { type BookingHooks, noBookingHooks, type ParticipantField } from "./hooks.ts";
+import {
+  openParticipantRow,
+  openParticipantRows,
+  participantContactColumns,
+} from "./participant-contact.ts";
 import { iso, record } from "./views.ts";
 
 /** The largest party a booking can have; positions run from 1 to the party size. */
@@ -78,23 +83,26 @@ export type PutParticipantResult =
 interface ParticipantRow {
   id: string;
   position: number;
-  full_name: string;
+  /** Null as stored for a sealed row; filled once opened. */
+  full_name: string | null;
   is_minor: boolean;
   email: string | null;
   guardian_name: string | null;
   guardian_email: string | null;
+  /** The sealed details (0056), or null for a plain row; opened before use. */
+  contact_sealed: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
 
 const participantColumns = sql`id, position, full_name, is_minor, email, guardian_name,
-  guardian_email, created_at, updated_at`;
+  guardian_email, contact_sealed, created_at, updated_at`;
 
 function toView(row: ParticipantRow): ParticipantView {
   return {
     id: row.id,
     position: row.position,
-    name: row.full_name,
+    name: row.full_name ?? "",
     isMinor: row.is_minor,
     email: row.email,
     guardian:
@@ -192,7 +200,7 @@ export async function listParticipants(
                   where c.tenant_id = b.tenant_id and c.booking_id = b.id
                   order by c.position)::int[] as given_up,
            p.id as p_id, p.position, p.full_name, p.is_minor, p.email, p.guardian_name,
-           p.guardian_email, p.created_at, p.updated_at
+           p.guardian_email, p.contact_sealed, p.created_at, p.updated_at
       from bookings b
       left join booking_participants p
         on p.tenant_id = b.tenant_id and p.booking_id = b.id and p.removed_at is null
@@ -200,12 +208,15 @@ export async function listParticipants(
      order by p.position`.execute(trx);
   const first = rows[0];
   if (!first) return null;
+  const named = await openParticipantRows(
+    trx,
+    tenantId,
+    rows.filter((r) => r.p_id !== null),
+  );
   return {
     partySize: first.party_size,
     places: placesOf(first.party_size, first.given_up),
-    participants: rows
-      .filter((r) => r.p_id !== null)
-      .map((r) => toView({ ...(r as ParticipantRow), id: r.p_id as string })),
+    participants: named.map((r) => toView({ ...(r as ParticipantRow), id: r.p_id as string })),
   };
 }
 
@@ -279,18 +290,22 @@ export async function putParticipant(
      where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId}
        and position = ${input.position}
        for no key update`.execute(trx);
-  const current = existing[0];
+  const current = existing[0]
+    ? await openParticipantRow(trx, ctx.tenantId, existing[0])
+    : undefined;
 
   if (!current) {
+    const c = await participantContactColumns(trx, ctx.tenantId, wanted);
     const { rows } = await sql<ParticipantRow>`
       insert into booking_participants (tenant_id, booking_id, position, full_name, is_minor,
-        email, guardian_name, guardian_email)
-      values (${ctx.tenantId}, ${input.bookingId}, ${input.position}, ${wanted.full_name},
-              ${wanted.is_minor}, ${wanted.email}, ${wanted.guardian_name},
-              ${wanted.guardian_email})
+        email, guardian_name, guardian_email, contact_sealed, email_index, guardian_email_index)
+      values (${ctx.tenantId}, ${input.bookingId}, ${input.position}, ${c.full_name},
+              ${wanted.is_minor}, ${c.email}, ${c.guardian_name}, ${c.guardian_email},
+              ${c.contact_sealed}, ${c.email_index}, ${c.guardian_email_index})
       returning ${participantColumns}`.execute(trx);
-    const row = rows[0];
-    if (!row) throw new Error("participant insert returned no row");
+    const inserted = rows[0];
+    if (!inserted) throw new Error("participant insert returned no row");
+    const row = await openParticipantRow(trx, ctx.tenantId, inserted);
     await record(trx, ctx, {
       action: "participant.added",
       subjectType: "booking_participant",
@@ -312,14 +327,21 @@ export async function putParticipant(
     .map(([field]) => field);
   if (changed.length === 0) return { kind: "unchanged", participant: toView(current) };
 
+  // A correction stays where the row was written, plain or sealed (0056).
+  const c = await participantContactColumns(trx, ctx.tenantId, wanted, {
+    sealed: current.contact_sealed !== null,
+  });
   const { rows } = await sql<ParticipantRow>`
     update booking_participants
-       set full_name = ${wanted.full_name}, is_minor = ${wanted.is_minor}, email = ${wanted.email},
-           guardian_name = ${wanted.guardian_name}, guardian_email = ${wanted.guardian_email}
+       set full_name = ${c.full_name}, is_minor = ${wanted.is_minor}, email = ${c.email},
+           guardian_name = ${c.guardian_name}, guardian_email = ${c.guardian_email},
+           contact_sealed = ${c.contact_sealed}, email_index = ${c.email_index},
+           guardian_email_index = ${c.guardian_email_index}
      where tenant_id = ${ctx.tenantId} and id = ${current.id}
      returning ${participantColumns}`.execute(trx);
-  const row = rows[0];
-  if (!row) throw new Error("locked participant did not update");
+  const updated = rows[0];
+  if (!updated) throw new Error("locked participant did not update");
+  const row = await openParticipantRow(trx, ctx.tenantId, updated);
   await record(trx, ctx, {
     action: "participant.updated",
     subjectType: "booking_participant",

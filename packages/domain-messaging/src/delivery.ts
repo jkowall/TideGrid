@@ -519,15 +519,23 @@ async function claimOne(
     if (found.link_purpose === "participant_profile" && found.booking_id !== null) {
       const { rows: checks } = await sql<{
         open: boolean | null;
-        recipient: string | null;
+        same_recipient: boolean;
         newer: boolean;
       }>`
         select app.profile_access_open(${ctx.tenantId}::uuid, ${found.booking_id}::uuid,
                                        ${found.participant_id}::uuid) as open,
-               (select case when p.is_minor then p.guardian_email else p.email end
-                  from booking_participants p
-                 where p.tenant_id = ${ctx.tenantId} and p.id = ${found.participant_id}::uuid)
-                 as recipient,
+               -- A plain participant by address, a sealed one (0056) by its token.
+               coalesce((select case when p.contact_sealed is null
+                                     then (case when p.is_minor then p.guardian_email
+                                                else p.email end) = m.to_email
+                                     else (case when p.is_minor then p.guardian_email_index
+                                                else p.email_index end) = m.to_email_index end
+                           from booking_participants p
+                           join email_messages m
+                             on m.tenant_id = p.tenant_id and m.id = ${found.id}::uuid
+                          where p.tenant_id = ${ctx.tenantId}
+                            and p.id = ${found.participant_id}::uuid), false)
+                 as same_recipient,
                exists (select 1 from email_messages n
                         where n.tenant_id = ${ctx.tenantId}
                           and n.booking_id = ${found.booking_id}::uuid
@@ -542,7 +550,7 @@ async function claimOne(
       const code =
         check?.open !== true
           ? INVITATION_CLOSED
-          : check.recipient !== found.to_email
+          : !check.same_recipient
             ? "recipient_changed"
             : check.newer
               ? INVITATION_SUPERSEDED

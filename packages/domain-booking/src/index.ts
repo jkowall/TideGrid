@@ -309,6 +309,13 @@ export {
   listBookingNotes,
   NOTES_LIMIT,
 } from "./notes.ts";
+// A participant's details, plain or sealed (W3-OPS-4, 0056).
+export {
+  openParticipantRows,
+  type ParticipantContact,
+  type ParticipantContactRow,
+  participantContactColumns,
+} from "./participant-contact.ts";
 export {
   listParticipants,
   MAX_PARTY_SIZE,

@@ -44,6 +44,32 @@ describe("export of sealed contact details", () => {
       email: null,
       phone: "+15555550123",
     });
+    const participant = await sealContact(
+      keyring,
+      { tenantId: tenant, field: "booking_participants.contact_sealed" },
+      {
+        name: "Kid Example",
+        email: null,
+        guardianName: "Ana Example",
+        guardianEmail: "ana@example.test",
+      },
+    );
+    expect(
+      await open("booking_participants", {
+        id: "p1",
+        is_minor: true,
+        contact_sealed: participant,
+        guardian_email_index: "b".repeat(64),
+      }),
+    ).toEqual({
+      id: "p1",
+      is_minor: true,
+      full_name: "Kid Example",
+      email: null,
+      guardian_name: "Ana Example",
+      guardian_email: "ana@example.test",
+      guardian_email_index: "b".repeat(64),
+    });
     // A value sealed for one column never opens as another's.
     await expect(
       open("import_customers", { record_id: "r2", contact_sealed: booker_sealed }),
