@@ -126,6 +126,14 @@ export {
   type FakeMailboxMessage,
   fakeEmailIdPattern,
 } from "./fake.ts";
+// A message's recipient and content, plain or sealed (W3-OPS-4, 0057).
+export {
+  type MessageContent,
+  type MessageContentRow,
+  openMessageContent,
+  SEALED_ADDRESS_MISMATCH,
+  SealedAddressMismatchError,
+} from "./message-content.ts";
 export {
   BALANCE_LINK_TEMPLATE,
   BALANCE_REMINDER_LEAD_DAYS,

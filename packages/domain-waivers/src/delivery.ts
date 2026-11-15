@@ -20,6 +20,7 @@
  * that already sent finds the generation and sends nothing.
  */
 import {
+  addressKey,
   type JsonObject,
   recordAudit,
   type TenantContext,
@@ -212,6 +213,9 @@ export async function sendWaiverRequest(
     );
   if (!participant) return { kind: "no_participant" };
   const recipient = participant.email?.trim().toLowerCase() || null;
+  // How the address is stored where addresses are compared: itself, or its
+  // key where contact details are sealed (0057).
+  const recipientKey = recipient ? await addressKey(trx, ctx.tenantId, recipient) : null;
 
   // The latest generation, and whether its address's access was closed for a
   // recipient change, so that the same address, added back, counts as a
@@ -257,7 +261,7 @@ export async function sendWaiverRequest(
     if (
       !recipient ||
       facts.latest_generation === null ||
-      facts.latest_recipient !== recipient ||
+      facts.latest_recipient !== recipientKey ||
       facts.latest_closed === true
     ) {
       return { kind: "not_renewable" };
@@ -276,7 +280,7 @@ export async function sendWaiverRequest(
   const kind = facts.latest_generation === null ? "initial" : input.kind;
   const recipientChanged =
     facts.latest_recipient !== null &&
-    (facts.latest_recipient !== recipient || facts.latest_closed === true);
+    (facts.latest_recipient !== recipientKey || facts.latest_closed === true);
   if (kind === "resend" && sendsUsed(facts.latest_generation, facts.reset_at) >= MAX_GENERATIONS) {
     // Nothing more goes out, but an address that is no longer this
     // participant's loses its links and sessions all the same.
@@ -287,10 +291,10 @@ export async function sendWaiverRequest(
   // The sending limits now; a send that only the interval holds goes out when
   // it is allowed, if no one is waiting on it.
   let sendAfter = facts.now;
-  let refusal = await sendingRefusal(trx, ctx.tenantId, request, recipient, facts.now);
+  let refusal = await sendingRefusal(trx, ctx.tenantId, request, recipientKey as string, facts.now);
   if (refusal?.code === "interval" && input.whenAllowed) {
     sendAfter = refusal.retry_after;
-    refusal = await sendingRefusal(trx, ctx.tenantId, request, recipient, sendAfter);
+    refusal = await sendingRefusal(trx, ctx.tenantId, request, recipientKey as string, sendAfter);
   }
   if (refusal) {
     if (recipientChanged) await closeOldAddress();
@@ -356,7 +360,7 @@ export async function sendWaiverRequest(
         request_id: request.id,
         generation,
         kind,
-        recipient_email: recipient,
+        recipient_email: recipientKey as string,
         message_id: enqueued.messageId,
         send_after: sendAfter,
         reason: input.reason,
@@ -377,7 +381,13 @@ export async function sendWaiverRequest(
     if (limit === "guest_limit") return { kind: "renewal_limit" };
     // Another send got in first, such as a concurrent booking's to this
     // address: read the limits again for the answer.
-    const again = await sendingRefusal(trx, ctx.tenantId, request, recipient, sendAfter);
+    const again = await sendingRefusal(
+      trx,
+      ctx.tenantId,
+      request,
+      recipientKey as string,
+      sendAfter,
+    );
     if (again && again.code !== "interval") {
       return { kind: "rate_limited", scope: again.code, retryAfter: again.retry_after };
     }

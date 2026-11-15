@@ -934,15 +934,19 @@ export interface EmailMessagesTable {
   booking_id: FixedDefault<string | null>;
   participant_id: FixedDefault<string | null>;
   subject_ref: FixedDefault<string | null>;
+  /** The address, or its address key where the message is sealed (0057). */
   to_email: Fixed<string>;
   to_name: FixedDefault<string | null>;
   /** The blind index token of to_email, where a keyring is set (0056). */
   to_email_index: FixedDefault<string | null>;
   from_name: Fixed<string>;
   reply_to: FixedDefault<string | null>;
-  subject: Fixed<string>;
-  html_body: Fixed<string>;
-  text_body: Fixed<string>;
+  /** Null where the message is sealed (0057). */
+  subject: FixedDefault<string | null>;
+  html_body: FixedDefault<string | null>;
+  text_body: FixedDefault<string | null>;
+  /** `{toEmail, toName, subject, html, text}` sealed (0057), or null for a plain message. */
+  content_sealed: FixedDefault<string | null>;
   link_purpose: FixedDefault<AccessPurpose | null>;
   link_path: FixedDefault<string | null>;
   link_ttl_seconds: FixedDefault<number | null>;

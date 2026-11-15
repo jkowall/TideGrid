@@ -5,12 +5,15 @@ import type { Database } from "./types.ts";
 
 export { type AuditEntry, recordAudit } from "./audit.ts";
 export {
+  ADDRESS_KEY_DOMAIN,
+  addressKey,
   bindFieldPolicy,
   contactKeys,
   contactKeysToOpen,
   emailToken,
   exactNameToken,
   type FieldPolicy,
+  isAddressKey,
   nameTokens,
   nameWords,
   openContact,
