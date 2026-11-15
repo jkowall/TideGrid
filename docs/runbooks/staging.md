@@ -2,7 +2,11 @@
 
 Staging is the rehearsal copy of TideGrid: the `staging` branch of the Neon project, the `tidegrid-api-staging` Worker on `api-staging.tidegrid.us`, and the `tidegrid-console-staging` Worker on `console-staging.tidegrid.us`. OpenTofu built its storage, queues, and alerts (docs/runbooks/terraform-apply.md). This runbook covers what runs on it. It holds synthetic data only.
 
-Everything here runs from GitHub, through the `staging` workflow (`.github/workflows/staging.yml`). Start it from main with a full SHA that is on main. Each run waits for the owner's approval on the `infra-staging` environment, then does one of three things.
+Everything here runs from GitHub, through the `staging` workflow (`.github/workflows/staging.yml`). Start it from main with a full SHA that is on main. Each run waits for one owner approval on the `infra-staging` environment.
+
+The default action, `rehearse`, does everything in one run under that one approval: deploy, then probes, then integration, stopping at the first failure. Use `deploy`, `probes`, or `integration` alone only to repeat one part. Start one run at a time: GitHub keeps only one run waiting behind a running one, so a third start cancels the second.
+
+If the run follows a Terraform change to staging (a new queue, bucket, or binding), the `infra-apply` run for staging must finish first, or the Worker deploy fails on the missing resource.
 
 ## Owner setup before the first deploy
 
