@@ -47,7 +47,7 @@ Product result and remaining risk:
 
 ## 3. Gate tally
 
-Fill this in only after all 12 interviews are complete. The direct-first and conditional-demand counts take only qualified results. The feasibility-spike count is the one exception: it takes provisionally Native-qualified prospects, as step 3 of the validation gate says.
+Fill this in only after all 12 interviews are complete. The direct-first and conditional-demand counts take only qualified results. The feasibility-spike count is the one exception: it takes provisionally Native-qualified prospects, as step 3 of the validation gate says. The [Core pilot gate](../v2/05-roadmap-validation.md#core-pilot-gate) does not require that count.
 
 ```text
 Completed interviews with distinct operators (needs 12):            ____
@@ -62,8 +62,11 @@ Feasibility-spike gate (needs the direct-first gate first)
   Operator types among them:                                        ____  (needs 2 or more)
   Passes: yes / no
 
+Feasibility-spike gate under the Core pilot gate: not applicable (mark n/a).
+
 Conditional-demand gate (fill only after the commercial follow-ups conclude)
-  Qualified Native operators with a written commitment:             ____  (needs 3 or more)
+  Route: Native (Validation gate) / Core (Core pilot gate)
+  Qualified operators on that route with a written commitment:      ____  (needs 3 or more)
   Operator types among them:                                        ____  (needs 2 or more)
   All from one operator type: yes / no  (yes means the gate fails)
   Passes: yes / no

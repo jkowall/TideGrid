@@ -1,6 +1,6 @@
 # TideGrid pricing worksheet (draft)
 
-**Status:** Proposed, not adopted. A Stage 0 draft for the owner's review. The owner has not approved the formula layout or the full-price-then-pilot-credit presentation. Both are pending that approval.
+**Status:** Approved by the owner on 2026-11-15 as written, including the formula layout and the full-price-then-pilot-credit presentation ([decision register](../v2/06-decision-register.md#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted)). [Stage 0](../v2/05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company) links to it. Updated the same day for the adopted Core pilot offer. Approval answers none of the open items under Pending before use and changes no price.
 
 **Data:** Synthetic examples only. No real prospect, operator, or customer value appears here. Fill in a copy for a named prospect only in the owner's private location, never in this repository.
 
@@ -36,6 +36,7 @@ A completed worksheet is a discussion aid. It is not a quote, an offer, an invoi
 | Estimated customer-specific Native delivery, if requested | | hours |
 | Estimated Native direct cost, if requested | | USD |
 | Pilot Native offer applies (first three qualified pilot operators only) | | yes or no |
+| Core pilot offer applies (first three qualified pilot operators, no Native add-on, Managed Launch taken) | | yes or no |
 
 ## Step 1: Channel mix
 
@@ -129,7 +130,9 @@ Not included in any line: Stripe processing, app-store memberships, domains, mes
 
 ## Step 5: Pilot credit, shown separately
 
-Show this step only after Step 4. The credit applies only under the Pilot Native offer: the first three qualified pilot operators, with Booking Core and Native both signed. Recurring prices are never discounted. See [Pilot Native offer controls](../v2/03-commercial-model.md#pilot-native-offer-controls).
+Show this step only after Step 4. A credit applies only under the Pilot Native offer: the first three qualified pilot operators, with Booking Core and Native both signed. Recurring prices are never discounted. See [Pilot Native offer controls](../v2/03-commercial-model.md#pilot-native-offer-controls).
+
+**Core pilot credit.** The Core pilot offer has no credit. A pilot can start without the phone app, but the operator pays the full Booking Core price and $1,000 for Managed Launch, which Step 4 must show. For a Core pilot, enter $0 on both credit lines, write "Core pilot offer: no credit; Managed Launch is the paid commitment", and the year-one pilot price equals the year-one full price. A prepaid first quarter is not required. See [Core pilot offer controls](../v2/03-commercial-model.md#core-pilot-offer-controls).
 
 ```text
 Native setup credit    = $4,500 - $2,250 = $2,250 (the $4,500 band only)
@@ -145,7 +148,7 @@ Year-one pilot price   = year-one full price - pilot credit
 | Pilot credit: Managed Launch | |
 | **Year-one pilot price** | |
 
-The commercial model defines the Native setup credit only against the $4,500 band. If a pilot prospect's estimate falls in a higher band, do not show a pilot price; that case goes to the owner (see Pending before use). The Managed Launch credit only offsets a Managed Launch charge that Step 4 shows. When the offer applies but the operator does not take Managed Launch, the Managed Launch credit is $0. When the Pilot Native offer does not apply, enter $0 for both credit lines and say why.
+The commercial model defines the Native setup credit only against the $4,500 band. If a pilot prospect's estimate falls in a higher band, do not show a pilot price; that case goes to the owner (see Pending before use). The Managed Launch credit only offsets a Managed Launch charge that Step 4 shows. When the offer applies but the operator does not take Managed Launch, the Managed Launch credit is $0. When the Pilot Native offer does not apply, enter $0 for both credit lines and say why. A prospect cannot use both offers.
 
 ## Step 6: Checks before showing the worksheet (proposed)
 
@@ -299,7 +302,7 @@ N is below $80,800, so the $3,000 annual minimum sets the Core charge. The $162 
 | Pilot credit: Managed Launch | 0.00 |
 | **Year-one pilot price** | **4,000.00** |
 
-No pilot credit applies. The Pilot Native offer requires the Native add-on, and this example does not request it. Under the adopted terms, Managed Launch is free only inside that offer.
+No pilot credit applies. The Pilot Native offer requires the Native add-on, and this example does not request it. Under the adopted terms, Managed Launch is free only inside that offer. If this operator joins as one of the first three qualified pilot operators, it fits the Core pilot offer: no app, full Booking Core price, and the $1,000 Managed Launch shown in B4 as its paid commitment. That offer also has no credit, so the year-one pilot price stays $4,000.00.
 
 ### B6. Checks
 
@@ -310,7 +313,5 @@ No pilot credit applies. The Pilot Native offer requires the Native add-on, and 
 
 ## Pending before use
 
-- The owner approves or replaces the formula layout and the full-price-then-pilot-credit presentation.
 - The owner decides how the pilot Native setup credit applies to a pilot prospect whose Native estimate falls above the $4,500 band. The commercial model defines the credit only against that band.
-- The owner decides whether [Stage 0](../v2/05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company) links to this draft.
 - A fresh reviewer re-derives every number in both examples against the [commercial model](../v2/03-commercial-model.md).
