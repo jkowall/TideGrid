@@ -182,3 +182,24 @@ variable "neon_branches" {
   }))
   default = {}
 }
+
+# Edge security (W3-OPS-4) ---------------------------------------------------
+
+variable "edge_security" {
+  description = <<-EOT
+    Firewall rules, edge rate limits, and the guest Turnstile widget. See the
+    cloudflare-security module. manage_zone_rules must stay false on a zone
+    another environment shares.
+  EOT
+  type = object({
+    manage_zone_rules = bool
+    api_host          = string
+    rate_limits = optional(map(object({
+      expression          = string
+      requests_per_period = number
+      period              = number
+      mitigation_timeout  = number
+    })), {})
+    turnstile_domains = optional(list(string), [])
+  })
+}

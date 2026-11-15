@@ -36,6 +36,13 @@ module "environment" {
   custom_hostname_fallback = null
 
   # The nonproduction project already exists, so it is referenced by id.
+  edge_security = {
+    # Staging shares the preview's zone, so its firewall stays as it is.
+    manage_zone_rules = false
+    api_host          = var.api_host
+    turnstile_domains = var.turnstile_domains
+  }
+
   neon_project_id = var.neon_project_id
   neon_branches = {
     staging = {

@@ -31,6 +31,23 @@ module "environment" {
 
   custom_hostname_fallback = var.custom_hostname_fallback
 
+  edge_security = {
+    manage_zone_rules = true
+    api_host          = var.api_host
+    rate_limits = {
+      # One rule fits every plan, including Free (10 second period, 10
+      # second block). On Pro or above, add a sign-in rule and lengthen the
+      # block (see the module's description).
+      public_writes = {
+        expression          = "http.host eq \"${var.api_host}\" and starts_with(http.request.uri.path, \"/v1/public/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"}"
+        requests_per_period = 20
+        period              = 10
+        mitigation_timeout  = 10
+      }
+    }
+    turnstile_domains = var.turnstile_domains
+  }
+
   neon_project_id = var.neon_project_id
   neon_project = {
     name = "tidegrid-production"
