@@ -1,0 +1,252 @@
+name: release
+# Added 2026-11-15 (W3-OPS-3). Releases the three Workers from GitHub instead
+# of the owner's Mac: one approval on the `production` environment, nothing
+# typed back. See docs/runbooks/release-from-github.md.
+#
+# It uploads a new Worker version and moves traffic to it with
+# `wrangler versions upload` and `wrangler versions deploy`. Those never
+# change custom domains, DNS, or cron schedules, so a commit that changes
+# any of them is refused here and still goes out through nov1. Migrations go
+# through neon-migrate.yml first; an API release refuses until the live
+# database holds this commit's last migration.
+run-name: ${{ inputs.action == 'rollback' && format('rollback {0} to {1}', inputs.workers, inputs.rollback_to) || format('release {0} {1}', inputs.workers, inputs.sha) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: release a commit, or roll back to an earlier version
+        type: choice
+        options: [release, rollback]
+        default: release
+        required: true
+      sha:
+        description: "release: full 40-character commit SHA on main"
+        required: false
+        default: ""
+      workers:
+        description: Which Workers (all goes api, then console, then guest)
+        type: choice
+        options: [all, api, console, guest]
+        default: all
+        required: true
+      traffic:
+        description: "release: move all traffic at once, or 10% first with checks and a wait"
+        type: choice
+        options: [all-at-once, ten-percent-first]
+        default: all-at-once
+        required: true
+      soak_minutes:
+        description: "release with ten-percent-first: minutes at 10% before 100% (0 to 30; 45 in all across Workers)"
+        required: false
+        default: "10"
+      rollback_to:
+        description: "rollback: previous (the deployment before the current one), or a version id"
+        required: false
+        default: previous
+
+permissions:
+  contents: read
+  # The CI gate reads ci.yml's runs and jobs.
+  actions: read
+
+# One release at a time, never cancelled midway: a cancelled run could stop
+# with traffic split between two versions.
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # No secrets in this job. It refuses before anyone is asked to approve.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      workers: ${{ steps.plan.outputs.workers }}
+    steps:
+      # The gate's tooling comes from the workflow's own commit on main.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Inputs make sense, and the commit is on main
+        id: plan
+        # Inputs are read from the environment, never interpolated into the
+        # script.
+        env:
+          ACTION: ${{ inputs.action }}
+          WANT: ${{ inputs.sha }}
+          WORKERS: ${{ inputs.workers }}
+          SOAK: ${{ inputs.soak_minutes }}
+          TRAFFIC: ${{ inputs.traffic }}
+          TO: ${{ inputs.rollback_to }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::start this workflow from main, so main's workflow runs"; exit 1
+          fi
+          case "$WORKERS" in
+            all) list="api console guest" ;;
+            api|console|guest) list="$WORKERS" ;;
+            *) echo "::error::unknown workers $WORKERS"; exit 1 ;;
+          esac
+          echo "workers=$list" >> "$GITHUB_OUTPUT"
+          if [ "$ACTION" = rollback ]; then
+            if [ "$WORKERS" = all ]; then
+              echo "::error::roll back one Worker at a time"; exit 1
+            fi
+            if [ "$TO" != previous ] && ! printf '%s' "$TO" | grep -Eqx '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'; then
+              echo "::error::rollback_to is previous or a version id"; exit 1
+            fi
+            echo "rollback $list to $TO"
+            exit 0
+          fi
+          if ! printf '%s' "$SOAK" | grep -Eqx '0|[1-9][0-9]?' || [ "$SOAK" -gt 30 ]; then
+            echo "::error::soak_minutes is a whole number from 0 to 30"; exit 1
+          fi
+          # Every soak must fit well inside the release job's 120 minutes: a
+          # job killed mid-soak would leave a Worker on a 10% split.
+          count=$(echo $list | wc -w)
+          if [ "$TRAFFIC" = ten-percent-first ] && [ $((SOAK * count)) -gt 45 ]; then
+            echo "::error::$count Workers at $SOAK minutes each is over 45 minutes of soak; release fewer at once or shorten the soak"; exit 1
+          fi
+          if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::give the full 40-character SHA"; exit 1
+          fi
+          if ! git cat-file -e "$WANT^{commit}" 2>/dev/null; then
+            echo "::error::$WANT is not a commit in this repository"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$WANT" refs/remotes/origin/main; then
+            echo "::error::$WANT is not on main"; exit 1
+          fi
+          echo "release $list at $WANT"
+      - uses: pnpm/action-setup@v6
+        if: inputs.action == 'release'
+      - uses: actions/setup-node@v7
+        if: inputs.action == 'release'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: inputs.action == 'release'
+      - name: ci.yml is green on all four jobs for this SHA
+        if: inputs.action == 'release'
+        # The same gate nov1 and neon-migrate use. The job's read-only token
+        # goes into a throwaway gh config directory, removed afterwards.
+        env:
+          SHA: ${{ inputs.sha }}
+          TOKEN: ${{ github.token }}
+        run: |
+          export GH_CONFIG_DIR="$RUNNER_TEMP/gh"
+          trap 'rm -rf "$GH_CONFIG_DIR"' EXIT
+          printf '%s' "$TOKEN" | gh auth login --hostname github.com --with-token
+          unset TOKEN
+          pnpm --silent --filter @tidegrid/release nov1 ci-check "$SHA"
+      - name: The live database already holds this commit's migrations
+        if: inputs.action == 'release' && contains(steps.plan.outputs.workers, 'api')
+        # Read from the API's public health and compared with the last
+        # migration file in the commit being released.
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          last=$(git ls-tree --name-only "$SHA" packages/database/migrations/ \
+            | sed 's#.*/##' | grep -E '^[0-9]{4}_.+\.sql$' | LC_ALL=C sort | tail -1)
+          pnpm --silent --filter @tidegrid/release gh-release schema-check --tree-last "$last"
+
+  release:
+    needs: gate
+    runs-on: ubuntu-24.04
+    # Long enough for three Workers with the longest soak the gate allows.
+    timeout-minutes: 120
+    # Required reviewer: the owner. Deployment branches: main only. Holds the
+    # secret CLOUDFLARE_API_TOKEN and the variable CLOUDFLARE_ACCOUNT_ID. See
+    # the runbook for the token's permissions.
+    environment: production
+    steps:
+      # The release tooling (src/gh-release) always comes from the workflow's
+      # own commit on main, so an older SHA is released with today's checks.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # The commit being released, in its own directory. Only its apps are
+      # built and uploaded.
+      - uses: actions/checkout@v7
+        if: inputs.action == 'release'
+        with:
+          ref: ${{ inputs.sha }}
+          path: release-target
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Still the approved commit, still on main
+        if: inputs.action == 'release'
+        working-directory: release-target
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          [ "$got" = "$WANT" ] || { echo "::error::asked for $WANT but checked out $got"; exit 1; }
+          git merge-base --is-ancestor "$WANT" refs/remotes/origin/main \
+            || { echo "::error::$WANT is not on main"; exit 1; }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # Dependencies install before any secret is in an environment.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        if: inputs.action == 'release'
+        working-directory: release-target
+      - name: Release
+        if: inputs.action == 'release'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          SHA: ${{ inputs.sha }}
+          TRAFFIC: ${{ inputs.traffic }}
+          SOAK: ${{ inputs.soak_minutes }}
+          WORKERS: ${{ needs.gate.outputs.workers }}
+        run: |
+          tree="$GITHUB_WORKSPACE/release-target"
+          # The short SHA, as nov1's git describe gives while the repository
+          # has no tags, so the API's health reports the commit.
+          build_id=$(git -C "$tree" rev-parse --short "$SHA")
+          last=$(ls "$tree/packages/database/migrations" | grep -E '^[0-9]{4}_.+\.sql$' | LC_ALL=C sort | tail -1)
+          ledger="$RUNNER_TEMP/release-ledger.ndjson"
+          : > "$ledger"
+          echo "## Release $SHA" >> "$GITHUB_STEP_SUMMARY"
+          for w in $WORKERS; do
+            if [ "$w" = api ]; then
+              # Again here: the approval may have come long after the gate.
+              pnpm --silent --filter @tidegrid/release gh-release schema-check --tree-last "$last"
+            fi
+            pnpm --silent --filter @tidegrid/release gh-release release \
+              --worker "$w" --sha "$SHA" --build-id "$build_id" --tree "$tree" \
+              --traffic "$TRAFFIC" --soak "$((SOAK * 60))" --ledger "$ledger"
+          done
+      - name: Roll back
+        if: inputs.action == 'rollback'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKERS: ${{ needs.gate.outputs.workers }}
+          TO: ${{ inputs.rollback_to }}
+        run: |
+          ledger="$RUNNER_TEMP/release-ledger.ndjson"
+          : > "$ledger"
+          echo "## Rollback" >> "$GITHUB_STEP_SUMMARY"
+          pnpm --silent --filter @tidegrid/release gh-release rollback \
+            --worker "$WORKERS" --to "$TO" --ledger "$ledger"
+      - name: Keep the release ledger
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-ledger-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-ledger.ndjson
+          if-no-files-found: ignore
+          retention-days: 90
