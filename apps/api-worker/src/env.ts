@@ -125,6 +125,13 @@ export interface Bindings {
    * the PDF in the evidence row.
    */
   WAIVER_EVIDENCE?: R2Bucket;
+  /**
+   * Secret, never a var, never in the repository (W3-OPS-4,
+   * src/field-keys.ts). The field keyring: JSON with the current key id, the
+   * AES-256 keys by id, and the blind index key. Staging and production refuse
+   * to sign a waiver without it; local and preview write plain fields.
+   */
+  FIELD_ENCRYPTION_KEYS?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

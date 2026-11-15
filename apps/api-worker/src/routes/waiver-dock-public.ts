@@ -218,7 +218,7 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
   app.openapi(signingRoute, async (c) => {
     const secret = lookupSecret(c);
     const { position } = c.req.valid("json");
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const started = await startDockSigning(trx, ctx, wdeps, { secret, position }).catch(
         (err: unknown) => {

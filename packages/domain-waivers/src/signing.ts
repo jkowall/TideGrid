@@ -9,9 +9,12 @@
  */
 import {
   enqueueOutbox,
+  type FieldKeyring,
   type GuardianRelationship,
   isUuid,
+  openField,
   recordAudit,
+  sealField,
   type TenantContext,
   type TenantTransaction,
   type WaiverAccessMethod,
@@ -86,10 +89,49 @@ async function findParticipant(
   return all.find((p) => p.id === participantId) ?? null;
 }
 
+/** The personal fields a sealed evidence row holds (0054), as the API seals them. */
+export interface SealedEvidenceFields {
+  participantName: string;
+  signerName: string;
+  signatureText: string;
+  recipientEmail: string | null;
+  sourceIp: string | null;
+  userAgent: string | null;
+}
+
+/** Where evidence's sealed fields live; the place binds the ciphertext to it. */
+const SEALED_PLACE = "waiver_evidence.personal_sealed";
+
+/** A sealed evidence row read with no keyring to open it. */
+export class WaiverEvidenceSealedError extends Error {
+  constructor(readonly evidenceId: string) {
+    super(`waiver evidence ${evidenceId} is sealed and no field keyring is configured`);
+    this.name = "WaiverEvidenceSealedError";
+  }
+}
+
+/**
+ * Opens a sealed evidence row's personal fields. Throws
+ * WaiverEvidenceSealedError with no keyring, and FieldDecryptError when the
+ * key is gone or the value was moved or damaged.
+ */
+export async function openEvidenceFields(
+  fields: FieldKeyring | undefined,
+  tenantId: string,
+  evidenceId: string,
+  sealed: string,
+): Promise<SealedEvidenceFields> {
+  if (!fields) throw new WaiverEvidenceSealedError(evidenceId);
+  return JSON.parse(
+    await openField(fields, { tenantId, field: SEALED_PLACE }, sealed),
+  ) as SealedEvidenceFields;
+}
+
 async function loadSigned(
   trx: TenantTransaction,
   tenantId: string,
   requestId: string,
+  fields: FieldKeyring | undefined,
 ): Promise<
   (SignedSummary & { sessionId: string; participantName: string; minor: boolean }) | null
 > {
@@ -105,20 +147,24 @@ async function loadSigned(
       "document_sha256",
       "participant_name",
       "participant_minor",
+      "personal_sealed",
     ])
     .where("tenant_id", "=", tenantId)
     .where("request_id", "=", requestId)
     .executeTakeFirst();
   if (!row) return null;
+  const opened = row.personal_sealed
+    ? await openEvidenceFields(fields, tenantId, row.id, row.personal_sealed)
+    : null;
   return {
     evidenceId: row.id,
     sessionId: row.session_id,
     signedAt: row.signed_at,
-    signerName: row.signer_name,
+    signerName: opened?.signerName ?? row.signer_name ?? "",
     signerRole: row.signer_role,
     relationship: row.guardian_relationship,
     documentSha256: row.document_sha256,
-    participantName: row.participant_name,
+    participantName: opened?.participantName ?? row.participant_name ?? "",
     minor: row.participant_minor,
   };
 }
@@ -173,7 +219,7 @@ export async function getSigningView(
     request.template_version,
   );
   if (!version) throw new Error("a request's version was not found");
-  const signed = await loadSigned(trx, tenantId, session.requestId);
+  const signed = await loadSigned(trx, tenantId, session.requestId, deps.fields);
   let participant: SigningView["participant"] = null;
   if (signed) {
     participant = {
@@ -337,7 +383,7 @@ export async function signWaiver(
   const request = await lockRequest(trx, ctx.tenantId, session.requestId);
   if (!request) throw new Error("a session's request was not found");
   if (request.state === "signed") {
-    const signed = await loadSigned(trx, ctx.tenantId, request.id);
+    const signed = await loadSigned(trx, ctx.tenantId, request.id, deps.fields);
     if (signed?.sessionId === session.id) {
       return {
         kind: "already_signed",
@@ -386,11 +432,13 @@ export async function signWaiver(
   const { rows } = await sql<{
     now: Date;
     recipient_email: string | null;
+    message_id: string | null;
     mode: "staff_device" | "participant_qr" | "dock_lookup" | null;
     staff_id: string | null;
     staff_name: string | null;
   }>`
     select now() as now, coalesce(d.recipient_email, w.recipient_email) as recipient_email,
+           l.message_id,
            a.mode, a.actor_id as staff_id,
            m.display_name as staff_name
       from waiver_signing_sessions s
@@ -463,6 +511,24 @@ export async function signWaiver(
   if (deps.documents && stored) {
     await deps.documents.put(stored.key, document, documentSha256);
   }
+  // With a field keyring (W3-OPS-4, 0054), the personal fields go into one
+  // sealed value and the plain columns stay null; an email link's row names
+  // the link's email instead of the address, which the database checks.
+  const recipientEmail = dock || assisted ? null : facts.recipient_email;
+  const sealed = deps.fields
+    ? await sealField(
+        deps.fields,
+        { tenantId: ctx.tenantId, field: SEALED_PLACE },
+        JSON.stringify({
+          participantName: participant.name,
+          signerName,
+          signatureText: signature,
+          recipientEmail,
+          sourceIp: meta.sourceIp,
+          userAgent: meta.userAgent,
+        } satisfies SealedEvidenceFields),
+      )
+    : null;
   await trx
     .insertInto("waiver_evidence")
     .values({
@@ -476,22 +542,24 @@ export async function signWaiver(
       template_version: version.version,
       content_sha256: version.contentSha256,
       rendering_version: RENDERING_VERSION,
-      participant_name: participant.name,
+      participant_name: sealed ? null : participant.name,
       participant_minor: participant.minor,
       signer_role: request.required_signer,
-      signer_name: signerName,
+      signer_name: sealed ? null : signerName,
       guardian_relationship: relationship,
       signature_method: "typed_name",
-      signature_text: signature,
+      signature_text: sealed ? null : signature,
       acknowledgments: version.acknowledgments,
       consent_version: ESIGN_CONSENT.version,
       consent_text: ESIGN_CONSENT.text,
       access_method: dock ? "dock_lookup" : assisted ? assisted.mode : "email_link",
-      recipient_email: dock || assisted ? null : facts.recipient_email,
+      recipient_email: sealed ? null : recipientEmail,
       match_method: dock ? "booking_lookup" : assisted ? "staff_confirmed" : "signer_confirmed",
       assisted_by: assisted ? assisted.staffId : null,
-      source_ip: meta.sourceIp,
-      user_agent: meta.userAgent,
+      source_ip: sealed ? null : meta.sourceIp,
+      user_agent: sealed ? null : meta.userAgent,
+      personal_sealed: sealed,
+      link_message_id: sealed && recipientEmail !== null ? facts.message_id : null,
       document: stored ? null : document,
       document_sha256: documentSha256,
       document_key: stored?.key ?? null,
