@@ -172,4 +172,17 @@ describe("neon-branch and the Neon main guard", () => {
       /recorded in NEON_MAIN_HOST/,
     );
   });
+  it("branches from a named parent branch", () => {
+    const now = Date.parse("2026-11-15T12:00:00Z");
+    const { options } = parseCreateArgs(
+      ["it-staging", "--ttl", "3", "--parent", "br-raspy-x-1"],
+      now,
+    );
+    expect(createBody("it-staging", options, now).branch).toEqual({
+      name: "it-staging",
+      parent_id: "br-raspy-x-1",
+      expires_at: "2026-11-15T15:00:00.000Z",
+    });
+    expect(() => parseCreateArgs(["b", "--parent", "main"])).toThrow(/branch id/);
+  });
 });

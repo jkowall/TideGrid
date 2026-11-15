@@ -12,6 +12,8 @@
  *                    one is added, so no connection string exists to fetch
  *   --out <file>     write {"branchId","connectionString"} to this file with
  *                    mode 0600; the file must not exist yet
+ *   --parent <id>    branch from this branch instead of the project's
+ *                    default branch (staging's throwaway test branches)
  *   --at <time>      branch from the parent as it was at this past instant,
  *                    an ISO 8601 UTC time such as 2026-11-15T01:00:00Z (a
  *                    point-in-time restore drill); Neon refuses an instant
@@ -80,6 +82,8 @@ export interface CreateOptions {
   withConnectionString: boolean;
   /** Branch from the parent as of this past instant (ISO 8601 UTC), or from now when absent. */
   parentTimestamp?: string;
+  /** The parent branch's id, or the project's default branch when absent. */
+  parentId?: string;
 }
 
 export const defaultTtlHours = 6;
@@ -89,6 +93,7 @@ export function createBody(name: string, options: CreateOptions, now = Date.now(
   return {
     branch: {
       name,
+      ...(options.parentId ? { parent_id: options.parentId } : {}),
       ...(options.parentTimestamp ? { parent_timestamp: options.parentTimestamp } : {}),
       ...(options.ttlSeconds === null
         ? {}
@@ -157,6 +162,7 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
   let endpoint = true;
   let out: string | null = null;
   let at: string | null = null;
+  let parent: string | null = null;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
     if (arg === "--ttl") {
@@ -184,6 +190,11 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
       }
       if (when > now) throw new Error("--at must be in the past");
       at = new Date(when).toISOString();
+    } else if (arg === "--parent") {
+      const raw = args[++i] ?? "";
+      if (!/^br-[a-z0-9-]{1,60}$/.test(raw))
+        throw new Error("--parent takes a branch id such as br-x-y-123");
+      parent = raw;
     } else if (arg.startsWith("--")) throw new Error(`unknown option ${arg}`);
     else if (name === null) name = arg;
     else throw new Error(`unexpected argument ${arg}`);
@@ -201,6 +212,7 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
       endpoint,
       withConnectionString: out !== null,
       ...(at ? { parentTimestamp: at } : {}),
+      ...(parent ? { parentId: parent } : {}),
     },
     out,
   };
@@ -248,7 +260,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(JSON.stringify({ deleted: arg }));
   } else if (command) {
     console.error(
-      "usage: neon-branch.ts create <name> [--ttl <hours> | --no-expiry] [--no-endpoint] [--out <file>] [--at <utc time>] | delete <branch-id>",
+      "usage: neon-branch.ts create <name> [--ttl <hours> | --no-expiry] [--no-endpoint] [--out <file>] [--at <utc time>] [--parent <branch id>] | delete <branch-id>",
     );
     process.exit(2);
   }
