@@ -62,9 +62,9 @@ On 2026-11-15 the owner chose "All contact details (phased)" over sealing waiver
 - **D6: staff see a masked address** ("a•••@example.com"), opened from the guest's current details. A waiver email that went to an address the guest no longer has shows as "an earlier address".
 - **D7: staging and production refuse to take a booking or write a guest email without the keys** (503 `field_keys_unavailable`), so no guest contact detail is ever written there in plain form.
 
-Review hardening (PR 186): before sending a sealed message the delivery job checks that its stored key is the opened address's own key, and fails it (`sealed_address_mismatch`) otherwise, so a sealed value copied onto another message can never send; a do-not-email entry recorded plain, before the keys were set, still stops sealed mail to that address.
+Review hardening (PR 186): before sending a sealed message the delivery job checks that its stored key is the opened address's own key, and fails it (`sealed_address_mismatch`) otherwise, so a sealed value copied onto a message for a different address can never send (a copy between two messages to the same address would still go to that address, so it reaches no one new); a do-not-email entry recorded plain, before the keys were set, still stops sealed mail to that address.
 
-Checked and left as they are: audit rows and events already record which fields changed, never their values; staff sign-in addresses are staff data, not guest data; the fake email provider's tables exist only in local and preview.
+Checked and left as they are: audit rows and events already record which fields changed, never their values; staff sign-in addresses are staff data, not guest data; the fake email provider's table exists in every database, but the application uses the fake provider only in local development, so in staging and production it stays empty.
 
 Known limits: waiver sending limits, reminders, and renewals do not count a plain earlier email and a sealed later one to the same person together (an environment writes one way); lifting a do-not-email entry by hand needs the address's key, which the application computes; a guest written plain before the keys were set cannot be sent a participant invitation from a sealing environment; tokens are per operator, so the same guest at two operators cannot be matched (by design).
 
