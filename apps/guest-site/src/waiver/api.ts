@@ -10,6 +10,7 @@ import {
 } from "@tidegrid/contracts";
 import type { z } from "zod";
 import { apiBase } from "../bootstrap.ts";
+import { humanCheckFailed, humanToken } from "../humanCheck.ts";
 
 /**
  * The waiver page's calls to the API (G2.15). The browser sends the page's
@@ -41,6 +42,7 @@ async function send(
     bearer?: string;
     accept?: string;
     signal?: AbortSignal | undefined;
+    humanToken?: string | null;
   },
 ): Promise<Response | null> {
   const controller = new AbortController();
@@ -50,6 +52,7 @@ async function send(
     const headers: Record<string, string> = { accept: init.accept ?? "application/json" };
     if (init.body !== undefined) headers["content-type"] = "application/json";
     if (init.bearer) headers.authorization = `Bearer ${init.bearer}`;
+    if (init.humanToken) headers["turnstile-token"] = init.humanToken;
     return await fetch(`${apiBase}${path}`, {
       method: init.method ?? "GET",
       credentials: "omit",
@@ -74,6 +77,7 @@ export async function call<S extends z.ZodType>(
     body?: unknown;
     bearer?: string;
     signal?: AbortSignal | undefined;
+    humanToken?: string | null;
   } = {},
 ): Promise<Result<z.infer<S>>> {
   const res = await send(path, init);
@@ -114,9 +118,16 @@ export async function openSession(token: string): Promise<Result<OpenedSession>>
  * answers the same whatever happened, so a 202 says only that it was taken.
  */
 export async function renewLink(token: string): Promise<Result<{ accepted: true }>> {
+  let human: string | null;
+  try {
+    human = await humanToken("waiver_renewal");
+  } catch {
+    return humanCheckFailed;
+  }
   return call("/v1/public/waiver-links/renewal", WaiverLinkRenewalResponse, {
     method: "POST",
     body: { token },
+    humanToken: human,
   });
 }
 

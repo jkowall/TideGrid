@@ -42,7 +42,7 @@ describe("static files", () => {
     expect(contact).toContain('Call <span className="guest-phone">{formatPhone(phone)}</span>');
   });
 
-  it("keeps the guest policy strict: no inline script or style, and the API and Stripe as the only connections", () => {
+  it("keeps the guest policy strict: no inline script or style, and the API, Stripe, and Turnstile as the only connections", () => {
     const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
     const policy = /Content-Security-Policy: (.+)/.exec(headers)?.[1] ?? "";
     const directives = new Map(
@@ -57,8 +57,9 @@ describe("static files", () => {
     expect(directives.get("style-src")).toBe("'self'");
     // W1-STRIPE-ELEMENT D3 (pending owner approval): Stripe.js from
     // js.stripe.com for the card form, and nothing else from Stripe.
+    // W3-OPS-4: Cloudflare Turnstile's script and frame, for the human check.
     expect(directives.get("script-src")).toBe(
-      "'self' https://static.cloudflareinsights.com https://js.stripe.com https://*.js.stripe.com",
+      "'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://js.stripe.com https://*.js.stripe.com",
     );
     // The page fetches only from the API. 'self' is for Cloudflare Web Analytics:
     // its automatically injected beacon reports to this site's own /cdn-cgi/rum,
@@ -70,7 +71,7 @@ describe("static files", () => {
     );
     // Stripe's card form and its 3D Secure check run in Stripe's frames only.
     expect(directives.get("frame-src")).toBe(
-      "https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+      "https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
     );
     // Card only: nothing for Stripe's address autocomplete, and the Payment
     // Request API stays off.

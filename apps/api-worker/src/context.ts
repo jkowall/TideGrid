@@ -9,6 +9,7 @@ import type { Kysely } from "kysely";
 import type { AccessVerifier } from "./auth/access.ts";
 import type { LoginLinkSender } from "./auth/login-links.ts";
 import type { Bindings } from "./env.ts";
+import type { Siteverify } from "./turnstile.ts";
 
 type Variables = {
   requestId: string;
@@ -66,4 +67,6 @@ export interface AppDeps {
    * Production keeps the domain's limit; tests lower it to reach `range_too_large`.
    */
   moneyReportLimit?: number;
+  /** Replaces Cloudflare's Turnstile siteverify call (src/turnstile.ts), for tests. */
+  siteverify?: Siteverify;
 }

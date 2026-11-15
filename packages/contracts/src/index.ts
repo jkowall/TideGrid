@@ -222,3 +222,16 @@ export * from "./tax-rates.ts";
 export * from "./tenant-access.ts";
 // Waiver evidence (G2.15).
 export * from "./waivers.ts";
+
+/**
+ * The guest site's Turnstile token (W3-OPS-4), in the `Turnstile-Token`
+ * header of public writes a script could abuse: opening a checkout, asking
+ * for a new waiver link, and the dock lookup. Needed where the API has a
+ * Turnstile secret; single use, so a retry sends a new one.
+ */
+export const TurnstileToken = z
+  .string()
+  .min(1)
+  .max(2048)
+  .optional()
+  .describe("A Cloudflare Turnstile token from the guest site's check; single use");

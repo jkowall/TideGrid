@@ -503,6 +503,26 @@
                       ],
                       "additionalProperties": false,
                       "description": "The tenant's active brand. Absent until the tenant publishes one; a guest surface must not render without it."
+                    },
+                    "humanCheck": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "enum": [
+                            "turnstile"
+                          ]
+                        },
+                        "siteKey": {
+                          "type": "string",
+                          "pattern": "^[0-9A-Za-z_-]{1,64}$"
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "siteKey"
+                      ],
+                      "description": "W3-OPS-4: present where the API checks Turnstile. The guest site draws the check with this public site key and sends its token in the Turnstile-Token header on a checkout, a waiver link renewal, and a dock lookup."
                     }
                   },
                   "required": [
@@ -6949,6 +6969,18 @@
             "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
             "name": "idempotency-key",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "description": "A Cloudflare Turnstile token from the guest site's check; single use"
+            },
+            "required": false,
+            "description": "A Cloudflare Turnstile token from the guest site's check; single use",
+            "name": "turnstile-token",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -7196,6 +7228,40 @@
               }
             }
           },
+          "403": {
+            "description": "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed); nothing was written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No active tenant hostname matches the origin, or no such quote",
             "content": {
@@ -7319,7 +7385,7 @@
             }
           },
           "503": {
-            "description": "Payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); for the latter, retry the same request with the same Idempotency-Key",
+            "description": "Payments are not configured (payments_unavailable), the provider did not answer (payment_provider_unavailable), or the Turnstile check could not be made (human_check_unavailable); retry the same request with the same Idempotency-Key and a new Turnstile token",
             "content": {
               "application/json": {
                 "schema": {
@@ -27850,6 +27916,20 @@
         ],
         "summary": "Ask for a new waiver link in place of a spent, lapsed, or replaced one",
         "description": "Resolves the browser Origin as /v1/public/trips does. Takes the old emailed link's token, in the body. When its waiver still waits for a signature and the link no longer works, a new email goes to the address the latest one went to, never anywhere else, at most 3 a day for the participant, and within the usual sending limits. A staff-assisted code is not renewed.\n\nThe answer is the same 202 whatever happened, including an unknown token, so it says nothing about an address, a booking, or whether a link exists. Rate limited per client address and operator like other public commands.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "description": "A Cloudflare Turnstile token from the guest site's check; single use"
+            },
+            "required": false,
+            "description": "A Cloudflare Turnstile token from the guest site's check; single use",
+            "name": "turnstile-token",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -27895,6 +27975,40 @@
           },
           "400": {
             "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed)",
             "content": {
               "application/json": {
                 "schema": {
@@ -27997,6 +28111,40 @@
           },
           "429": {
             "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The Turnstile check could not be made (human_check_unavailable); try again",
             "content": {
               "application/json": {
                 "schema": {
@@ -30004,6 +30152,20 @@
         ],
         "summary": "Find today's booking at the dock by its code and the booker's last name",
         "description": "Resolves the browser Origin as /v1/public/trips does. A match needs a confirmed booking at this operator with that code, whose trip departs today in its own time zone and has not ended, and the booker's last name (the last word or words of the name on the booking, ignoring case, accents, and punctuation).\n\nA match returns a 15-minute secret and the party: first names with an initial, each person's waiver status, and who signs. No address, id, or delivery detail. Every miss answers the same 404, whatever the reason. Tries are counted by the database, an IPv6 address by its /64: 20 misses from one address in 15 minutes or 8 misses for one booking code in 24 hours from anywhere hold further tries (429), as do 100 matches from one address in an hour; 300 misses at one operator in an hour hold further misses, never a right code and name. Also rate limited per client address and operator like other public commands.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "description": "A Cloudflare Turnstile token from the guest site's check; single use"
+            },
+            "required": false,
+            "description": "A Cloudflare Turnstile token from the guest site's check; single use",
+            "name": "turnstile-token",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -30168,6 +30330,40 @@
               }
             }
           },
+          "403": {
+            "description": "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No operator at this address, or no booking departing today matches (dock_lookup_not_found)",
             "content": {
@@ -30238,6 +30434,40 @@
           },
           "429": {
             "description": "Too many tries (dock_lookup_limited), or too many requests from this address (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The Turnstile check could not be made (human_check_unavailable); try again",
             "content": {
               "application/json": {
                 "schema": {

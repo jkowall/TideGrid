@@ -1,4 +1,4 @@
-import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   DockLookupRequest,
   DockLookupResponse,
@@ -6,6 +6,7 @@ import {
   DockPartyResponse,
   DockSigningRequest,
   DockSigningResponse,
+  TurnstileToken,
 } from "@tidegrid/contracts";
 import type { JsonObject } from "@tidegrid/database";
 import {
@@ -19,6 +20,7 @@ import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withPublicTenant } from "../public-tenant.ts";
+import { requireHuman, TURNSTILE_HEADER } from "../turnstile.ts";
 import { waiverDeps } from "../waivers.ts";
 import { errorBody } from "./responses.ts";
 
@@ -102,9 +104,13 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
       "A match returns a 15-minute secret and the party: first names with an initial, each person's waiver status, and who signs. No address, id, or delivery detail. Every miss answers the same 404, whatever the reason. Tries are counted by the database, an IPv6 address by its /64: 20 misses from one address in 15 minutes or 8 misses for one booking code in 24 hours from anywhere hold further tries (429), as do 100 matches from one address in an hour; 300 misses at one operator in an hour hold further misses, never a right code and name. Also rate limited per client address and operator like other public commands.",
     ].join("\n\n"),
     request: {
+      headers: z.object({ [TURNSTILE_HEADER]: TurnstileToken }),
       body: { required: true, content: { "application/json": { schema: DockLookupRequest } } },
     },
     responses: {
+      403: errorBody(
+        "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed)",
+      ),
       201: {
         content: { "application/json": { schema: DockLookupResponse } },
         description: "The booking's party",
@@ -118,11 +124,13 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
       429: errorBody(
         "Too many tries (dock_lookup_limited), or too many requests from this address (rate_limited)",
       ),
+      503: errorBody("The Turnstile check could not be made (human_check_unavailable); try again"),
     },
   });
 
   app.openapi(lookupRoute, async (c) => {
     const input = c.req.valid("json");
+    await requireHuman(c, deps, "dock_lookup");
     // A miss is recorded and committed, so it counts, then answered.
     const { fields } = await waiverDeps(deps, c.env);
     let body: JsonObject;

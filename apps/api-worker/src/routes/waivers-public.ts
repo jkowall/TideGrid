@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   ManageWaiverResendRequest,
   ManageWaiversResponse,
+  TurnstileToken,
   WaiverLinkRedeemRequest,
   WaiverLinkRenewalRequest,
   WaiverLinkRenewalResponse,
@@ -37,6 +38,7 @@ import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { sealingRequired } from "../field-keys.ts";
 import { withPublicTenant } from "../public-tenant.ts";
+import { requireHuman, TURNSTILE_HEADER } from "../turnstile.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
 import { errorBody } from "./responses.ts";
 
@@ -264,12 +266,16 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       "The answer is the same 202 whatever happened, including an unknown token, so it says nothing about an address, a booking, or whether a link exists. Rate limited per client address and operator like other public commands.",
     ].join("\n\n"),
     request: {
+      headers: z.object({ [TURNSTILE_HEADER]: TurnstileToken }),
       body: {
         required: true,
         content: { "application/json": { schema: WaiverLinkRenewalRequest } },
       },
     },
     responses: {
+      403: errorBody(
+        "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed)",
+      ),
       202: {
         content: { "application/json": { schema: WaiverLinkRenewalResponse } },
         description: "Taken; a new link is emailed when the waiver still needs one",
@@ -277,11 +283,13 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       400: errorBody("Request did not match the contract"),
       404: errorBody("No operator at this address"),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+      503: errorBody("The Turnstile check could not be made (human_check_unavailable); try again"),
     },
   });
 
   app.openapi(renewalRoute, async (c) => {
     const { token } = c.req.valid("json");
+    await requireHuman(c, deps, "waiver_renewal");
     const wdeps = await waiverDeps(deps, c.env);
     let renewedFor: string | null = null;
     await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
