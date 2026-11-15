@@ -133,6 +133,11 @@ describe("migration safety check", () => {
         "COMMENT ON TABLE public.bookings IS '-- migration-check: allow data_change example allowance text';\nUPDATE public.bookings SET x = 1;",
       ),
     ).toEqual(["data_change"]);
+    expect(rules("ALTER TABLE public.bookings ADD UNIQUE USING INDEX b_ref;")).toEqual([]);
+    expect(rules("ALTER TABLE public.bookings ADD PRIMARY KEY USING INDEX b_id;")).toEqual([]);
+    expect(rules("ALTER TABLE public.bookings ADD UNIQUE (tenant_id, ref);")).toEqual([
+      "index_not_concurrent",
+    ]);
     expect(rules("ALTER TABLE public.bookings ADD COLUMN ref text UNIQUE;")).toEqual([
       "index_not_concurrent",
     ]);

@@ -172,6 +172,7 @@ const rules: Rule[] = [
             // A new column declared UNIQUE or PRIMARY KEY builds the same index.
             (/\badd\b/i.test(p) &&
               !/\badd\s+constraint\b/i.test(p) &&
+              !/\busing\s+index\s+[\w"]/i.test(p) &&
               /\b(?:unique|primary\s+key)\b/i.test(p)),
         )
       );
