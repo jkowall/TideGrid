@@ -58,8 +58,8 @@ started=$(date -u +%s)
 stamp=$(date -u -d "@$started" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$started" +%Y%m%dT%H%M%SZ)
 base="tidegrid-$label-$stamp"
 
-# The dumping role must read every row. Tables force row-level security, so
-# a role without BYPASSRLS would dump empty tables without complaint.
+# The dumping role must read every row. Tables force row-level security:
+# pg_dump refuses such a role, and the manifest's counts would read nothing.
 bypass=$(tg_psql "$DATABASE_URL" -c "select rolsuper or rolbypassrls from pg_roles where rolname = current_user")
 [ "$bypass" = t ] || tg_die "the connecting role cannot bypass row-level security, so the dump would miss rows; use the owner role"
 
@@ -74,7 +74,8 @@ read -r -t 60 snapshot <&4 || tg_die "could not export a snapshot"
 [[ "$snapshot" =~ ^[0-9A-F-]+$ ]] || tg_die "unexpected snapshot id"
 
 # Facts in the same snapshot, ended by a marker line.
-printf '%s\n' "$TG_MIGRATIONS_SQL" "select '--end-migrations--';" "$TG_TABLE_FACTS_SQL" "select '--end-tables--';" >&3
+printf '%s\n' "$TG_MIGRATIONS_SQL" "select '--end-migrations--';" "$(cat "$here/table-facts.sql")" "select '--end-tables--';" \
+  "$(cat "$here/security-facts.sql")" "select '--end-security--';" >&3
 : > "$work/migrations.txt"
 while read -r -t 600 line <&4; do
   [ "$line" = "--end-migrations--" ] && break
@@ -85,6 +86,12 @@ while read -r -t 600 line <&4; do
   [ "$line" = "--end-tables--" ] && break
   printf '%s\n' "$line" >> "$work/tables.txt"
 done
+: > "$work/security.txt"
+while read -r -t 600 line <&4; do
+  [ "$line" = "--end-security--" ] && break
+  printf '%s\n' "$line" >> "$work/security.txt"
+done
+[ "$(wc -l < "$work/security.txt" | tr -d ' ')" = 2 ] || tg_die "could not read the policy and grant facts"
 [ -s "$work/migrations.txt" ] || tg_die "no applied migrations found"
 [ -s "$work/tables.txt" ] || tg_die "no tables found"
 
@@ -136,6 +143,7 @@ table_count=$(wc -l < "$work/tables.txt" | tr -d ' ')
   printf '  "dumpBytes": %s,\n' "$dump_bytes"
   printf '  "tocEntries": %s,\n' "$toc_entries"
   printf '  "lastMigration": "%s",\n' "$(tail -1 "$work/migrations.txt")"
+  awk -F'|' '{printf "  \"%s\": {\"count\": %s, \"digest\": \"%s\"},\n", $1, $2, $3}' "$work/security.txt"
   printf '  "roles": [%s],\n' "$(awk 'NR>1{printf ", "} {printf "\"%s\"", $0}' "$work/roles.txt")"
   printf '  "migrations": [\n'
   awk 'NR>1{printf ",\n"} {printf "    \"%s\"", $0} END{printf "\n"}' "$work/migrations.txt"

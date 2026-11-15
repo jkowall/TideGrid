@@ -33,7 +33,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Reuses the backup environment (main only, no reviewer) for the owner
-    # database URL and the backup bucket's read token. Repository variables:
+    # database URL and the backup bucket's token, which can also write: the
+    # same credentials as the daily backup, now used hourly. A narrower role
+    # and a read-only token are a follow-up (register, W3-OPS-5 D4). Repository variables:
     # SYNTHETIC_API (https://api.tidegrid.us) and SYNTHETIC_ORIGIN (the
     # synthetic tenant's booking site origin).
     environment: backup
@@ -63,7 +65,7 @@ jobs:
           SYNTHETIC_API: ${{ vars.SYNTHETIC_API || 'https://api.tidegrid.us' }}
           SYNTHETIC_ORIGIN: ${{ vars.SYNTHETIC_ORIGIN }}
         run: pnpm --silent --filter @tidegrid/release synthetic | tee -a "$RUNNER_TEMP/report.txt"
-      - name: Signals (finalization gaps, outbox, dead letters, email, cron)
+      - name: Signals (payments not booked, background jobs, dead letters, email account)
         id: signals
         continue-on-error: true
         env:
@@ -89,7 +91,8 @@ jobs:
         run: |
           touch "$RUNNER_TEMP/report.txt"
           { echo '```'; cat "$RUNNER_TEMP/report.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          # Counts, ages, and step timings only; it can reach a public issue.
+          # Counts, ages, step timings, and the newest backup's file name
+          # (label and time) only; it can reach a public issue.
           {
             echo "text<<REPORT_END"
             grep -E '^(signals|backup-age|\{)' "$RUNNER_TEMP/report.txt" | cut -c1-300 || true
@@ -122,7 +125,11 @@ jobs:
           [ "$SYNTHETIC" = failure ] && failed="$failed synthetic-booking"
           [ "$SIGNALS" = failure ] && failed="$failed signals"
           [ "$BACKUP" = failure ] && failed="$failed backup-age"
-          summary="Failed:${failed:- none}"
+          # What exactly fails: the failed parts plus each alerting signal and
+          # the synthetic step, so a new failure under an open issue still
+          # gets its own comment (and email).
+          detail=$(printf '%s\n' "$REPORT" | grep -oE 'ALERT [a-z_]+|"failedStep":"[a-z]+"|backup-age: FAIL' | sort -u | tr '\n' ' ' | sed 's/ $//' || true)
+          summary="Failed:${failed:- none}${detail:+ ($detail)}"
           gh label create ops-alert --color B60205 --description "Opened and closed by the ops-check workflow" 2>/dev/null || true
           open=$(gh issue list --label ops-alert --state open --json number --jq '.[0].number // empty')
           body=$(printf '%s\n\nRun: %s\n\n```\n%s\n```\n\nWhat each line means: docs/runbooks/ops-checks.md\n' "$summary" "$RUN_URL" "$REPORT")
@@ -131,8 +138,11 @@ jobs:
               gh issue create --label ops-alert --title "Ops check failed:$failed" --body "$body"
             else
               # One comment per change in what fails, not one an hour.
-              last=$(gh issue view "$open" --json body,comments --jq '([.body] + [.comments[].body]) | last' | head -1)
-              [ "$last" = "$summary" ] || gh issue comment "$open" --body "$body"
+              last=$(gh issue view "$open" --json body,comments --jq '([.body] + [.comments[].body]) | last | split("\n") | .[0]')
+              if [ "$last" != "$summary" ]; then
+                gh issue comment "$open" --body "$body"
+                gh issue edit "$open" --title "Ops check failed:$failed"
+              fi
             fi
             exit 1
           elif [ -n "$open" ]; then

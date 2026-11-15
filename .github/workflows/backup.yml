@@ -85,7 +85,7 @@ jobs:
           {
             echo "## Backup $(basename "$dump" .dump.age)"
             echo "- Encrypted size $want bytes, uploaded to \`$prefix/\`"
-            python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print(f"- {len(m[\"tables\"])} tables, {sum(t[\"rows\"] for t in m[\"tables\"])} rows, last migration `{m[\"lastMigration\"]}`, dump took {m[\"dumpSeconds\"]} s")' "$manifest"
+            python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print("- %d tables, %d rows, last migration `%s`, dump took %s s" % (len(m["tables"]), sum(t["rows"] for t in m["tables"]), m["lastMigration"], m["dumpSeconds"]))' "$manifest"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: The newest backup is fresh
         env:

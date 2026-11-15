@@ -13,10 +13,13 @@ Checks:
                for a point-in-time branch whose instant differs from the
                manifest's)
   rls          every table that forced row-level security still does
+  policies     every row-level security policy is the same, word for word
+  grants       the runtime role holds exactly the same table privileges
   no-tenant    the runtime role tidegrid_app, with no tenant set, sees no row
                in any table the manifest says forced row-level security
   two-tenant   with one tenant set, the runtime role sees only that tenant's
-               rows, and sees at least one of them
+               rows (the tenants table by id, the rest by tenant_id), and
+               sees at least one of them
 
 Nothing printed carries a row's contents, a host, or a connection string.
 """
@@ -27,22 +30,17 @@ import os
 import subprocess
 import sys
 
-TABLE_FACTS_SQL = """
-select format('%s.%s|%s|%s|%s',
-         n.nspname, c.relname,
-         (xpath('/row/n/text()', x))[1]::text,
-         coalesce((xpath('/row/d/text()', x))[1]::text, ''),
-         case when c.relforcerowsecurity then 't' else 'f' end)
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
-  cross join lateral query_to_xml(
-    format('select count(*) as n, md5(string_agg(h, '''' order by h)) as d
-              from (select md5(t::text) as h from %I.%I t) s', n.nspname, c.relname),
-    false, true, '') as x
- where n.nspname in ('public', 'app')
-   and c.relkind in ('r', 'p')
- order by 1;
-"""
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def read_sql(name):
+    with open(os.path.join(HERE, name), encoding="utf-8") as f:
+        return f.read()
+
+
+# Shared with backup.sh, so the two read the same facts.
+TABLE_FACTS_SQL = read_sql("table-facts.sql")
+SECURITY_FACTS_SQL = read_sql("security-facts.sql")
 
 # Runs as the runtime role inside a transaction that is always rolled back.
 # The GRANT gives the connecting admin the right to SET ROLE for this
@@ -81,21 +79,23 @@ $$;
 select set_config('app.tenant_id', :'tenant', true);
 set local role tidegrid_app;
 with t as materialized (
-  select n.nspname, c.relname
+  select n.nspname, c.relname,
+         case when c.oid = 'public.tenants'::regclass then 'id' else 'tenant_id' end as col
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
    where n.nspname in ('public', 'app') and c.relkind in ('r', 'p')
    and format('%s.%s', n.nspname, c.relname) = any(:'forced'::text[])
      and has_table_privilege('tidegrid_app', c.oid, 'SELECT')
      and exists (select 1 from pg_attribute a
-                  where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped)
+                  where a.attrelid = c.oid and not a.attisdropped
+                    and (a.attname = 'tenant_id' or (c.oid = 'public.tenants'::regclass and a.attname = 'id')))
 )
 select format('two-tenant|%s|%s',
          coalesce(sum((xpath('/row/o/text()', x))[1]::text::bigint), 0),
          coalesce(sum((xpath('/row/m/text()', x))[1]::text::bigint), 0))
   from t
   cross join lateral query_to_xml(format(
-    'select count(*) filter (where tenant_id::text <> %L) as o, count(*) filter (where tenant_id::text = %L) as m from %I.%I',
-    current_setting('app.tenant_id'), current_setting('app.tenant_id'), t.nspname, t.relname), false, true, '') as x;
+    'select count(*) filter (where %I::text <> %L) as o, count(*) filter (where %I::text = %L) as m from %I.%I',
+    t.col, current_setting('app.tenant_id'), t.col, current_setting('app.tenant_id'), t.nspname, t.relname), false, true, '') as x;
 reset role;
 rollback;
 """
@@ -110,7 +110,9 @@ def psql(url, sql, variables=None):
     done = subprocess.run(cmd, input=sql, capture_output=True, text=True, env=env, check=False)
     if done.returncode != 0:
         # psql's own message names the failing statement, never a password.
-        raise RuntimeError(done.stderr.strip().splitlines()[-1] if done.stderr.strip() else "psql failed")
+        lines = done.stderr.strip().splitlines()
+        errors = [l for l in lines if "ERROR" in l or "FATAL" in l]
+        raise RuntimeError((errors or lines or ["psql failed"])[0][:300])
     return [line for line in done.stdout.splitlines() if line.strip()]
 
 
@@ -174,33 +176,54 @@ def main():
     forced = sum(1 for t in facts.values() if t["forceRls"])
     check("rls", not lost, f"{forced} tables force row-level security; lost on {lost or 'none'}")
 
+    security = {}
+    for line in psql(url, SECURITY_FACTS_SQL):
+        name, count, digest = line.split("|")
+        security[name] = {"count": int(count), "digest": digest}
+    for name in ("policies", "grants"):
+        want = manifest.get(name)
+        got = security.get(name)
+        check(
+            name,
+            want is not None and got == want,
+            f"{got['count'] if got else 0} on the restore, {want['count'] if want else 'none'} in the manifest;"
+            f" {'same' if got == want else 'DIFFERENT'} definitions",
+        )
+
     # The probes cover every table the manifest says forced row-level
     # security, so a table that lost it on restore shows its rows here.
     forced_names = sorted(n for n, t in expected.items() if t["forceRls"])
     if not all(part.replace("_", "").isalnum() for n in forced_names for part in n.split(".")):
         sys.exit("verify: unexpected table name in the manifest")
     forced_array = "{" + ",".join(forced_names) + "}"
-    probe = psql(url, TENANT_PROBE_SQL, {"forced": forced_array})
-    lines = [l for l in probe if l.startswith("no-tenant|")]
-    seen = int(lines[0].split("|")[1]) if lines else -1
-    check("no-tenant", seen == 0, f"the runtime role sees {seen} rows with no tenant set")
+    try:
+        probe = psql(url, TENANT_PROBE_SQL, {"forced": forced_array})
+        lines = [l for l in probe if l.startswith("no-tenant|")]
+        seen = int(lines[0].split("|")[1]) if lines else -1
+        check("no-tenant", seen == 0, f"the runtime role sees {seen} rows with no tenant set")
 
-    tenants = psql(url, TENANTS_SQL)
-    if not tenants:
-        check("two-tenant", False, "no tenants to probe")
-    else:
-        others = 0
-        mine = 0
-        for tenant in tenants:
-            out = psql(url, TWO_TENANT_SQL, {"tenant": tenant, "forced": forced_array})
-            line = next(l for l in out if l.startswith("two-tenant|")).split("|")
-            others += int(line[1])
-            mine += int(line[2])
-        check(
-            "two-tenant",
-            others == 0 and mine > 0,
-            f"{len(tenants)} tenants probed; rows of another tenant seen {others}, own rows seen {mine}",
-        )
+        tenants = psql(url, TENANTS_SQL)
+        if not tenants:
+            check("two-tenant", False, "no tenants to probe")
+        else:
+            others = 0
+            mine = 0
+            for tenant in tenants:
+                out = psql(url, TWO_TENANT_SQL, {"tenant": tenant, "forced": forced_array})
+                line = next(l for l in out if l.startswith("two-tenant|")).split("|")
+                others += int(line[1])
+                mine += int(line[2])
+            check(
+                "two-tenant",
+                others == 0 and mine > 0,
+                f"{len(tenants)} tenants probed; rows of another tenant seen {others}, own rows seen {mine}",
+            )
+
+    except RuntimeError as err:
+        # The connecting role must be able to act as tidegrid_app (superuser,
+        # or holding ADMIN on it, as the role that created it does).
+        for name in ("no-tenant", "two-tenant"):
+            check(name, False, f"could not run the probe as tidegrid_app: {err}")
 
     failed = [r["check"] for r in results if not r["ok"]]
     print(json.dumps({"verify": "pass" if not failed else "fail", "failed": failed, "tables": len(facts), "rows": total}))

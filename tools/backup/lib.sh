@@ -10,28 +10,8 @@ tg_psql() {
     psql -X -A -t -q -v ON_ERROR_STOP=1 "$@"
 }
 
-# One line per table in the public and app schemas:
-#   <schema.table>|<row count>|<digest>|<row level security forced: t or f>
-# The digest is an md5 over the sorted md5 of each row's text form, so it does
-# not depend on the server's collation or on physical row order. Two databases
-# with the same rows give the same line. At pilot volume this reads every row
-# in well under a minute.
-TG_TABLE_FACTS_SQL="
-select format('%s.%s|%s|%s|%s',
-         n.nspname, c.relname,
-         (xpath('/row/n/text()', x))[1]::text,
-         coalesce((xpath('/row/d/text()', x))[1]::text, ''),
-         case when c.relforcerowsecurity then 't' else 'f' end)
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
-  cross join lateral query_to_xml(
-    format('select count(*) as n, md5(string_agg(h, '''' order by h)) as d
-              from (select md5(t::text) as h from %I.%I t) s', n.nspname, c.relname),
-    false, true, '') as x
- where n.nspname in ('public', 'app')
-   and c.relkind in ('r', 'p')
- order by 1;
-"
+# The facts queries live in table-facts.sql and security-facts.sql, shared
+# with verify.py so the two can never drift.
 
 # The applied migrations, one name per line, in order.
 TG_MIGRATIONS_SQL="select name from public.schema_migrations order by name;"

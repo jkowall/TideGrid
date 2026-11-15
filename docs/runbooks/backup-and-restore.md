@@ -38,14 +38,14 @@ The owner URL in a no-reviewer environment is a known risk: any workflow file on
 
 ### Every change to the tooling (automatic)
 
-`restore-drill.yml` runs on any pull request that touches `tools/backup/`. It migrates and seeds a throwaway PostgreSQL 17, backs it up, restores into a second empty database, and checks it. It also proves the guards: a restore over a database with tables is refused, and a tampered copy (one changed row, one table without row-level security) fails the check.
+`restore-drill.yml` runs on any pull request that touches `tools/backup/`. It migrates and seeds a throwaway PostgreSQL 17, backs it up, restores into a second empty database, and checks it. It restores twice, as a superuser and as a plain role with `--no-owner` (the managed-provider case), and proves the guards: a restore over a database with tables is refused, and five tampered copies, each changed one way (a changed row, row-level security turned off, a policy that leaks reads, one that leaks writes, a grant removed), each fail the check.
 
 ### On Neon branches (by hand, owner approves)
 
-Actions, restore-drill, Run workflow from `main`, kind `both`. It waits for your approval on the `neon-main` environment, because it uses that environment's Neon API key. It never reads Neon main's URL and never writes to main.
+Actions, restore-drill, Run workflow from `main`, kind `both` (or `logical` alone). It waits for your approval on the `neon-main` environment, because it uses that environment's Neon API key. It never reads Neon main's URL and never writes to main.
 
 - **Logical drill.** Makes a branch of main now, backs it up with a key made for this run only, restores it into a fresh PostgreSQL 17 in the runner (the "Neon is gone" case), and checks every table's rows match exactly.
-- **Point-in-time drill.** Makes a branch of main as it was `minutes_ago` minutes back, then checks migrations, tables, row-level security, and tenant isolation on it.
+- **Point-in-time drill** (with `both`). Makes a branch of main as it was `minutes_ago` minutes back, then checks it against the logical drill's manifest: migrations, every table present, row-level security, policies, grants, and tenant isolation. Row counts differ by design.
 
 Both branches are deleted at the end and expire after 2 hours anyway. Each costs a few minutes of the smallest compute. The run summary records the timings.
 
@@ -81,10 +81,13 @@ This is the drill that proves the real key opens a real backup. On your Mac, wit
 ### Neon is gone (logical backup)
 
 1. Create a new PostgreSQL 17 (a new Neon project, or another provider).
-2. Restore the newest backup with `restore.sh` as in "Restore a real backup". On a managed provider without superuser, add `--no-owner`.
+2. Restore the newest backup with `restore.sh` as in "Restore a real backup". On a managed provider without superuser, add `--no-owner`: the restoring role then owns every table and gets migrations 0001 and 0002's default privileges. If `tidegrid_app` already exists there, the restoring role needs `ADMIN` on it for the tenant checks.
 3. Give `tidegrid_app` a password (`pnpm --filter @tidegrid/database app-role:password`), point Hyperdrive and the release tooling at the new database, and run `pnpm --filter @tidegrid/database migrate:status`: it should list every migration as applied.
 4. Reconcile the gap since the backup's `startedAt` against Stripe, email, and import records before reopening writes. Bookings and payments made in that gap must be re-entered from the provider records.
 
 ## Watching backup age
+
+GitHub turns off scheduled workflows in a public repository after 60 days without repository activity. That would stop the daily backup and the hourly ops check together, without a sound. A commit or a manual run resets the clock.
+
 
 `backup-age.sh` fails when the newest backup is more than 26 hours old. The backup workflow runs it after each upload (limit 1 hour), and the [ops check](ops-checks.md) runs it every hour. A red run emails whoever GitHub notifies for this repository's workflow failures; the ops check also opens an issue.

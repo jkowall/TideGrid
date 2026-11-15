@@ -87,6 +87,18 @@ describe("neon-branch create options", () => {
 });
 
 describe("neon-branch requests (injected fetch, no network)", () => {
+  it("deletes the new branch when its connection string cannot be read", async () => {
+    const { calls, deps } = recorder({
+      "/connection_uri": { status: 500, body: "" },
+      "/branches/br-9": { status: 200, body: "" },
+      "/branches": { status: 201, body: JSON.stringify({ branch: { id: "br-9" } }) },
+    });
+    const { options } = parseCreateArgs(["drill-x", "--ttl", "2", "--out", "/tmp/never"]);
+    await expect(createBranch("drill-x", options, deps)).rejects.toThrow(/500/);
+    expect(calls.map((c) => c.method)).toEqual(["POST", "GET", "DELETE"]);
+    expect(calls[2]?.url).toContain("/branches/br-9");
+  });
+
   it("skips the connection_uri call without --out", async () => {
     const { calls, deps } = recorder({
       "/branches": { status: 201, body: JSON.stringify({ branch: { id: "br-1" } }) },

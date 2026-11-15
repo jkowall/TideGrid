@@ -161,6 +161,74 @@ describe("synthetic booking check", () => {
     expect(f.calls.at(-1)?.path).toBe("/v1/public/checkout-sessions/c-1/cancel");
   });
 
+  it("finds and cancels a checkout kept behind a provider outage, by replaying its key", async () => {
+    const f = fakeApi({
+      "POST /v1/public/checkout-sessions": {
+        status: 503,
+        body: { error: { code: "payment_provider_unavailable", message: "x" } },
+      },
+    });
+    let posts = 0;
+    const fetch = async (input: string, init?: RequestInit) => {
+      if (new URL(input).pathname === "/v1/public/checkout-sessions") {
+        posts += 1;
+        if (posts === 2) {
+          // The replay: the provider answered this time.
+          return new Response(
+            JSON.stringify({
+              checkoutSession: { id: "0b7f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69", state: "open" },
+              payment: {},
+            }),
+            { status: 201 },
+          );
+        }
+      }
+      return f.fetch(input, init);
+    };
+    const keys: string[] = [];
+    const watching = async (input: string, init?: RequestInit) => {
+      const h = (init?.headers ?? {}) as Record<string, string>;
+      if (new URL(input).pathname === "/v1/public/checkout-sessions")
+        keys.push(h["Idempotency-Key"] ?? "");
+      return fetch(input, init);
+    };
+    const result = await runSynthetic({ api, origin, days: 30, fetch: watching, now: () => now });
+    expect(result).toMatchObject({ failedStep: "checkout" });
+    expect(result.reason).toContain("payment_provider_unavailable");
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    expect(f.calls.at(-1)?.path).toBe(
+      "/v1/public/checkout-sessions/0b7f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69/cancel",
+    );
+  });
+
+  it("says a checkout may remain when the replay cannot find it either", async () => {
+    const f = fakeApi({
+      "POST /v1/public/checkout-sessions": {
+        status: 503,
+        body: { error: { code: "payment_provider_unavailable", message: "x" } },
+      },
+    });
+    const result = await run(f);
+    expect(result.reason).toBe(
+      "HTTP 503 payment_provider_unavailable; a held checkout may remain until it expires",
+    );
+  });
+
+  it("never repeats free text from the server", async () => {
+    const f = fakeApi({
+      "POST /v1/public/checkout-sessions": {
+        status: 201,
+        body: {
+          checkoutSession: { id: "c-1", state: "guest jane@real.example 4111" },
+          payment: {},
+        },
+      },
+    });
+    const result = await run(f);
+    expect(result.reason).toBe("state unexpected");
+  });
+
   it("fails when the cancel does not release the hold", async () => {
     const f = fakeApi({
       "POST /v1/public/checkout-sessions/c-1/cancel": {

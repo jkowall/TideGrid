@@ -117,11 +117,18 @@ export async function createBranch(
   });
   const branchId = created.branch.id;
   if (!options.withConnectionString) return { branchId, connectionString: null };
-  const uri = await neon<{ uri: string }>(
-    deps,
-    `/projects/${project}/connection_uri?branch_id=${branchId}&role_name=neondb_owner&database_name=neondb&pooled=false`,
-  );
-  return { branchId, connectionString: uri.uri };
+  try {
+    const uri = await neon<{ uri: string }>(
+      deps,
+      `/projects/${project}/connection_uri?branch_id=${branchId}&role_name=neondb_owner&database_name=neondb&pooled=false`,
+    );
+    return { branchId, connectionString: uri.uri };
+  } catch (err) {
+    // The caller never learns this branch's id, so nothing else could delete
+    // it: delete it here rather than leave it to its expiry.
+    await deleteBranch(branchId, deps).catch(() => undefined);
+    throw err;
+  }
 }
 
 /** Idempotent: a branch that is already gone (deleted or expired) counts as deleted. */
@@ -218,7 +225,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const { name, options, out } = parseCreateArgs(rest);
     const result = await createBranch(name, options);
     if (out) {
-      await writePrivate(out, `${JSON.stringify(result)}\n`);
+      try {
+        await writePrivate(out, `${JSON.stringify(result)}\n`);
+      } catch (err) {
+        // Nobody else knows the id: delete the branch rather than orphan it.
+        await deleteBranch(result.branchId).catch(() => undefined);
+        throw err;
+      }
     }
     console.log(JSON.stringify({ branchId: result.branchId }));
     if (options.endpoint) console.error(throwawayBranchHint);

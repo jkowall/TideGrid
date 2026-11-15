@@ -82,19 +82,41 @@ done < <(manifest_value roles)
 # plain PostgreSQL target accepts the rest. The schema's own extension,
 # btree_gist, and plpgsql stay.
 pg_restore --list "$work/backup.dump" > "$work/toc.full"
-awk '
+# With --no-owner, also leave out the default privileges: they name the
+# source's owner role (ALTER DEFAULT PRIVILEGES FOR ROLE ...), which only a
+# superuser may set for another role. They are set again below for the
+# restoring role, which then owns every table.
+awk -v no_owner="$no_owner" '
   / EXTENSION / || / COMMENT - EXTENSION / {
     keep = ($0 ~ / EXTENSION - (btree_gist|plpgsql) / || $0 ~ / COMMENT - EXTENSION (btree_gist|plpgsql) /)
     if (!keep) { print ";" $0; next }
   }
+  no_owner == 1 && / DEFAULT ACL / { print ";" $0; next }
   { print }
 ' "$work/toc.full" > "$work/toc.list"
 skipped=$(grep -c '^;[0-9]' "$work/toc.list" || true)
 
 owner_flag=()
 [ "$no_owner" = 1 ] && owner_flag=(--no-owner)
-pg_restore --dbname="$TARGET_DATABASE_URL" --use-list="$work/toc.list" --exit-on-error \
-  --single-transaction ${owner_flag[@]+"${owner_flag[@]}"} "$work/backup.dump"
+# A failed restore can print a row (DETAIL: Failing row contains, CONTEXT:
+# COPY ... line N). In a GitHub Actions log, which is public here, only the
+# other lines are shown.
+if ! pg_restore --dbname="$TARGET_DATABASE_URL" --use-list="$work/toc.list" --exit-on-error \
+  --single-transaction ${owner_flag[@]+"${owner_flag[@]}"} "$work/backup.dump" 2> "$work/restore.err"; then
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    grep -Ev '^(DETAIL|CONTEXT|Command was)|Failing row' "$work/restore.err" | cut -c1-300 >&2 || true
+  else
+    cat "$work/restore.err" >&2
+  fi
+  tg_die "pg_restore failed; nothing was restored (one transaction)"
+fi
+if [ "$no_owner" = 1 ]; then
+  # Migrations 0001 and 0002's defaults, for objects a later migration creates.
+  psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" \
+    -c "alter default privileges revoke execute on functions from public" \
+    -c "alter default privileges in schema public grant select, insert on tables to tidegrid_app" \
+    -c "alter default privileges in schema public grant usage, select on sequences to tidegrid_app"
+fi
 restored=$(date -u +%s)
 
 # Database-level settings live outside pg_dump. Migration 0002 revokes
@@ -102,7 +124,7 @@ restored=$(date -u +%s)
 psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" \
   -c "do \$\$ begin execute format('revoke temporary on database %I from public', current_database()); end \$\$;"
 
-echo "restored $(manifest_value file): decrypt $(tg_seconds "$started" "$decrypted") s, restore $(tg_seconds "$decrypted" "$restored") s; left out $skipped provider extension entries"
+echo "restored $(manifest_value file): decrypt $(tg_seconds "$started" "$decrypted") s, restore $(tg_seconds "$decrypted" "$restored") s; left out $skipped entries (provider extensions, and default privileges with --no-owner)"
 TARGET_DATABASE_URL="$TARGET_DATABASE_URL" python3 -I "$here/verify.py" --manifest "$manifest" --expect-exact
 finished=$(date -u +%s)
 echo "restore drill total $(tg_seconds "$started" "$finished") s"

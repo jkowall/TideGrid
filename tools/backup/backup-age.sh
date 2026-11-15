@@ -24,8 +24,14 @@ export AWS_DEFAULT_REGION=auto AWS_REQUEST_CHECKSUM_CALCULATION=when_required AW
 
 # Manifests only: a manifest is written after its dump, so it marks a
 # finished backup.
-newest=$(aws s3api list-objects-v2 --endpoint-url "$R2_ENDPOINT" --bucket "$R2_BUCKET" --prefix "$prefix" \
-  --query 'sort_by(Contents[?ends_with(Key, `.json`)], &LastModified)[-1].[Key, LastModified]' --output text 2>/dev/null || true)
+# A listing error (credentials, endpoint) is its own failure, not "no backup".
+if ! newest=$(aws s3api list-objects-v2 --endpoint-url "$R2_ENDPOINT" --bucket "$R2_BUCKET" --prefix "$prefix" \
+  --query 'sort_by(Contents[?ends_with(Key, `.json`)] || `[]`, &LastModified)[-1].[Key, LastModified]' --output text 2> /tmp/backup-age.err.$$); then
+  echo "backup-age: FAIL could not list the backup bucket ($(grep -o 'An error occurred ([A-Za-z]*)' /tmp/backup-age.err.$$ | head -1))"
+  rm -f /tmp/backup-age.err.$$
+  exit 1
+fi
+rm -f /tmp/backup-age.err.$$
 if [ -z "$newest" ] || [ "$newest" = "None" ]; then
   echo "backup-age: FAIL no backup manifest under $prefix"
   exit 1

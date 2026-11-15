@@ -12,8 +12,10 @@ name: restore-drill
 #   logical  branch main now, back it up with a key made for this run only,
 #            restore into a fresh PostgreSQL 17 in the runner (the "Neon is
 #            gone" case), and check every table's rows match exactly
-#   pitr     branch main as it was some minutes ago (point-in-time restore)
-#            and check it: migrations, tables, row-level security, tenants
+#   both     the logical drill, then a branch of main as it was some
+#            minutes ago (point-in-time restore), checked against the
+#            logical drill's manifest: migrations, tables present, row-level
+#            security, policies, grants, tenants
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('restore drill {0}', inputs.kind) || 'restore drill round trip' }}
 
 on:
@@ -31,7 +33,9 @@ on:
       kind:
         description: Which drill
         type: choice
-        options: [both, logical, pitr]
+        # The point-in-time drill always runs after the logical one, whose
+        # manifest of main is its reference.
+        options: [both, logical]
         default: both
       minutes_ago:
         description: For pitr, how many minutes back to restore to (1 to 1440)
@@ -78,22 +82,45 @@ jobs:
           recipient=$(age-keygen -y "$RUNNER_TEMP/drill.key")
           BACKUP_AGE_RECIPIENT="$recipient" tools/backup/backup.sh --label ci --out "$RUNNER_TEMP/bk"
           dump=$(ls "$RUNNER_TEMP"/bk/*.dump.age)
-          psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database restored"
-          target="${DATABASE_URL%/*}/restored"
-          # Refuses without --throwaway, and refuses a database with tables.
-          if TARGET_DATABASE_URL="$DATABASE_URL" tools/backup/restore.sh --backup "$dump" \
-               --manifest "${dump%.dump.age}.json" --identity "$RUNNER_TEMP/drill.key" --throwaway; then
+          manifest="${dump%.dump.age}.json"
+          base="${DATABASE_URL%/*}"
+          restore() { TARGET_DATABASE_URL="$1" tools/backup/restore.sh --backup "$dump" --manifest "$manifest" --identity "$RUNNER_TEMP/drill.key" --throwaway "${@:2}"; }
+
+          # Refused: a database that already has tables.
+          if restore "$DATABASE_URL" 2> "$RUNNER_TEMP/refused.txt"; then
             echo "::error::restore.sh restored over a database that has tables"; exit 1
           fi
-          TARGET_DATABASE_URL="$target" tools/backup/restore.sh --backup "$dump" \
-            --manifest "${dump%.dump.age}.json" --identity "$RUNNER_TEMP/drill.key" --throwaway
-          # A changed row, a table that lost row-level security: the check fails.
-          psql -X -q -v ON_ERROR_STOP=1 "$target" -c "update public.boats set name = name || ' x' where ctid = (select ctid from public.boats limit 1)" \
-            -c "alter table public.boats no force row level security" -c "alter table public.boats disable row level security"
-          if TARGET_DATABASE_URL="$target" python3 -I tools/backup/verify.py --manifest "${dump%.dump.age}.json" --expect-exact; then
-            echo "::error::verify passed a tampered restore"; exit 1
-          fi
-          echo "the check caught the tampered copy"
+          grep -q "already has .* tables" "$RUNNER_TEMP/refused.txt" || { cat "$RUNNER_TEMP/refused.txt"; echo "::error::refused for the wrong reason"; exit 1; }
+
+          # As a superuser, ownership kept.
+          psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database restored"
+          restore "$base/restored"
+
+          # As a role without superuser (a managed provider), with --no-owner.
+          # It may act as tidegrid_app, as the role that creates it would.
+          psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" \
+            -c "create role restorer login password 'drill-only' createrole bypassrls" \
+            -c "grant tidegrid_app to restorer with admin option" \
+            -c "create database restored_plain owner restorer"
+          plain="$(printf '%s' "$base" | sed -E 's#//[^@]*@#//restorer:drill-only@#')/restored_plain"
+          restore "$plain" --no-owner
+
+          # Each tamper alone must fail the check.
+          tampers=(
+            "update public.boats set name = name || ' x' where ctid = (select ctid from public.boats limit 1)"
+            "alter table public.boats no force row level security"
+            "create policy drill_leak on public.boats for select using (true)"
+            "create policy drill_leak_w on public.boats for insert with check (true)"
+            "revoke select on public.boats from tidegrid_app"
+          )
+          for i in "${!tampers[@]}"; do
+            psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database tamper_$i template restored"
+            psql -X -q -v ON_ERROR_STOP=1 "$base/tamper_$i" -c "${tampers[$i]}"
+            if TARGET_DATABASE_URL="$base/tamper_$i" python3 -I tools/backup/verify.py --manifest "$manifest" --expect-exact > "$RUNNER_TEMP/tamper.txt"; then
+              cat "$RUNNER_TEMP/tamper.txt"; echo "::error::verify passed a tampered copy: ${tampers[$i]}"; exit 1
+            fi
+            echo "caught: ${tampers[$i]} ($(grep -o '"failed": \[[^]]*\]' "$RUNNER_TEMP/tamper.txt"))"
+          done
       - name: Server log
         if: failure()
         run: tools/local-db/local-db.sh logs | tail -50
@@ -140,7 +167,6 @@ jobs:
       - name: Install the PostgreSQL 17 client and age
         run: tools/backup/install-tools.sh
       - name: Logical drill, branch main now and back it up
-        if: inputs.kind != 'pitr'
         id: source
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
@@ -165,7 +191,6 @@ jobs:
           echo "branch_s=$((t1 - t0))" >> "$GITHUB_OUTPUT"
           echo "backup_s=$((t2 - t1))" >> "$GITHUB_OUTPUT"
       - name: Logical drill, restore into a fresh PostgreSQL 17 and check
-        if: inputs.kind != 'pitr'
         id: logical
         run: |
           set -euo pipefail
@@ -183,7 +208,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Point-in-time drill, branch main as it was and check
-        if: inputs.kind != 'logical'
+        if: inputs.kind == 'both'
         id: pitr
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
@@ -207,16 +232,7 @@ jobs:
             sleep 2
           done
           t1=$(date -u +%s)
-          # The reference: this run's logical backup manifest when there is
-          # one, otherwise a manifest of the restored branch itself (no dump
-          # is made from it; only its facts are read).
-          ref=$(ls "$RUNNER_TEMP"/bk/*.json 2>/dev/null | head -1 || true)
-          if [ -z "$ref" ]; then
-            age-keygen -o "$RUNNER_TEMP/pitr.key" 2>/dev/null
-            DATABASE_URL="$url" BACKUP_AGE_RECIPIENT="$(age-keygen -y "$RUNNER_TEMP/pitr.key")" \
-              tools/backup/backup.sh --label pitr --out "$RUNNER_TEMP/pitr-ref" >/dev/null
-            ref=$(ls "$RUNNER_TEMP"/pitr-ref/*.json)
-          fi
+          ref=$(ls "$RUNNER_TEMP"/bk/*.json)
           TARGET_DATABASE_URL="$url" python3 -I tools/backup/verify.py --manifest "$ref" | tee "$RUNNER_TEMP/pitr.txt"
           t2=$(date -u +%s)
           {
@@ -237,4 +253,4 @@ jobs:
           for id in $SOURCE $PITR; do
             pnpm --silent --filter @tidegrid/database neon:branch delete "$id" || echo "::warning::could not delete $id; it expires within 2 hours"
           done
-          rm -rf "$RUNNER_TEMP/bk" "$RUNNER_TEMP/pitr-ref" "$RUNNER_TEMP"/*.key "$RUNNER_TEMP"/source.json "$RUNNER_TEMP"/pitr.json
+          rm -rf "$RUNNER_TEMP/bk" "$RUNNER_TEMP"/*.key "$RUNNER_TEMP"/source.json "$RUNNER_TEMP"/pitr.json

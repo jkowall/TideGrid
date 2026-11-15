@@ -62,6 +62,11 @@ function localDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** A server-supplied word, only when it is a plain code; never free text. */
+function word(value: unknown): string {
+  return typeof value === "string" && /^[a-z_]{1,32}$/.test(value) ? value : "unexpected";
+}
+
 /** The status and the API's error code when it gave one; never the message. */
 async function why(res: Response): Promise<string> {
   let code = "";
@@ -103,11 +108,13 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
   }
 
   let opened: { id: string; secret: string } | null = null;
+  // Set once a checkout request is about to go out; finds a kept checkout.
+  let recover: (() => Promise<void>) | null = null;
   try {
     await step("health", async () => {
       const body = await expectJson("health", await o.fetch(`${base}/v1/health`), 200);
       if (body.database !== "ok")
-        throw new StepFailure("health", `database ${String(body.database)}`);
+        throw new StepFailure("health", `database ${word(body.database)}`);
     });
 
     const trip = await step("trips", async () => {
@@ -149,7 +156,10 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
       const party =
         offer.charter || !ticket
           ? { kind: "charter", guests: Math.max(1, offer.product.minPartySize) }
-          : { kind: "tickets", tickets: [{ code: ticket.code, quantity: 1 }] };
+          : {
+              kind: "tickets",
+              tickets: [{ code: ticket.code, quantity: Math.max(1, offer.product.minPartySize) }],
+            };
       const res = await o.fetch(`${base}/v1/public/quotes`, {
         method: "POST",
         headers: headers({ "Content-Type": "application/json", "Idempotency-Key": randomUUID() }),
@@ -160,26 +170,45 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
       return body.quote;
     });
 
-    await step("checkout", async () => {
-      const secret = randomBytes(32).toString("base64url");
-      const res = await o.fetch(`${base}/v1/public/checkout-sessions`, {
+    // Kept outside the step: when the answer is lost or the provider is down,
+    // the checkout may exist anyway, and replaying the same key with the same
+    // body returns it, so it can still be canceled.
+    const checkoutKey = randomUUID();
+    const secret = randomBytes(32).toString("base64url");
+    const checkoutBody = JSON.stringify({
+      quoteId: quote.quoteId,
+      acceptedPolicyVersion: offer.policy.version,
+      booker: syntheticBooker,
+      checkoutSecret: secret,
+    });
+    const postCheckout = () =>
+      o.fetch(`${base}/v1/public/checkout-sessions`, {
         method: "POST",
-        headers: headers({ "Content-Type": "application/json", "Idempotency-Key": randomUUID() }),
-        body: JSON.stringify({
-          quoteId: quote.quoteId,
-          acceptedPolicyVersion: offer.policy.version,
-          booker: syntheticBooker,
-          checkoutSecret: secret,
-        }),
+        headers: headers({ "Content-Type": "application/json", "Idempotency-Key": checkoutKey }),
+        body: checkoutBody,
       });
-      const body = (await expectJson("checkout", res, 201)) as {
+    recover = async () => {
+      // Learn the id of a checkout the server may have kept.
+      try {
+        const res = await postCheckout();
+        if (res.status !== 200 && res.status !== 201) return;
+        const body = (await res.json()) as { checkoutSession?: { id?: unknown } };
+        const id = body.checkoutSession?.id;
+        if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)) opened = { id, secret };
+      } catch {
+        // Unknown: the checkout, if any, expires by itself.
+      }
+    };
+
+    await step("checkout", async () => {
+      const body = (await expectJson("checkout", await postCheckout(), 201)) as {
         checkoutSession?: { id: string; state: string };
         payment?: unknown;
       };
       if (!body.checkoutSession?.id) throw new StepFailure("checkout", "no checkout id");
       opened = { id: body.checkoutSession.id, secret };
       if (body.checkoutSession.state !== "open") {
-        throw new StepFailure("checkout", `state ${body.checkoutSession.state}`);
+        throw new StepFailure("checkout", `state ${word(body.checkoutSession.state)}`);
       }
       // The provider payment exists: the payment provider answered.
       if (!body.payment) throw new StepFailure("checkout", "no provider payment");
@@ -190,15 +219,25 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
         ? err
         : new StepFailure(
             (Object.keys(ms).at(-1) as SyntheticStep | undefined) ?? "health",
-            (err as Error).name === "TimeoutError" ? "timeout" : "network error",
+            (err as Error).name === "TimeoutError"
+              ? "timeout"
+              : err instanceof TypeError && !/fetch/i.test((err as Error).message)
+                ? "unexpected response"
+                : "network error",
           );
+    let unknown = false;
+    if (!opened && recover && failure.step === "checkout") {
+      await recover();
+      // Still no id: the server may have kept a checkout it could not show.
+      unknown = !opened && !/^HTTP (4\d\d)/.test(failure.message);
+    }
     const cancel = await cancelOpened(opened);
-    return {
-      outcome: "fail",
-      failedStep: failure.step,
-      reason: cancel ? `${failure.message}; cancel ${cancel}` : failure.message,
-      ms,
-    };
+    const notes = [
+      failure.message,
+      ...(cancel ? [`cancel ${cancel}`] : []),
+      ...(unknown ? ["a held checkout may remain until it expires"] : []),
+    ];
+    return { outcome: "fail", failedStep: failure.step, reason: notes.join("; "), ms };
   }
 
   const cancelProblem = await step("cancel", () => cancelOpened(opened));
@@ -217,7 +256,7 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
       const body = (await res.json()) as { checkoutSession?: { state?: string } };
       return body.checkoutSession?.state === "canceled"
         ? null
-        : `state ${String(body.checkoutSession?.state)}`;
+        : `state ${word(body.checkoutSession?.state)}`;
     } catch {
       return "network error";
     }
