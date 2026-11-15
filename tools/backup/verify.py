@@ -217,12 +217,18 @@ def main():
     if not all(part.replace("_", "").isalnum() for n in forced_names for part in n.split(".")):
         sys.exit("verify: unexpected table name in the manifest")
     forced_array = "{" + ",".join(forced_names) + "}"
+    # Each probe reports its own failure: the connecting role must be able to
+    # act as tidegrid_app (superuser, or holding ADMIN on it, as the role that
+    # created it does).
     try:
         probe = psql(url, TENANT_PROBE_SQL, {"forced": forced_array})
         lines = [l for l in probe if l.startswith("no-tenant|")]
         seen = int(lines[0].split("|")[1]) if lines else -1
         check("no-tenant", seen == 0, f"the runtime role sees {seen} rows with no tenant set")
+    except RuntimeError as err:
+        check("no-tenant", False, f"could not run the probe as tidegrid_app: {err}")
 
+    try:
         tenants = psql(url, TENANTS_SQL)
         if not tenants:
             check("two-tenant", False, "no tenants to probe")
@@ -239,12 +245,8 @@ def main():
                 others == 0 and mine > 0,
                 f"{len(tenants)} tenants probed; rows of another tenant seen {others}, own rows seen {mine}",
             )
-
     except RuntimeError as err:
-        # The connecting role must be able to act as tidegrid_app (superuser,
-        # or holding ADMIN on it, as the role that created it does).
-        for name in ("no-tenant", "two-tenant"):
-            check(name, False, f"could not run the probe as tidegrid_app: {err}")
+        check("two-tenant", False, f"could not run the probe as tidegrid_app: {err}")
 
     failed = [r["check"] for r in results if not r["ok"]]
     print(json.dumps({"verify": "pass" if not failed else "fail", "failed": failed, "tables": len(facts), "rows": total}))
