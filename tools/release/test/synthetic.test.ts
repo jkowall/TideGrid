@@ -273,6 +273,30 @@ describe("synthetic booking check", () => {
     });
   });
 
+  it("passes, with a note, when checkout asks for the human check", async () => {
+    const f = fakeApi({
+      "POST /v1/public/checkout-sessions": {
+        status: 403,
+        body: { error: { code: "human_check_required", message: "x" } },
+      },
+    });
+    const result = await run(f);
+    expect(result).toMatchObject({ outcome: "pass", failedStep: null });
+    expect(result.note).toMatch(/human check/);
+    expect(f.calls.filter((c) => c.path.endsWith("/cancel"))).toHaveLength(0);
+  });
+
+  it("fails when the human check itself is refused", async () => {
+    const f = fakeApi({
+      "POST /v1/public/checkout-sessions": {
+        status: 403,
+        body: { error: { code: "human_check_failed", message: "x" } },
+      },
+    });
+    const result = await run(f);
+    expect(result).toMatchObject({ outcome: "fail", failedStep: "checkout" });
+  });
+
   it("fails when no trip is on sale long enough", async () => {
     const f = fakeApi({
       "GET /v1/public/trips": { status: 200, body: { trips: [] } },

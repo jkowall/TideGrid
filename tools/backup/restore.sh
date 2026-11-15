@@ -121,13 +121,14 @@ if ! pg_restore --dbname="$TARGET_DATABASE_URL" --use-list="$work/toc.list" --ex
   fi
   tg_die "pg_restore failed; nothing was restored (one transaction)"
 fi
-if [ "$no_owner" = 1 ]; then
-  # Migrations 0001 and 0002's defaults, for objects a later migration creates.
-  psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" \
-    -c "alter default privileges revoke execute on functions from public" \
-    -c "alter default privileges in schema public grant select, insert on tables to tidegrid_app" \
-    -c "alter default privileges in schema public grant usage, select on sequences to tidegrid_app"
-fi
+# Migrations 0001 and 0002's defaults, for objects a later migration creates,
+# set for the restoring role in both modes: the restored defaults belong to the
+# source's owner, and later migrations run as whoever restored. Restoring as a
+# superuser keeps the source owner's defaults as well.
+psql -X -q -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" \
+  -c "alter default privileges revoke execute on functions from public" \
+  -c "alter default privileges in schema public grant select, insert on tables to tidegrid_app" \
+  -c "alter default privileges in schema public grant usage, select on sequences to tidegrid_app"
 restored=$(date -u +%s)
 
 # Database-level settings live outside pg_dump. Migration 0002 revokes

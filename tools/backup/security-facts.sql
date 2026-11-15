@@ -4,7 +4,8 @@
 --                               app tables: table, name, command, roles,
 --                               permissive, USING and WITH CHECK
 --   grants|<count>|<digest>     every table and column privilege the runtime
---                               role or PUBLIC holds, with its grant option
+--                               role or PUBLIC holds, with its grant option,
+--                               and EXECUTE on the schemas' own functions
 -- A restore that drops, loosens, or adds a policy or a grant changes a digest.
 select format('policies|%s|%s', count(*),
          coalesce(md5(string_agg(concat_ws('|', schemaname, tablename, policyname, cmd, permissive,
@@ -28,5 +29,18 @@ select format('grants|%s|%s', count(*),
       cross join lateral aclexplode(a.attacl) x
      where a.attacl is not null and not a.attisdropped
        and n.nspname in ('public', 'app')
+       and (x.grantee = 'tidegrid_app'::regrole or x.grantee = 0)
+    union all
+    -- EXECUTE on the schema's own functions, by signature. Routines that
+    -- belong to an extension are left out, as the restore may leave out the
+    -- extension.
+    select concat_ws('|', case when x.grantee = 0 then 'PUBLIC' else 'tidegrid_app' end,
+             n.nspname, p.oid::regprocedure::text, x.privilege_type, x.is_grantable)
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x
+     where n.nspname in ('public', 'app')
+       and not exists (select 1 from pg_depend d
+                        where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')
        and (x.grantee = 'tidegrid_app'::regrole or x.grantee = 0)
   ) grants;

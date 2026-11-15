@@ -41,6 +41,8 @@ export interface SyntheticResult {
   failedStep: SyntheticStep | null;
   /** A short, fixed reason: an HTTP status and error code, never a body. */
   reason: string | null;
+  /** Set when a step passed without the full check, and why. */
+  note?: string;
   ms: Partial<Record<SyntheticStep, number>>;
 }
 
@@ -117,6 +119,7 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
   let opened: { id: string; secret: string } | null = null;
   // Set once a checkout request is about to go out; finds a kept checkout.
   let recover: (() => Promise<void>) | null = null;
+  let humanCheck = false;
   try {
     await step("health", async () => {
       const body = await expectJson("health", await o.fetch(`${base}/v1/health`), 200);
@@ -232,7 +235,14 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
     };
 
     await step("checkout", async () => {
-      const body = (await expectJson("checkout", await postCheckout(), 201)) as {
+      const res = await postCheckout();
+      if (res.status === 403 && (await why(res.clone())) === "HTTP 403 human_check_required") {
+        // Staging and production ask for a Turnstile token a script cannot
+        // get. A refusal before any seat is held is the healthy answer.
+        humanCheck = true;
+        return;
+      }
+      const body = (await expectJson("checkout", res, 201)) as {
         checkoutSession?: { id: string; state: string };
         payment?: unknown;
       };
@@ -276,6 +286,15 @@ export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult
     };
   }
 
+  if (humanCheck) {
+    return {
+      outcome: "pass",
+      failedStep: null,
+      reason: null,
+      note: "checkout asked for the human check, so no seat was held",
+      ms,
+    };
+  }
   const cancelProblem = await step("cancel", () => cancelOpened(opened));
   if (cancelProblem) return { outcome: "fail", failedStep: "cancel", reason: cancelProblem, ms };
   return { outcome: "pass", failedStep: null, reason: null, ms };

@@ -50,4 +50,5 @@ Cost: GitHub Actions minutes are free for a public repository. The database is a
 
 - **Tenant escape.** No hourly signal. Tenant isolation is proven by the two-tenant tests in CI on every change and by `nov1 isolation` at each release. A runtime signal needs a design (for example, counting refused cross-tenant reads) and is a follow-up.
 - **Paging and long-term logs.** Not for the paid pilots (owner, 2026-11-08). Workers Logs keeps seven days. Both return before the pilots end; the hosting plan's every-5-minutes synthetic check and paging come with them.
+- **The seat hold, where the human check is on.** Staging and production ask for a Turnstile token before a checkout, which a script cannot get. There the synthetic check passes when checkout answers `human_check_required` before holding anything, and says so in its `note`; the hold and cancel are not exercised. Testing them needs a synthetic-only way past the check, an API change and a follow-up.
 - **A paid booking.** The synthetic check stops before payment. Proving payment to confirmation needs a Stripe test card from outside the browser and is a follow-up.
