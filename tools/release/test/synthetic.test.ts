@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  optionsFromEnv,
-  runSynthetic,
-  syntheticBooker,
-} from "../src/synthetic.ts";
+import { optionsFromEnv, runSynthetic, syntheticBooker } from "../src/synthetic.ts";
 
 const now = Date.parse("2026-11-15T12:00:00Z");
 const api = "https://api.example.test";
@@ -183,9 +179,7 @@ describe("synthetic booking check", () => {
       failedStep: "checkout",
       reason: "no provider payment",
     });
-    expect(f.calls.at(-1)?.path).toBe(
-      "/v1/public/checkout-sessions/c-1/cancel",
-    );
+    expect(f.calls.at(-1)?.path).toBe("/v1/public/checkout-sessions/c-1/cancel");
   });
 
   it("finds and cancels a checkout kept behind a provider outage, by replaying its key", async () => {
@@ -290,9 +284,7 @@ describe("synthetic booking check", () => {
   });
 
   it("checks its settings", () => {
-    expect(
-      optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: `${origin}/` }),
-    ).toEqual({
+    expect(optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: `${origin}/` })).toEqual({
       api,
       origin,
       days: 30,
@@ -310,9 +302,7 @@ describe("synthetic booking check", () => {
         SYNTHETIC_ORIGIN: `${origin}/book`,
       }),
     ).toThrow(/origin/);
-    expect(() => optionsFromEnv({ SYNTHETIC_API: api })).toThrow(
-      /SYNTHETIC_ORIGIN/,
-    );
+    expect(() => optionsFromEnv({ SYNTHETIC_API: api })).toThrow(/SYNTHETIC_ORIGIN/);
     expect(() =>
       optionsFromEnv({
         SYNTHETIC_API: api,

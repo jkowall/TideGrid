@@ -34,13 +34,7 @@ export interface SyntheticOptions {
   now: () => number;
 }
 
-export type SyntheticStep =
-  | "health"
-  | "trips"
-  | "offer"
-  | "quote"
-  | "checkout"
-  | "cancel";
+export type SyntheticStep = "health" | "trips" | "offer" | "quote" | "checkout" | "cancel";
 
 export interface SyntheticResult {
   outcome: "pass" | "fail";
@@ -73,9 +67,7 @@ function localDate(ms: number): string {
 
 /** A server-supplied word, only when it is a plain code; never free text. */
 function word(value: unknown): string {
-  return typeof value === "string" && /^[a-z_]{1,32}$/.test(value)
-    ? value
-    : "unexpected";
+  return typeof value === "string" && /^[a-z_]{1,32}$/.test(value) ? value : "unexpected";
 }
 
 /** The status and the API's error code when it gave one; never the message. */
@@ -94,9 +86,7 @@ async function why(res: Response): Promise<string> {
   return `HTTP ${res.status}${code}`;
 }
 
-export async function runSynthetic(
-  o: SyntheticOptions,
-): Promise<SyntheticResult> {
+export async function runSynthetic(o: SyntheticOptions): Promise<SyntheticResult> {
   const ms: SyntheticResult["ms"] = {};
   const base = o.api.replace(/\/+$/, "");
   const guests = o.party ?? 1;
@@ -106,10 +96,7 @@ export async function runSynthetic(
     ...extra,
   });
 
-  async function step<T>(
-    name: SyntheticStep,
-    run: () => Promise<T>,
-  ): Promise<T> {
+  async function step<T>(name: SyntheticStep, run: () => Promise<T>): Promise<T> {
     const started = o.now();
     try {
       return await run();
@@ -118,11 +105,7 @@ export async function runSynthetic(
     }
   }
 
-  async function expectJson(
-    name: SyntheticStep,
-    res: Response,
-    status: number,
-  ) {
+  async function expectJson(name: SyntheticStep, res: Response, status: number) {
     if (res.status !== status) throw new StepFailure(name, await why(res));
     try {
       return (await res.json()) as Record<string, unknown>;
@@ -136,11 +119,7 @@ export async function runSynthetic(
   let recover: (() => Promise<void>) | null = null;
   try {
     await step("health", async () => {
-      const body = await expectJson(
-        "health",
-        await o.fetch(`${base}/v1/health`),
-        200,
-      );
+      const body = await expectJson("health", await o.fetch(`${base}/v1/health`), 200);
       if (body.database !== "ok")
         throw new StepFailure("health", `database ${word(body.database)}`);
     });
@@ -150,12 +129,9 @@ export async function runSynthetic(
       // of US evenings, so start a day early. Sales times filter what is left.
       const from = localDate(o.now() - 86_400_000);
       const to = localDate(o.now() + o.days * 86_400_000);
-      const res = await o.fetch(
-        `${base}/v1/public/trips?from=${from}&to=${to}&party=${guests}`,
-        {
-          headers: headers(),
-        },
-      );
+      const res = await o.fetch(`${base}/v1/public/trips?from=${from}&to=${to}&party=${guests}`, {
+        headers: headers(),
+      });
       const body = (await expectJson("trips", res, 200)) as {
         trips?: {
           tripId: string;
@@ -167,19 +143,15 @@ export async function runSynthetic(
         (t) => Date.parse(t.salesCloseAt) > o.now() + salesMargin,
       );
       // Shared seats first: a charter holds the whole boat while the check runs.
-      const pick =
-        open.find((t) => t.product.kind === "shared_seat") ?? open[0];
+      const pick = open.find((t) => t.product.kind === "shared_seat") ?? open[0];
       if (!pick) throw new StepFailure("trips", "no bookable trip in range");
       return pick;
     });
 
     const offer = await step("offer", async () => {
-      const res = await o.fetch(
-        `${base}/v1/public/trips/${trip.tripId}/offer`,
-        {
-          headers: headers(),
-        },
-      );
+      const res = await o.fetch(`${base}/v1/public/trips/${trip.tripId}/offer`, {
+        headers: headers(),
+      });
       const body = (await expectJson("offer", res, 200)) as {
         offer?: {
           tickets: { code: string }[];
@@ -253,34 +225,24 @@ export async function runSynthetic(
           checkoutSession?: { id?: unknown };
         };
         const id = body.checkoutSession?.id;
-        if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id))
-          opened = { id, secret };
+        if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)) opened = { id, secret };
       } catch {
         // Unknown: the checkout, if any, expires by itself.
       }
     };
 
     await step("checkout", async () => {
-      const body = (await expectJson(
-        "checkout",
-        await postCheckout(),
-        201,
-      )) as {
+      const body = (await expectJson("checkout", await postCheckout(), 201)) as {
         checkoutSession?: { id: string; state: string };
         payment?: unknown;
       };
-      if (!body.checkoutSession?.id)
-        throw new StepFailure("checkout", "no checkout id");
+      if (!body.checkoutSession?.id) throw new StepFailure("checkout", "no checkout id");
       opened = { id: body.checkoutSession.id, secret };
       if (body.checkoutSession.state !== "open") {
-        throw new StepFailure(
-          "checkout",
-          `state ${word(body.checkoutSession.state)}`,
-        );
+        throw new StepFailure("checkout", `state ${word(body.checkoutSession.state)}`);
       }
       // The provider payment exists: the payment provider answered.
-      if (!body.payment)
-        throw new StepFailure("checkout", "no provider payment");
+      if (!body.payment) throw new StepFailure("checkout", "no provider payment");
     });
   } catch (err) {
     const failure =
@@ -290,8 +252,7 @@ export async function runSynthetic(
             (Object.keys(ms).at(-1) as SyntheticStep | undefined) ?? "health",
             (err as Error).name === "TimeoutError"
               ? "timeout"
-              : err instanceof TypeError &&
-                  !/fetch/i.test((err as Error).message)
+              : err instanceof TypeError && !/fetch/i.test((err as Error).message)
                 ? "unexpected response"
                 : "network error",
           );
@@ -316,23 +277,17 @@ export async function runSynthetic(
   }
 
   const cancelProblem = await step("cancel", () => cancelOpened(opened));
-  if (cancelProblem)
-    return { outcome: "fail", failedStep: "cancel", reason: cancelProblem, ms };
+  if (cancelProblem) return { outcome: "fail", failedStep: "cancel", reason: cancelProblem, ms };
   return { outcome: "pass", failedStep: null, reason: null, ms };
 
   /** Null when canceled (or nothing to cancel); otherwise why not. */
-  async function cancelOpened(
-    c: { id: string; secret: string } | null,
-  ): Promise<string | null> {
+  async function cancelOpened(c: { id: string; secret: string } | null): Promise<string | null> {
     if (!c) return null;
     try {
-      const res = await o.fetch(
-        `${base}/v1/public/checkout-sessions/${c.id}/cancel`,
-        {
-          method: "POST",
-          headers: headers({ Authorization: `Bearer ${c.secret}` }),
-        },
-      );
+      const res = await o.fetch(`${base}/v1/public/checkout-sessions/${c.id}/cancel`, {
+        method: "POST",
+        headers: headers({ Authorization: `Bearer ${c.secret}` }),
+      });
       if (res.status !== 200) return await why(res);
       const body = (await res.json()) as {
         checkoutSession?: { state?: string };
@@ -353,9 +308,7 @@ export function optionsFromEnv(
   const api = env.SYNTHETIC_API ?? "";
   const origin = env.SYNTHETIC_ORIGIN ?? "";
   const local = (u: URL) =>
-    u.hostname === "localhost" ||
-    u.hostname.endsWith(".localhost") ||
-    u.hostname === "127.0.0.1";
+    u.hostname === "localhost" || u.hostname.endsWith(".localhost") || u.hostname === "127.0.0.1";
   for (const [name, value] of [
     ["SYNTHETIC_API", api],
     ["SYNTHETIC_ORIGIN", origin],
@@ -366,10 +319,7 @@ export function optionsFromEnv(
     } catch {
       throw new Error(`${name} must be a URL such as https://api.tidegrid.us`);
     }
-    if (
-      url.protocol !== "https:" &&
-      !(url.protocol === "http:" && local(url))
-    ) {
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && local(url))) {
       throw new Error(`${name} must be https (http only for localhost)`);
     }
     if (name === "SYNTHETIC_ORIGIN" && url.pathname !== "/") {
