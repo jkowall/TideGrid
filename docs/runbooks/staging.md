@@ -25,7 +25,7 @@ The deploy's preflight step checks that the token can read Workers and Hyperdriv
 6. Builds and deploys the staging console.
 7. Waits until `https://api-staging.tidegrid.us/v1/health` shows the SHA and the last migration.
 
-The Hyperdrive config's id is printed in the run summary. The API's `env.staging` binds it by id in `apps/api-worker/wrangler.jsonc`. Until that binding is committed, staging connects through `DATABASE_URL` directly, and the Hyperdrive probes do not count.
+The Hyperdrive config's id is printed in the run summary. The API's `env.staging` binds it by id (`9c9970c1c7fd4433813445cbbfdf3ad1`) in `apps/api-worker/wrangler.jsonc`, so the Worker connects through Hyperdrive and keeps `DATABASE_URL` only as a fallback. If the config is ever deleted and recreated, update that id.
 
 **probes** (needs a deploy first)
 
