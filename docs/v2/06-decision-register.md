@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: W3-OPS-5, synthetic booking check and alerts, code parts (coordinator defaults pending owner confirmation)
+
+The code parts of W3-OPS-5 under the same go as W3-OPS-6 (the entry below), within the owner's 2026-11-08 choice of no paging and no long-term logs for the paid pilots. The [ops checks runbook](../runbooks/ops-checks.md), the synthetic check (`pnpm --filter @tidegrid/release synthetic`), and the signals (`tools/ops`). Nothing is switched on. Coordinator defaults, pending owner confirmation:
+
+- **D1: an alert is a GitHub issue.** The `ops-check` workflow opens one issue labeled `ops-alert` when a check fails, comments only when what fails changes, and closes it when a run is clean. GitHub emails it to the repository's watchers. No paging, no new account. The repository is public, so the issue shows counts and step names only.
+- **D2: hourly, not every 5 minutes.** The hosting plan's every-5-minutes synthetic check comes back with paging before the pilots end. Hourly keeps Stripe test calls and stray synthetic rows low; the API's own 15-minute cron already wakes the database, so Neon cost does not change.
+- **D3: the synthetic booking stops before payment.** It holds one seat on a synthetic tenant's trip, checks the Stripe payment was created, then cancels, so nothing is booked and nobody gets email. The booker is at `example.test`. Proving payment to confirmation is a follow-up.
+- **D4: the signals and their limits.** A paid checkout with no booking and no refund after 15 minutes (any), the oldest due background job (30 minutes), unreplayed dead letters (any), an email account fault in the last hour (any), the oldest due email (60 minutes), the cron's sweeps quiet (45 minutes), backup age (26 hours, once backups are on). Read with the owner URL from the `backup` environment in a read-only session.
+- **D5: tenant escape has no hourly signal yet.** CI's two-tenant tests and `nov1 isolation` at release cover it; a runtime signal needs its own design.
+
+Not done: no deploy, no Cloudflare alert change, no dedicated synthetic tenant (the runbook suggests `demo-harbor` until there is one), and the OpenTelemetry export, which waits for the long-term telemetry choice.
+
 ### 2026-11-15: W3-OPS-6, backups and restore drills, tooling only (coordinator defaults pending owner confirmation)
 
 On 2026-11-15 the owner wrote "lets finish it up" about the rest of the Wave 3 operations work, and the coordinator started W3-OPS-6 and the code parts of W3-OPS-5 as code and docs only: no live apply, no new account, no money. Drills run only on throwaway Neon branches. The [backup and restore runbook](../runbooks/backup-and-restore.md), [tooling](../../tools/backup/README.md), and an [RPO acceptance draft](drafts/rpo-acceptance.md) for operator sign-off. Nothing is switched on. Coordinator defaults, pending owner confirmation:

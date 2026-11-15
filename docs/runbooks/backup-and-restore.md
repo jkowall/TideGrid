@@ -87,4 +87,4 @@ This is the drill that proves the real key opens a real backup. On your Mac, wit
 
 ## Watching backup age
 
-`backup-age.sh` fails when the newest backup is more than 26 hours old. The backup workflow runs it after each upload (limit 1 hour), and the ops check (W3-OPS-5) runs it on its own schedule. A red run emails whoever GitHub notifies for this repository's workflow failures; the ops check also opens an issue.
+`backup-age.sh` fails when the newest backup is more than 26 hours old. The backup workflow runs it after each upload (limit 1 hour), and the [ops check](ops-checks.md) runs it every hour. A red run emails whoever GitHub notifies for this repository's workflow failures; the ops check also opens an issue.
