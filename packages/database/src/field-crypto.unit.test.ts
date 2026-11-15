@@ -35,7 +35,10 @@ describe("field encryption", () => {
     await expect(
       openField(keyring, { ...place, field: "other.column" }, sealed),
     ).rejects.toBeInstanceOf(FieldDecryptError);
-    const flipped = `${sealed.slice(0, -2)}${sealed.endsWith("AA") ? "AB" : "AA"}`;
+    // A character in the middle of the body: every one of its bits is data,
+    // unlike the last character, whose low bits can be padding.
+    const at = sealed.lastIndexOf(":") + 10;
+    const flipped = `${sealed.slice(0, at)}${sealed[at] === "A" ? "B" : "A"}${sealed.slice(at + 1)}`;
     await expect(openField(keyring, place, flipped)).rejects.toBeInstanceOf(FieldDecryptError);
     await expect(openField(keyring, place, "plain text")).rejects.toBeInstanceOf(FieldDecryptError);
   });

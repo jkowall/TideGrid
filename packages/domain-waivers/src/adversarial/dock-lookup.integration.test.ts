@@ -6,12 +6,26 @@
  * (TIDEGRID_EPHEMERAL_DB=1), synthetic data only.
  */
 import { randomUUID } from "node:crypto";
-import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
+import {
+  inTenantTransaction,
+  newFieldKeyringSecret,
+  parseFieldKeyring,
+  type TenantContext,
+} from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { lookUpAtDock, startAssistedSigning, startDockSigning, type WaiverDeps } from "../index.ts";
+import {
+  dockParty,
+  loadDockLookup,
+  lookUpAtDock,
+  resendWaiverForBooker,
+  startAssistedSigning,
+  startDockSigning,
+  type WaiverDeps,
+  WaiverEvidenceSealedError,
+} from "../index.ts";
 import {
   adult,
   createWaiverFixture,
@@ -26,6 +40,7 @@ import {
   closeWorld,
   liveRequest,
   name,
+  openFor,
   openWorld,
   redeem,
   refusal,
@@ -169,6 +184,59 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
     // An unreadable code is refused without counting.
     expect(await lookUp(A.id, "#!?", "Booker")).toEqual({ kind: "invalid" });
   });
+
+  it("reads a party with sealed evidence (W3-OPS-4): lookup, refresh, dock signing, and booker resend", async () => {
+    const sealed: WaiverDeps = {
+      ...deps,
+      fields: await parseFieldKeyring(newFieldKeyringSecret()),
+    };
+    const { booked, p1 } = await todaysBooking("Sealed");
+    // The adult signs from the emailed link with sealing on; the minor waits.
+    const r1 = (await liveRequest(world.admin, booked.bookingId, p1)).id;
+    const s1 = await openFor(world, A.id, r1);
+    expect((await sign(world, A.id, sealed, s1.session)).kind).toBe("signed");
+    const [row] = await world.admin<{ personal_sealed: string | null }[]>`
+      select personal_sealed from public.waiver_evidence where request_id = ${r1}`;
+    expect(row?.personal_sealed).toMatch(/^tgf1:/);
+
+    const ctx = guest(A.id);
+    const found = await inTenantTransaction(world.db, ctx, (trx) =>
+      lookUpAtDock(trx, ctx, { bookingCode: booked.reference, lastName: "Booker" }, sealed.fields),
+    );
+    expect(found.kind).toBe("matched");
+    if (found.kind !== "matched") return;
+    expect(found.party.people.map((p) => [p.position, p.status])).toEqual([
+      [1, "signed"],
+      [2, "to_sign"],
+    ]);
+    // The party refresh, with and without the keyring.
+    const refresh = (fields: WaiverDeps["fields"]) =>
+      inTenantTransaction(world.db, guest(A.id), async (trx) => {
+        const lookup = await loadDockLookup(trx, A.id, found.secret);
+        if (!lookup) throw new Error("lookup ended");
+        return dockParty(trx, A.id, lookup, fields);
+      });
+    expect((await refresh(sealed.fields))?.people).toHaveLength(2);
+    await expect(refresh(undefined)).rejects.toBeInstanceOf(WaiverEvidenceSealedError);
+
+    const signCtx = guest(A.id);
+    const started = await inTenantTransaction(world.db, signCtx, (trx) =>
+      startDockSigning(trx, signCtx, sealed, { secret: found.secret, position: 2 }),
+    );
+    expect(started.kind).toBe("issued");
+
+    const resendCtx = guest(A.id);
+    const resent = await inTenantTransaction(world.db, resendCtx, (trx) =>
+      resendWaiverForBooker(trx, resendCtx, sealed, {
+        bookingId: booked.bookingId,
+        position: 2,
+        name: "Kid Sealed",
+      }),
+    );
+    // It reads the party, sealed signature and all, and gets as far as the
+    // send's own wait: the first email went out moments ago.
+    expect(resent).toMatchObject({ kind: "refused", reason: "too_soon" });
+  }, 120_000);
 
   it("starts a signing on the guest's phone, and the evidence records the dock lookup", async () => {
     const { booked, p1 } = await todaysBooking("Sign");

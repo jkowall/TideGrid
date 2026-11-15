@@ -22,7 +22,12 @@
  *
  * Lock order: the request, then its links, as everywhere else.
  */
-import type { TenantContext, TenantTransaction, WaiverSignerRole } from "@tidegrid/database";
+import type {
+  FieldKeyring,
+  TenantContext,
+  TenantTransaction,
+  WaiverSignerRole,
+} from "@tidegrid/database";
 import { recordAudit } from "@tidegrid/database";
 import { sql } from "kysely";
 import { crewAccessLive, issueCodeLink } from "./assisted.ts";
@@ -221,6 +226,7 @@ export async function lookUpAtDock(
   trx: TenantTransaction,
   ctx: TenantContext,
   input: { bookingCode: string; lastName: string },
+  fields?: FieldKeyring,
 ): Promise<DockLookupResult> {
   if (ctx.actorType !== "guest") throw new Error("the dock lookup is a guest's");
   const referenceKey = normalizeBookingCode(input.bookingCode);
@@ -262,11 +268,16 @@ export async function lookUpAtDock(
     subjectId: bookingId,
     after: { lookupId: lookup.id },
   });
-  const party = await dockParty(trx, ctx.tenantId, {
-    id: lookup.id,
-    bookingId,
-    expiresAt: new Date(lookup.expires_at),
-  });
+  const party = await dockParty(
+    trx,
+    ctx.tenantId,
+    {
+      id: lookup.id,
+      bookingId,
+      expiresAt: new Date(lookup.expires_at),
+    },
+    fields,
+  );
   if (!party) throw new Error("a matched dock lookup's booking was not found");
   return { kind: "matched", secret, party };
 }
@@ -310,9 +321,10 @@ export async function dockParty(
   trx: TenantTransaction,
   tenantId: string,
   lookup: DockLookup,
+  fields?: FieldKeyring,
 ): Promise<DockParty | null> {
   const booking = await loadBookingContext(trx, tenantId, lookup.bookingId);
-  const waivers = await listBookingWaivers(trx, tenantId, lookup.bookingId);
+  const waivers = await listBookingWaivers(trx, tenantId, lookup.bookingId, fields);
   if (!booking || !waivers) return null;
   const trip = tripFacts(booking);
   return {
@@ -360,7 +372,7 @@ export async function startDockSigning(
   if (ctx.actorType !== "guest") throw new Error("a dock signing is started by the guest");
   const lookup = await loadDockLookup(trx, ctx.tenantId, input.secret);
   if (!lookup) return { kind: "lookup_ended" };
-  const waivers = await listBookingWaivers(trx, ctx.tenantId, lookup.bookingId);
+  const waivers = await listBookingWaivers(trx, ctx.tenantId, lookup.bookingId, deps.fields);
   const person = waivers?.participants.find((p) => p.position === input.position);
   const requestId = person?.request?.state === "pending" ? person.request.id : null;
   if (!person || !requestId) return { kind: "not_pending" };

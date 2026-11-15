@@ -124,10 +124,11 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
   app.openapi(lookupRoute, async (c) => {
     const input = c.req.valid("json");
     // A miss is recorded and committed, so it counts, then answered.
+    const { fields } = await waiverDeps(deps, c.env);
     let body: JsonObject;
     try {
       ({ body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
-        const found = await lookUpAtDock(trx, ctx, input);
+        const found = await lookUpAtDock(trx, ctx, input, fields);
         if (found.kind !== "matched") return { kind: found.kind } as JsonObject;
         return {
           kind: "matched",
@@ -176,9 +177,10 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
 
   app.openapi(partyRoute, async (c) => {
     const secret = lookupSecret(c);
+    const { fields } = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const lookup = await loadDockLookup(trx, ctx.tenantId, secret);
-      const party = lookup ? await dockParty(trx, ctx.tenantId, lookup) : null;
+      const party = lookup ? await dockParty(trx, ctx.tenantId, lookup, fields) : null;
       if (!party) throw lookupEnded();
       return { party: partyJson(party) } as JsonObject;
     });
