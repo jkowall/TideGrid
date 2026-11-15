@@ -47,9 +47,10 @@ module "r2" {
     brand-assets = {}
     # Generated documents, such as exports.
     documents = {}
-    # Encrypted daily pg_dump files. The decryption key lives outside both
-    # Neon and this Cloudflare account (hosting plan, backup and recovery).
-    backups = { expire_days = var.backup_expire_days }
+    # Encrypted daily pg_dump files (tools/backup, .github/workflows/backup.yml).
+    # The decryption key lives outside both Neon and this Cloudflare account
+    # (hosting plan, backup and recovery).
+    backups = { expire_days = var.backup_expire_days, lock_days = var.backup_lock_days }
   }
 }
 

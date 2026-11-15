@@ -68,5 +68,5 @@ terraform -chdir=infra/terraform/environments/staging validate
 
 - No plan per change in CI. A plan reads real accounts, so it needs credentials and a state backend. The hosting plan wants one; it comes with the backend (W3-OPS-3 or the first apply).
 - Application alerts (outbox age, dead letter depth, the email account fault, backup age) belong to the observability goal, W3-OPS-5. These modules only cover Cloudflare's own notifications.
-- Backup jobs and restore drills belong to W3-OPS-6. This only creates the bucket.
+- Backup jobs and restore drills are W3-OPS-6: [`tools/backup`](../../tools/backup/README.md), the `backup` and `restore-drill` workflows, and the [runbook](../../docs/runbooks/backup-and-restore.md). Terraform creates the bucket, its 35-day expiry, and in production a 7-day lock (`backup_lock_days`).
 - The async Worker's Wrangler configuration, which binds the queues, belongs to G2.3 and its release.

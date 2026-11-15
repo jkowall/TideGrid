@@ -8,6 +8,19 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: W3-OPS-6, backups and restore drills, tooling only (coordinator defaults pending owner confirmation)
+
+On 2026-11-15 the owner wrote "lets finish it up" about the rest of the Wave 3 operations work, and the coordinator started W3-OPS-6 and the code parts of W3-OPS-5 as code and docs only: no live apply, no new account, no money. Drills run only on throwaway Neon branches. The [backup and restore runbook](../runbooks/backup-and-restore.md), [tooling](../../tools/backup/README.md), and an [RPO acceptance draft](drafts/rpo-acceptance.md) for operator sign-off. Nothing is switched on. Coordinator defaults, pending owner confirmation:
+
+- **D1: the backup runs in GitHub Actions, once a day.** A scheduled workflow, off until the repository variable `BACKUP_ENABLED` is `true`, at 07:17 UTC. No new account: the repository is public, so its Actions minutes are free. One wake of the database a day.
+- **D2: age encryption with an offline key.** Each dump is encrypted to an age public key. The private key is made on the owner's Mac and kept in two places outside Neon and Cloudflare. GitHub holds only the public key, so nothing that writes backups can read them.
+- **D3: the owner role, read-only sessions.** The backup reads with the owner's direct URL from a `backup` environment limited to `main`, because a dump must bypass row-level security. Every session it opens is read-only. A narrower read-only role is a follow-up.
+- **D4: a 7-day lock and 35-day expiry in production.** Terraform adds `backup_lock_days = 7` to the production backups bucket, so the token that writes backups cannot delete the last week's. Staging keeps no lock.
+- **D5: the checks.** A restore must match the manifest exactly: every migration, every table's row count and a digest of its rows (this covers the money tables, as the hosting plan's ledger check), row-level security still forced, the runtime role sees no rows with no tenant set, and with one tenant set sees only that tenant's. A point-in-time branch is checked the same way except row counts, which differ by design.
+- **D6: the Neon drills reuse `neon-main`.** The drill workflow takes the Neon API key from that environment, so each drill waits for the owner's approval. It never reads Neon main's URL; it branches main and deletes the branches at the end (they expire after 2 hours anyway).
+
+Not done: no bucket, token, or environment created, no backup of a live database, and the independent observer, the operator sign-off on the RPO, and the 30-day history window on a paid Neon plan wait for production. The free plan's history window is shorter than 30 days.
+
 ### 2026-11-14: W3-G2.5-TAX, staff screens for tax rates (coordinator defaults pending owner confirmation)
 
 Staff endpoints and the console's Tax rates page for the per-location rates of 2026-11-08 ([pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax), [console](../../apps/operator-site/README.md#tax-rates-w3-g25-tax)). No migration. Coordinator defaults, pending owner confirmation:

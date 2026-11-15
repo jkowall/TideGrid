@@ -88,6 +88,22 @@ variable "backup_expire_days" {
   default     = 35
 }
 
+variable "backup_lock_days" {
+  description = <<-EOT
+    Days each backup object is locked against deletion or overwrite, or null
+    for no lock. A lock means the token that writes backups (and anyone who
+    steals it) cannot delete recent ones. Must be shorter than
+    backup_expire_days.
+  EOT
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.backup_lock_days == null || try(var.backup_lock_days >= 1, false)
+    error_message = "backup_lock_days must be at least one day, or null."
+  }
+}
+
 variable "hyperdrive" {
   description = "Neon direct endpoint for Hyperdrive. Used only when allow_secrets_in_state is true."
   type = object({

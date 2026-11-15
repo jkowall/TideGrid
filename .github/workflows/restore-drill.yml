@@ -1,0 +1,240 @@
+name: restore-drill
+# Restore drills (hosting plan, backup and disaster recovery; goal W3-OPS-6).
+# See docs/runbooks/backup-and-restore.md.
+#
+# On a pull request or push that touches the backup tooling: a round trip on a
+# throwaway PostgreSQL 17 in the runner (migrate and seed, back up, restore
+# into a second empty database, check). No secrets.
+#
+# On a manual run: the drills on throwaway Neon branches. Nothing here reads
+# or writes Neon main itself; both drills read branches of it, and both
+# branches are deleted at the end (and expire after 2 hours regardless).
+#   logical  branch main now, back it up with a key made for this run only,
+#            restore into a fresh PostgreSQL 17 in the runner (the "Neon is
+#            gone" case), and check every table's rows match exactly
+#   pitr     branch main as it was some minutes ago (point-in-time restore)
+#            and check it: migrations, tables, row-level security, tenants
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('restore drill {0}', inputs.kind) || 'restore drill round trip' }}
+
+on:
+  pull_request:
+    paths:
+      - tools/backup/**
+      - .github/workflows/restore-drill.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/backup/**
+      - .github/workflows/restore-drill.yml
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Which drill
+        type: choice
+        options: [both, logical, pitr]
+        default: both
+      minutes_ago:
+        description: For pitr, how many minutes back to restore to (1 to 1440)
+        default: "15"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-drill-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  roundtrip:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the PostgreSQL 17 client and age
+        run: tools/backup/install-tools.sh
+      - name: Start PostgreSQL 17, migrate, and seed
+        run: |
+          tools/local-db/local-db.sh up >> "$GITHUB_ENV"
+          eval "$(tools/local-db/local-db.sh env)"
+          tools/local-db/local-db.sh prepare integration
+      - name: Back up, restore into an empty database, check
+        run: |
+          set -euo pipefail
+          umask 077
+          age-keygen -o "$RUNNER_TEMP/drill.key" 2>/dev/null
+          recipient=$(age-keygen -y "$RUNNER_TEMP/drill.key")
+          BACKUP_AGE_RECIPIENT="$recipient" tools/backup/backup.sh --label ci --out "$RUNNER_TEMP/bk"
+          dump=$(ls "$RUNNER_TEMP"/bk/*.dump.age)
+          psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database restored"
+          target="${DATABASE_URL%/*}/restored"
+          # Refuses without --throwaway, and refuses a database with tables.
+          if TARGET_DATABASE_URL="$DATABASE_URL" tools/backup/restore.sh --backup "$dump" \
+               --manifest "${dump%.dump.age}.json" --identity "$RUNNER_TEMP/drill.key" --throwaway; then
+            echo "::error::restore.sh restored over a database that has tables"; exit 1
+          fi
+          TARGET_DATABASE_URL="$target" tools/backup/restore.sh --backup "$dump" \
+            --manifest "${dump%.dump.age}.json" --identity "$RUNNER_TEMP/drill.key" --throwaway
+          # A changed row, a table that lost row-level security: the check fails.
+          psql -X -q -v ON_ERROR_STOP=1 "$target" -c "update public.boats set name = name || ' x' where ctid = (select ctid from public.boats limit 1)" \
+            -c "alter table public.boats no force row level security" -c "alter table public.boats disable row level security"
+          if TARGET_DATABASE_URL="$target" python3 -I tools/backup/verify.py --manifest "${dump%.dump.age}.json" --expect-exact; then
+            echo "::error::verify passed a tampered restore"; exit 1
+          fi
+          echo "the check caught the tampered copy"
+      - name: Server log
+        if: failure()
+        run: tools/local-db/local-db.sh logs | tail -50
+
+  neon:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Reuses the neon-main environment for NEON_API_KEY and NEON_PROJECT_ID,
+    # so each drill waits for the owner's approval. NEON_DATABASE_URL is
+    # never read here.
+    environment: neon-main
+    services:
+      # The "new standard PostgreSQL target" for the logical drill. Listens on
+      # the runner only; the password is for this run alone.
+      target:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: drill-only
+        ports:
+          - 127.0.0.1:5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Runs from main only
+        env:
+          MINUTES: ${{ inputs.minutes_ago }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run this from main"; exit 1; }
+          [[ "$MINUTES" =~ ^[0-9]{1,4}$ ]] && [ "$MINUTES" -ge 1 ] && [ "$MINUTES" -le 1440 ] \
+            || { echo "::error::minutes_ago must be 1 to 1440"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the PostgreSQL 17 client and age
+        run: tools/backup/install-tools.sh
+      - name: Logical drill, branch main now and back it up
+        if: inputs.kind != 'pitr'
+        id: source
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          . tools/backup/lib.sh
+          t0=$(date -u +%s)
+          name="drill-logical-r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pnpm --silent --filter @tidegrid/database neon:branch create "$name" --ttl 2 --out "$RUNNER_TEMP/source.json"
+          id=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["branchId"])' "$RUNNER_TEMP/source.json")
+          echo "branch=$id" >> "$GITHUB_OUTPUT"
+          url=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["connectionString"])' "$RUNNER_TEMP/source.json")
+          tg_mask_url "$url"
+          t1=$(date -u +%s)
+          age-keygen -o "$RUNNER_TEMP/drill.key" 2>/dev/null
+          DATABASE_URL="$url" BACKUP_AGE_RECIPIENT="$(age-keygen -y "$RUNNER_TEMP/drill.key")" \
+            tools/backup/backup.sh --label drill --out "$RUNNER_TEMP/bk"
+          t2=$(date -u +%s)
+          echo "timing branch $((t1 - t0)) s, backup $((t2 - t1)) s"
+          echo "branch_s=$((t1 - t0))" >> "$GITHUB_OUTPUT"
+          echo "backup_s=$((t2 - t1))" >> "$GITHUB_OUTPUT"
+      - name: Logical drill, restore into a fresh PostgreSQL 17 and check
+        if: inputs.kind != 'pitr'
+        id: logical
+        run: |
+          set -euo pipefail
+          t0=$(date -u +%s)
+          dump=$(ls "$RUNNER_TEMP"/bk/*.dump.age)
+          TARGET_DATABASE_URL="postgres://postgres:drill-only@127.0.0.1:5433/postgres" \
+            tools/backup/restore.sh --backup "$dump" --manifest "${dump%.dump.age}.json" \
+            --identity "$RUNNER_TEMP/drill.key" --throwaway | tee "$RUNNER_TEMP/logical.txt"
+          t1=$(date -u +%s)
+          {
+            echo "## Logical restore drill (Neon branch to a new PostgreSQL 17)"
+            echo "- Branch of main ${{ steps.source.outputs.branch_s }} s, backup ${{ steps.source.outputs.backup_s }} s, restore and check $((t1 - t0)) s"
+            echo '```'
+            grep -E '^(ok|FAIL) |^\{' "$RUNNER_TEMP/logical.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Point-in-time drill, branch main as it was and check
+        if: inputs.kind != 'logical'
+        id: pitr
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          MINUTES: ${{ inputs.minutes_ago }}
+        run: |
+          set -euo pipefail
+          umask 077
+          . tools/backup/lib.sh
+          at=$(date -u -d "-$MINUTES minutes" +%Y-%m-%dT%H:%M:%SZ)
+          t0=$(date -u +%s)
+          name="drill-pitr-r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pnpm --silent --filter @tidegrid/database neon:branch create "$name" --ttl 2 --at "$at" --out "$RUNNER_TEMP/pitr.json"
+          id=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["branchId"])' "$RUNNER_TEMP/pitr.json")
+          echo "branch=$id" >> "$GITHUB_OUTPUT"
+          url=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["connectionString"])' "$RUNNER_TEMP/pitr.json")
+          tg_mask_url "$url"
+          # The first query waits for the branch's compute to start.
+          for i in $(seq 1 30); do
+            tg_psql "$url" -c "select 1" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          t1=$(date -u +%s)
+          # The reference: this run's logical backup manifest when there is
+          # one, otherwise a manifest of the restored branch itself (no dump
+          # is made from it; only its facts are read).
+          ref=$(ls "$RUNNER_TEMP"/bk/*.json 2>/dev/null | head -1 || true)
+          if [ -z "$ref" ]; then
+            age-keygen -o "$RUNNER_TEMP/pitr.key" 2>/dev/null
+            DATABASE_URL="$url" BACKUP_AGE_RECIPIENT="$(age-keygen -y "$RUNNER_TEMP/pitr.key")" \
+              tools/backup/backup.sh --label pitr --out "$RUNNER_TEMP/pitr-ref" >/dev/null
+            ref=$(ls "$RUNNER_TEMP"/pitr-ref/*.json)
+          fi
+          TARGET_DATABASE_URL="$url" python3 -I tools/backup/verify.py --manifest "$ref" | tee "$RUNNER_TEMP/pitr.txt"
+          t2=$(date -u +%s)
+          {
+            echo "## Point-in-time restore drill (Neon branch as of $at, $MINUTES min back)"
+            echo "- Branch created and answering in $((t1 - t0)) s, checks $((t2 - t1)) s"
+            echo '```'
+            grep -E '^(ok|FAIL) |^\{' "$RUNNER_TEMP/pitr.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Delete the drill branches
+        if: always()
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          SOURCE: ${{ steps.source.outputs.branch }}
+          PITR: ${{ steps.pitr.outputs.branch }}
+        run: |
+          for id in $SOURCE $PITR; do
+            pnpm --silent --filter @tidegrid/database neon:branch delete "$id" || echo "::warning::could not delete $id; it expires within 2 hours"
+          done
+          rm -rf "$RUNNER_TEMP/bk" "$RUNNER_TEMP/pitr-ref" "$RUNNER_TEMP"/*.key "$RUNNER_TEMP"/source.json "$RUNNER_TEMP"/pitr.json
