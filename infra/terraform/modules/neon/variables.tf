@@ -75,7 +75,9 @@ variable "branches" {
     compute = optional(object({
       min_cu                  = optional(number, 0.25)
       max_cu                  = optional(number, 1)
-      suspend_timeout_seconds = optional(number, 300)
+      # null leaves Neon's default (5 minutes). Neon's Free plan refuses any
+      # explicit value (HTTP 412), so set it only on a paid plan.
+      suspend_timeout_seconds = optional(number)
     }))
   }))
   default = {}
