@@ -76,6 +76,7 @@ Entries covered:
 - [2026-11-08: W1-TEST-GUARDS, guards that refuse Neon main in test setup and app-role (owner go; coordinator defaults pending owner confirmation)](#2026-11-08-w1-test-guards-guards-that-refuse-neon-main-in-test-setup-and-app-role-owner-go-coordinator-defaults-pending-owner-confirmation)
 - [2026-11-08: W1-STRIPE-WEBHOOK, Stripe webhook quick 2xx and source address list (owner go; coordinator defaults pending owner confirmation)](#2026-11-08-w1-stripe-webhook-stripe-webhook-quick-2xx-and-source-address-list-owner-go-coordinator-defaults-pending-owner-confirmation)
 - [2026-11-08: nov1 refuses a SHA without a green four-job CI run (owner request; coordinator defaults pending owner confirmation)](#2026-11-08-nov1-refuses-a-sha-without-a-green-four-job-ci-run-owner-request-coordinator-defaults-pending-owner-confirmation)
+- The two Stripe adapter defaults that the [2026-11-08 confirmation](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions) lists under "Stripe defaults not asked": the error codes that never settle a refund as failed, and the adapter's place in `packages/domain-payments`. The Stripe adapter's other choices keep their 2026-11-08 owner decision date.
 
 ### 2026-11-15: W3-OPS-7, operating runbooks drafted (coordinator defaults pending owner confirmation)
 
