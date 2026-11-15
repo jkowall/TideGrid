@@ -58,15 +58,16 @@ Symptoms: the operator or a guest reports a certificate error, the wrong site, o
 | Safe first action | Tell the operator to point guests at the platform name |
 | Customer impact check | `hostnames status <slug>` shows the provider's last states and when it was read |
 | Evidence | Incident record with the status lines (no ids in public notes) |
-| Limit | The sweep demotes only on a definite negative and never promotes. A name it demoted needs the operator's DNS fixed, then `activate` again |
+| Limit | The sweep demotes only on a definite negative and never promotes. A demoted name is `disabled`, which is final: no command brings it back |
 | Communication | TideGrid owner to operator owner; the operator tells guests if needed |
-| Closed when | The name is `active` again, or the operator has agreed to the platform name |
+| Closed when | The name is `active` again, or guests are on the platform name or a new custom name |
 
 1. `hostnames status <slug>`. Read the provider's ownership and certificate states.
-2. If the CNAME moved or was deleted, the operator fixes their DNS. Then `activate` again.
-3. If the certificate failed, check the TXT records are still published.
-4. If Cloudflare refused the whole account (429, 5xx, or an account error), the sweep records nothing and stops reading. That is not this operator's fault. Wait one run and recheck before acting.
-5. If the name now points somewhere that is not TideGrid, treat it as a possible hijack: disable it at once (next section) and open [guide 9](09-security-incidents.md).
+2. If the name is still `pending` or `active` and the CNAME moved or was deleted, the operator fixes their DNS. A `pending` name can then be activated.
+3. If the sweep already demoted it, it is `disabled` for good. Guests use the platform name, and the operator can request a different custom name. Reusing the same name needs a reviewed migration (see the [removal runbook](../hostname-removal.md)).
+4. If the certificate is still pending, check the TXT records are still published.
+5. If Cloudflare refused the whole account (429, 5xx, or an account error), the sweep records nothing and stops reading. That is not this operator's fault. Wait one run and recheck before acting.
+6. If the name now points somewhere that is not TideGrid, treat it as a possible hijack: disable it at once (next section) and open [guide 9](09-security-incidents.md).
 
 ## Moving or removing a name
 

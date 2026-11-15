@@ -97,7 +97,7 @@ Each of these needs the owner's go. Each is undone by doing the opposite.
 | A secret has leaked | Rotate it (guide 9). Rotation is the switch | [9](09-security-incidents.md) |
 | A migration is failing | Do not release the API. Leave the database as it is and forward-fix | [6](06-database-changes.md) |
 
-There is no single switch that takes all of TideGrid offline. If one is needed, the owner removes the API Worker's custom domain in the Cloudflare dashboard; the console and guest sites then show their own error states. Treat that as a last resort and record it.
+**Gap:** there is no single verified switch that takes all of TideGrid offline. Removing the API's public domain would not do it: the console and guest site reach the API through Worker bindings, and the cron does not use the domain. A tested safe-shutdown procedure is needed before the first live booking (the emergency custodian's authority depends on it).
 
 ## The operator's manual fallback
 
@@ -108,7 +108,7 @@ Every pilot operator keeps a paper-and-phone way to run the day when TideGrid is
 1. **Close sales.** Who closes online sales on a trip, and how (the trip's actions on the console Calendar page), and what the operator's website or phone message says instead.
 2. **The latest roster.** Each evening, booking staff save the next day's rosters and day export from the console (Roster page, and the Bookings page's day export). Keep the files where the dock can reach them without TideGrid.
 3. **Manual changes.** A paper or spreadsheet log for walk-ups, cancellations, and changes taken while TideGrid is down: time, booking reference if any, guest name, party size, what changed, and money taken.
-4. **Money.** Take cash, check, or the operator's own card terminal. Record each in the log. **Gap:** the console has no way yet to enter a booking paid outside TideGrid (staff bookings take a card checkout, and the external payments route has no screen). Until one exists, these stay in the operator's log, and the operator closes those seats on TideGrid when it comes back.
+4. **Money.** Take cash, check, or the operator's own card terminal. Record each in the log. **Gap:** the console has no way yet to enter a booking paid outside TideGrid (staff bookings take a card checkout, and the external payments route has no screen). Until one exists, these stay in the operator's log. Closing sales closes a whole trip, not single seats, so any trip that took paper walk-ups stays closed online through recovery until departure.
 5. **Waivers.** Paper waivers for anyone who could not sign online. The operator keeps the paper. TideGrid records a legacy waiver status later only if the operator asks.
 6. **Contacting guests.** The operator's own phone and email, using the roster file.
 

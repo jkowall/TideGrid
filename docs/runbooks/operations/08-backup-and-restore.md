@@ -40,9 +40,10 @@ These are internal targets from the [hosting plan](../../v2/08-build-hosting-and
    - row counts per tenant for bookings, payments, refunds, and waiver evidence match the backup's record;
    - the tenant isolation checks pass (two operators, nothing crosses);
    - one known booking per operator reads correctly.
-6. **Point the API at it**: update Hyperdrive's origin to the new database, set the runtime role's password there, then check `/v1/health`. This is a live change with the owner's go.
-7. **Reconcile** (next section) before reopening sales.
-8. **Reopen** one operator at a time. Staff enter their manual logs.
+6. **Pause before connecting.** **Gap:** there is no single verified pause for guest and staff requests, the cron, and email. Proposed until one exists, untested: close sales on every trip, and release an API build with the cron trigger removed and `EMAIL_PROVIDER` unset (a reviewed configuration change), so restored rows are not processed or emailed. Narrowing the email allowlist is not enough here, because it fails messages instead of keeping them.
+7. **Point the API at it**: update Hyperdrive's origin to the new database, set the runtime role's password there, then check `/v1/health`. This is a live change with the owner's go.
+8. **Reconcile** (next section). Turn the cron and email back on only after it, with the owner's go.
+9. **Reopen** one operator at a time. Staff enter their manual logs.
 
 ## Reconciling after any restore
 
@@ -59,7 +60,7 @@ Run this after a point-in-time restore or a full restore, before sales reopen. T
 | Communication | Operator contacts guests whose bookings or waivers must be redone |
 | Closed when | Every item in the gap is matched, re-entered, refunded, or written off with the operator's agreement |
 
-1. **Payments.** In each operator's Stripe dashboard, list payments, refunds, and disputes in the gap. For each, find the TideGrid booking. Stripe resends recent webhook events; replaying them from Stripe's dashboard lets the inbox record what was missed. A payment with no booking becomes a late-payment refund or a manual booking, the operator's choice.
+1. **Payments.** In each operator's Stripe dashboard, list payments, refunds, and disputes in the gap. For each, find the TideGrid booking. Where the payment or refund row survived the restore, replaying Stripe's event from its dashboard lets the inbox record what was missed. Where the row itself was lost, a replay does nothing (it answers `unmatched_payment` or `unmatched_refund`). Those need the operator's decision (refund in Stripe, or book the guest again) and a reviewed reconstruction of the record, with the accounting outcome written in the reconciliation sheet.
 2. **Bookings.** Compare the operator's manual log and the money report. Re-enter missing bookings from the console where it can take them. Bookings paid outside TideGrid have no console path yet and stay on the log.
 3. **Email.** Guests may have received email for bookings that no longer exist. The operator tells them. Messages that were queued but not sent before the restore point will send again; check the email backlog before turning email back on.
 4. **Waivers.** Signed waivers in the gap are gone from TideGrid. Send new requests for those guests.

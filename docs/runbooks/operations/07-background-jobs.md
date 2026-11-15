@@ -28,7 +28,7 @@ The scheduled sweeps, the outbox and its queue, retries, dead letters, replay, a
 | Evidence | Incident record with the last good run's time and the failing job's error type |
 | Limit | Nothing is lost while the cron is down; work waits. Email reminders that become too late cancel themselves |
 | Communication | TideGrid owner tells operators if trips show fewer free seats than they should |
-| Closed when | Two runs in a row log every job's summary line without a failure |
+| Closed when | Two runs in a row log, for every job, either its summary line with no failures or its expected `..._skipped` line (for example `outbox_publish_skipped` with `queue_unconfigured`) |
 
 **High** if holds stop expiring (trips look full when they are not).
 
@@ -86,6 +86,7 @@ If something truly happened twice (two bookings for one payment, two refunds), i
 
 When Stripe or Cloudflare Email was down:
 
-1. Nothing needs replaying by hand. The checkout sweep finishes received events and retries refunds; the email sweep retries temporary failures and gives back attempts lost to account faults.
+1. Payments need no replay by hand: the checkout sweep finishes received events and retries refunds. Email needs a look: the email sweep retries temporary failures and gives back attempts lost to account faults.
+   An email whose send timed out or had an unknown result is marked `outcome_unknown` and is never sent again, because Cloudflare does not deduplicate. After an email outage, open Email exceptions for each operator and have staff send those again or contact the guests.
 2. Watch two cron runs. Check the refund and payment exception lists ([guide 3](03-payments.md#where-to-look)) and Email exceptions ([guide 4](04-guest-messages.md#where-to-look)).
 3. Stripe resends undelivered webhook events for a few days. If the outage was longer, compare the operator's Stripe dashboard with the money report for the gap.

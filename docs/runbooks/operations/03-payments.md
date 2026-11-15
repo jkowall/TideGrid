@@ -2,7 +2,7 @@
 
 Connecting an operator's Stripe account, rotating the webhook secret, and what to do when a payment, refund, or dispute does not look right.
 
-**Status today.** The live preview uses the fake payment provider. The Stripe adapter is built and off by default ([payments README](../../../packages/domain-payments/README.md#the-stripe-adapter-proposed-off-by-default)); it has run only in Stripe test mode. Live mode is a separate owner window ([Nov 1 runbook](../2026-11-01-preview-deploy.md#p9-stripe-live-window) P9).
+**Status today.** The live preview uses the fake payment provider. The Stripe adapter is built and off by default ([payments README](../../../packages/domain-payments/README.md#the-stripe-adapter-proposed-off-by-default)); it has run only in Stripe test mode. **Live mode is not built.** The adapter refuses live keys everywhere and test keys in production, and refuses live-mode webhook events. The [Nov 1 runbook](../2026-11-01-preview-deploy.md#p9-stripe-live-window)'s P9 is a test-mode window. Taking real money needs a reviewed change and the owner's go before the onboarding below can reach its closure test.
 
 **The rule that keeps money safe.** PostgreSQL is the record of truth. Only a verified provider event confirms or fails a payment. A reading from the provider never changes a payment on its own; a disagreement is listed for staff ([decision register, 2026-11-10 reconciliation defaults](../../v2/06-decision-register.md)). Refunds carry an idempotency key, so sending one again can never refund twice. Never "fix" a payment by editing the database.
 

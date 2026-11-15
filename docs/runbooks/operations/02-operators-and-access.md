@@ -58,10 +58,10 @@ Urgent when the person left on bad terms or a device was lost.
 | Evidence | The audit rows for the disable; change record |
 | Limit | Work the person already did stays. The last active owner of an operator cannot be disabled |
 | Communication | TideGrid owner confirms to the operator owner when it is done |
-| Closed when | The person's next request is refused and their open sessions are revoked |
+| Closed when | The person's next console request is refused |
 
 1. Remove their address from the Access policy.
-2. Disable the membership: `POST /v1/staff/tenants/{tenantId}/members/{userId}/status`. Disabling revokes their open sessions at once.
+2. Disable the membership: `POST /v1/staff/tenants/{tenantId}/members/{userId}/status`. Their open sessions are revoked at once only when this was their last active membership. If they are staff at another operator too, their sessions there stay open, so also check the Access policy removal took effect: their next console request must be refused.
 3. **Gap:** there is no way to change a member's role yet. Inviting an existing member again is refused (`member_exists`). Until a role change exists, disable the membership and ask an agent session for a reviewed fix.
 4. If a device was lost, also follow [guide 9](09-security-incidents.md#lost-device-or-token).
 

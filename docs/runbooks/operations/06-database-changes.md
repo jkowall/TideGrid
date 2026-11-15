@@ -55,7 +55,7 @@ When one is needed:
 | Closed when | A forward fix applies cleanly and the release that needed it is out |
 
 1. The failed file rolled back; earlier files in the same run stayed applied. The database may be at an in-between version. That is fine for the running API.
-2. Read the error. A lock timeout means something held the table: run again in a quieter moment. A constraint or data error means the migration was wrong: write a new migration that fixes it (a forward fix), merge it, and run again.
+2. Read the error. A lock timeout means something held the table: run again in a quieter moment. A constraint or data error stops the runner at that file, so a later migration never runs. Either repair the data the file trips on, with the owner's go, so the file can complete, or, if the file itself is wrong and has not applied on any database, replace it in a reviewed pull request (the one case where an unapplied file may change). Then run again. Forward fixes in later migrations are for problems found after a file applied.
 3. **An invalid index** from a failed concurrent index build blocks every later run until it is removed. Follow [repair after a failed concurrent build](../../../packages/database/README.md#repair-after-a-failed-concurrent-build). On Neon main, each `DROP INDEX CONCURRENTLY` is a live step with the owner's go.
 4. Only restore from the run's restore branch if a forward fix cannot work. That loses data written since.
 
@@ -94,7 +94,7 @@ For a bad change to data, from the app, an operator, or a migration, inside Neon
 3. Check the branch: health query, the migration list, one known booking per operator, and the day's control totals.
 4. List the writes on main after that time (new bookings, payments, refunds, signed waivers). These are what the restore would lose.
 5. Decide with the operator owners: re-enter them by hand after cutover, or fix forward on main instead. If payments are in the gap, reconcile against Stripe after cutover ([guide 8](08-backup-and-restore.md#reconciling-after-any-restore)).
-6. Cutover, with the owner's go: close sales, then use Neon's restore on main to the same time. Check in Neon's documentation that main's state from before the restore is kept as a backup branch, so the gap's writes can still be read. Release nothing new. Check health.
+6. Cutover, with the owner's go: close sales and pause background work and email first (see the pause gap in [guide 8](08-backup-and-restore.md#neon-is-gone-or-unusable)), then use Neon's restore on main to the same time. Check in Neon's documentation that main's state from before the restore is kept as a backup branch, so the gap's writes can still be read. Release nothing new. Check health.
 7. Run the [reconciliation](08-backup-and-restore.md#reconciling-after-any-restore) and re-enter the gap.
 8. Reopen sales.
 

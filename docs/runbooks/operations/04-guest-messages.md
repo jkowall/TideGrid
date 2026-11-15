@@ -58,7 +58,7 @@ Guests report no confirmation; the Email card shows messages stuck as "Queued" p
 
 1. Use the switch first.
 2. Find what was sent: the Email cards of affected bookings.
-3. If links went to the wrong person, close them: correcting the booker's contact on the booking closes the old links and sends new ones to the right address.
+3. If links went to the wrong person, close them: correcting the booker's email on the booking closes the old links and sends new ones to the right address. That works only for a confirmed booking whose trip has not left (see [guide 9](09-security-incidents.md#lost-device-or-token) for the gap).
 4. Fix the cause in a pull request, release it, then put the full allowlist back under the owner's go. Messages that failed while narrowed are resent from each booking's Email card.
 
 ## One guest did not get an email
@@ -85,7 +85,7 @@ Only that operator's mail waits; everyone else's keeps going.
 
 1. `email domain-status <slug>` (email CLI, admin connection).
 2. Check Cloudflare shows SPF, DKIM, and DMARC verified, and that the address is in the API Worker's `allowed_sender_addresses`.
-3. If it cannot be fixed today, `email domain-retire <slug> <domain> "<reason>"` sends that operator's mail from the shared sender again. Adding it back later is the onboarding order in the [email CLI README](../../../tools/email/README.md).
+3. If it cannot be fixed today, `email domain-retire <slug> <domain> "<reason>"`. What happens next depends on the sender policy: under `shared` the operator's mail goes from the shared sender again; under `operator_only`, the production default, the mail keeps waiting until a domain is verified. Switching production to `shared` affects every operator and needs the owner's go and a reviewed release. Adding it back later is the onboarding order in the [email CLI README](../../../tools/email/README.md).
 
 ## Setting up the bounce and spam event queue
 

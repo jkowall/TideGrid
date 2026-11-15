@@ -70,13 +70,13 @@ A staff member lost a laptop or phone, or a guest says someone else has their bo
 
 **Staff device:**
 
-1. Remove their address from the console's Access policy, and disable their membership ([guide 2](02-operators-and-access.md#removing-a-staff-member-or-changing-a-role)). That revokes their sessions.
+1. Remove their address from the console's Access policy, and disable their membership ([guide 2](02-operators-and-access.md#removing-a-staff-member-or-changing-a-role)). Check their next console request is refused before treating it as contained.
 2. If the device had a second-step authenticator, they enroll a new one from a confirmed device. If they had none left, the TideGrid owner removes their registered devices in Cloudflare Zero Trust, as Cloudflare's documentation describes, then adds them back to the Access policy so they enroll again.
 3. If the device was the TideGrid owner's own, also rotate everything in the secrets table it could reach, and use the second hardware key to get back into accounts.
 
 **Guest booking link or session:**
 
-1. A management link and its sessions are tied to the booker's email. If the guest's email account itself was taken, staff correct the booker's email on the booking to a new address the guest gives: on an email change, every unused link is closed and every other session ends.
+1. A management link and its sessions are tied to the booker's email. If the guest's email account itself was taken, staff correct the booker's email on the booking to a new address the guest gives: on an email change, every unused link is closed and every other session ends. This works only for a confirmed booking whose trip has not left. **Gap:** there is no way yet to close one leaked link while keeping the same address, or on a canceled or departed booking. Until there is, the exposure is limited by the one-hour session and the link's own expiry; record it and ask for a reviewed fix.
 2. Guest sessions last one hour. Staff can send a waiver request again from the booking.
 3. The demo phone app drops a stored booking session once it expires (one hour).
 
