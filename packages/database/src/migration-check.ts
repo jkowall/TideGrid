@@ -167,8 +167,12 @@ const rules: Rule[] = [
         /\balter\s+table\b/i.test(s) &&
         topLevelParts(s).some(
           (p) =>
-            /\badd\s+(?:constraint\s+[\w"]+\s+)?(?:unique|primary\s+key|exclude)\b/i.test(p) &&
-            !/\busing\s+index\s+[\w"]/i.test(p),
+            (/\badd\s+(?:constraint\s+[\w"]+\s+)?(?:unique|primary\s+key|exclude)\b/i.test(p) &&
+              !/\busing\s+index\s+[\w"]/i.test(p)) ||
+            // A new column declared UNIQUE or PRIMARY KEY builds the same index.
+            (/\badd\b/i.test(p) &&
+              !/\badd\s+constraint\b/i.test(p) &&
+              /\b(?:unique|primary\s+key)\b/i.test(p)),
         )
       );
     },
@@ -229,10 +233,11 @@ export function stripSql(sql: string, keepLineComments = false): string {
       const body = sql.slice(i + tag.length, end < 0 ? sql.length : end);
       i = end < 0 ? sql.length : end + tag.length;
       if (/\bdo(?:\s+language\s+[\w"]+)?\s*$/i.test(out)) {
-        const inner = stripSql(body).replace(
-          /\b(?:declare|begin|end\s+if|end\s+loop|end|then|else|elsif|loop)\b/gi,
-          ";",
-        );
+        // A CREATE TABLE inside a DO block may be guarded (IF, EXCEPTION), so it
+        // never proves a table new: rename it so the new-table exemption skips it.
+        const inner = stripSql(body)
+          .replace(/\bcreate(\s+unlogged)?\s+table\b/gi, "create$1 guarded_table")
+          .replace(/\b(?:declare|begin|end\s+if|end\s+loop|end|then|else|elsif|loop)\b/gi, ";");
         out += ` $body$ ;${inner}; `;
       } else out += " $body$ ";
       continue;

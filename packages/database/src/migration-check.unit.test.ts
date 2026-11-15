@@ -133,6 +133,14 @@ describe("migration safety check", () => {
         "COMMENT ON TABLE public.bookings IS '-- migration-check: allow data_change example allowance text';\nUPDATE public.bookings SET x = 1;",
       ),
     ).toEqual(["data_change"]);
+    expect(rules("ALTER TABLE public.bookings ADD COLUMN ref text UNIQUE;")).toEqual([
+      "index_not_concurrent",
+    ]);
+    expect(
+      rules(
+        "DO $$ BEGIN CREATE TABLE public.bookings (a int); EXCEPTION WHEN duplicate_table THEN NULL; END $$; ALTER TABLE public.bookings ALTER a TYPE bigint;",
+      ),
+    ).toEqual(["column_type_change"]);
     // Still fine: a new table's own steps, and DROP DEFAULT / DROP NOT NULL.
     expect(
       rules(
