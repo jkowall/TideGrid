@@ -36,6 +36,25 @@
       "services": [
         { "binding": "API", "service": "tidegrid-api-dev", "entrypoint": "ConsoleGateway" }
       ]
+    },
+    // Staging (W3-OPS-2): `wrangler deploy --env staging` publishes
+    // tidegrid-console-staging on console-staging.tidegrid.us, bound to
+    // tidegrid-api-staging. Add that hostname to the console's Access
+    // application before the first deploy; the API refuses staff requests
+    // without a valid Access assertion either way.
+    "staging": {
+      "routes": [{ "pattern": "console-staging.tidegrid.us", "custom_domain": true }],
+      "workers_dev": false,
+      "preview_urls": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
+      "services": [
+        { "binding": "API", "service": "tidegrid-api-staging", "entrypoint": "ConsoleGateway" }
+      ]
     }
   }
 }

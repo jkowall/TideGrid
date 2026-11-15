@@ -142,6 +142,84 @@
           }
         ]
       }
+    },
+    // Staging (W3-OPS-2): the resources Terraform built in
+    // infra/terraform/environments/staging (apply run 43670300225). Deploy
+    // with `wrangler deploy --env staging`; the script is tidegrid-api-staging.
+    // Nothing is inherited but routes and crons, so every binding is named
+    // here. Before the first deploy these must exist as Worker secrets on
+    // tidegrid-api-staging: DATABASE_URL (the tidegrid_app role on the Neon
+    // "staging" branch; there is no staging Hyperdrive), FIELD_ENCRYPTION_KEYS,
+    // TURNSTILE_SECRET_KEY, FAKE_PAYMENT_WEBHOOK_SECRET, and
+    // EMAIL_ALLOWED_RECIPIENTS (outside production an empty list sends
+    // nothing). Without the first three, staging refuses bookings and
+    // signings rather than running unprotected. TURNSTILE_SITE_KEY, the
+    // public key paired with TURNSTILE_SECRET_KEY, goes in "vars" below once
+    // the staging widget exists; until then guests send no token and staging
+    // refuses the protected public commands (human_check_required).
+    "staging": {
+      "routes": [{ "pattern": "api-staging.tidegrid.us", "custom_domain": true }],
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "BUILD_ID": "staging",
+        "ALLOWED_ORIGINS": "https://console-staging.tidegrid.us",
+        "STAFF_ORIGINS": "https://console-staging.tidegrid.us",
+        // The same Access application as production, with
+        // console-staging.tidegrid.us added as a second hostname, so the
+        // audience tag is shared.
+        "CF_ACCESS_TEAM_DOMAIN": "winter-feather-7169.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "9e89e2b88c98e68596a7433251be06f0b7013c38540aa3c1c7c6feec0c52e78f",
+        "PAYMENT_PROVIDER": "fake",
+        "EMAIL_PROVIDER": "cloudflare",
+        "EMAIL_FROM_ADDRESS": "bookings@mail.tidegrid.us",
+        // Guest links in staging email and the console (dock code, assisted
+        // signing) must never open the production guest site, whose API
+        // cannot redeem a staging credential. No staging guest site exists
+        // yet, so these names do not resolve: a staging link fails instead of
+        // reaching production. A staging guest deployment takes this pattern.
+        "GUEST_LINK_ORIGIN": "https://{slug}.book-staging.tidegrid.us",
+        "PUBLIC_CORS": "dynamic"
+      },
+      "send_email": [
+        { "name": "EMAIL", "allowed_sender_addresses": ["bookings@mail.tidegrid.us"] }
+      ],
+      "placement": { "mode": "smart" },
+      // Account-unique namespace ids, apart from production's 7211 and 7212.
+      "ratelimits": [
+        {
+          "name": "AUTH_RATE_LIMITER",
+          "namespace_id": "7221",
+          "simple": { "limit": 10, "period": 60 }
+        },
+        {
+          "name": "PUBLIC_RATE_LIMITER",
+          "namespace_id": "7222",
+          "simple": { "limit": 30, "period": 60 }
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "WAIVER_EVIDENCE", "bucket_name": "tidegrid-staging-waiver-evidence" }
+      ],
+      "queues": {
+        "producers": [{ "binding": "OUTBOX_QUEUE", "queue": "tidegrid-staging-outbox" }],
+        "consumers": [
+          {
+            "queue": "tidegrid-staging-outbox",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 6,
+            "dead_letter_queue": "tidegrid-staging-outbox-dlq"
+          },
+          {
+            "queue": "tidegrid-staging-outbox-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 3
+          }
+        ]
+      }
     }
   }
 }

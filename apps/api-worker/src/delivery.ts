@@ -36,9 +36,13 @@ export function retryDelaySeconds(attempts: number): number {
   return Math.min(900, 30 * 2 ** Math.max(0, attempts - 1));
 }
 
-/** The outbox queue and its DLQ are named tidegrid-outbox-<environment>[-dlq]. */
+/**
+ * The outbox queue and its DLQ: tidegrid-outbox-<environment>[-dlq] in the
+ * Workers test runtime, tidegrid-<environment>-outbox[-dlq] where Terraform
+ * provisions them (infra/terraform/modules/cloudflare-queues).
+ */
 export function isOutboxQueue(queueName: string): boolean {
-  return queueName.startsWith("tidegrid-outbox-");
+  return /^tidegrid-(outbox-[a-z0-9]+|[a-z0-9]+-outbox)(-dlq)?$/.test(queueName);
 }
 
 /** The DLQ's messages arrive on a queue whose name ends in -dlq. */
