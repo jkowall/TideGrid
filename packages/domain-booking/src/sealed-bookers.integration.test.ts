@@ -113,7 +113,7 @@ describe.skipIf(!env)("sealed bookers (W3-OPS-4, 0055)", () => {
     bindFieldPolicy(sealed.db, { keyring: async () => keyring, required: true });
     plain = createDb(env.runtimeUrl, { max: 2 });
     payments = fakeProvider(sealed.db);
-    A = await createCheckoutFixture(admin, sealed.db, "seal-a", { days: 10 });
+    A = await createCheckoutFixture(admin, sealed.db, "seal-a", { days: 14 });
     B = await createCheckoutFixture(admin, sealed.db, "seal-b");
     tripsA = tripAllocator(A);
     tripsB = tripAllocator(B);
@@ -137,8 +137,8 @@ describe.skipIf(!env)("sealed bookers (W3-OPS-4, 0055)", () => {
     expect(row.booker_sealed).toMatch(/^tgf1:k1:/);
     expect(row.booker_sealed).not.toContain("Neil");
     expect(row.booker_email_index).toMatch(/^[0-9a-f]{64}$/);
-    // Four words: ana, maría, o, neil.
-    expect(row.booker_name_index).toHaveLength(4);
+    // Four words (ana, maría, o, neil) and the exact name.
+    expect(row.booker_name_index).toHaveLength(5);
 
     const detail = await as(staffContext(A.id), (trx) =>
       getBookingDetail(trx, A.id, booked.bookingId, { withBooker: true }),
@@ -225,6 +225,28 @@ describe.skipIf(!env)("sealed bookers (W3-OPS-4, 0055)", () => {
       code: "23514",
       constraint_name: "checkout_sessions_booker_place",
     });
+  });
+
+  it("records a correction of case or punctuation alone, and takes a name of many words", async () => {
+    const run = randomUUID().slice(0, 8);
+    const email = `case-${run}@example.test`;
+    const booked = await confirmBooking(sealed.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Ana Example", email },
+    });
+    for (const name of [
+      "ANA Example",
+      "ANA Example.",
+      "a b c d e f g h i j k l m n o p q r s t u v w x y z 1 2 3 4 5 6 7 8 9",
+    ]) {
+      const result = await as(staffContext(A.id), (trx, c) =>
+        changeBookerContact(trx, c, { bookingId: booked.bookingId, name, email }),
+      );
+      expect(result).toMatchObject({
+        kind: "changed",
+        change: { nameChanged: true, emailChanged: false },
+      });
+    }
+    expect((await stored(booked.checkoutSessionId)).booker_name_index).toHaveLength(36);
   });
 
   it("keys a sealed booker's credit by the email token, and matches only that booker", async () => {

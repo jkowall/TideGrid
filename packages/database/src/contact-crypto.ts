@@ -93,6 +93,19 @@ export function nameWords(name: string): string[] {
   return [...new Set(words)];
 }
 
+/**
+ * The exact name's token (purpose `name_exact`), kept beside the word tokens
+ * so a correction of case or punctuation alone still changes them. Never a
+ * search term: a search only ever asks for `name_word` tokens.
+ */
+export function exactNameToken(
+  keyring: FieldKeyring,
+  tenantId: string,
+  name: string,
+): Promise<string> {
+  return blindIndex(keyring, tenantId, "name_exact", name);
+}
+
 /** One token per word of a name, for whole-word search. */
 export async function nameTokens(
   keyring: FieldKeyring,

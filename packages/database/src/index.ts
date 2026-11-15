@@ -9,6 +9,7 @@ export {
   contactKeys,
   contactKeysToOpen,
   emailToken,
+  exactNameToken,
   type FieldPolicy,
   nameTokens,
   nameWords,

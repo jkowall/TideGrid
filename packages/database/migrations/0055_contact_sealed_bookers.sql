@@ -13,7 +13,9 @@
 --
 --   booker_email_index   the address, to match a credit account or to find a
 --                        booking by its full address;
---   booker_name_index    one token per word of the name, for whole-word search.
+--   booker_name_index    one token per word of the name, for whole-word search,
+--                        and one of the exact name, so any correction to it
+--                        (even of case or punctuation) changes the tokens.
 --
 -- A credit account is keyed by the same email token instead of the address,
 -- and an imported customer keeps its name, email, and phone sealed with its
@@ -34,7 +36,7 @@ ALTER TABLE public.checkout_sessions
     CHECK (booker_sealed ~ '^tgf1:[a-z0-9]{1,16}:[A-Za-z0-9_-]{24,}$' AND char_length(booker_sealed) <= 4000),
   ADD COLUMN booker_email_index text CHECK (booker_email_index ~ '^[0-9a-f]{64}$'),
   ADD COLUMN booker_name_index text[]
-    CHECK (cardinality(booker_name_index) BETWEEN 1 AND 32
+    CHECK (cardinality(booker_name_index) >= 1
            AND array_position(booker_name_index, NULL) IS NULL
            AND array_to_string(booker_name_index, ',') ~ '^[0-9a-f]{64}(,[0-9a-f]{64})*$');
 

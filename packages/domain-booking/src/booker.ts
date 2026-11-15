@@ -10,6 +10,7 @@ import {
   contactKeys,
   contactKeysToOpen,
   emailToken,
+  exactNameToken,
   nameTokens,
   openContact,
   sealContact,
@@ -61,8 +62,9 @@ export async function bookerColumns(
     booker_email: null,
     booker_sealed: await sealContact(keyring, place, { name, email }),
     booker_email_index: email === null ? null : await emailToken(keyring, tenantId, email),
-    // A name with no letter or digit still gets one token, of the whole name.
-    booker_name_index: tokens.length > 0 ? tokens : [await emailToken(keyring, tenantId, name)],
+    // The words, for search, and the exact name, so every correction changes
+    // the tokens and a name with no letter or digit still has one.
+    booker_name_index: [...tokens, await exactNameToken(keyring, tenantId, name)],
   };
 }
 
