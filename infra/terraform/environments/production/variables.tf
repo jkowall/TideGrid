@@ -76,3 +76,14 @@ variable "custom_hostname_fallback" {
   type        = string
   default     = null
 }
+
+variable "api_host" {
+  description = "The API's hostname in this environment."
+  type        = string
+}
+
+variable "turnstile_domains" {
+  description = "Hostnames where the guest Turnstile check runs. Empty creates no widget."
+  type        = list(string)
+  default     = []
+}
