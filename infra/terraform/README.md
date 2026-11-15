@@ -34,10 +34,22 @@ infra/terraform/
     cloudflare-tokens/            scoped, expiring account tokens; values never output
     cloudflare-alerts/            certificate and Cloudflare incident alerts
     cloudflare-custom-hostnames/  Cloudflare for SaaS fallback origin
+    cloudflare-security/          firewall rules, edge rate limits, guest Turnstile widget (W3-OPS-4)
     neon/                         project, long-lived branches, compute; never a role
 ```
 
 Resource names start with `tidegrid-<environment>-`. The environment roots output every identifier Wrangler needs (`wrangler_inputs`), with no secret values. Account ids, zone ids, Neon project ids, hosts, and addresses come from `TF_VAR_` variables at plan time, never from a committed file.
+
+## Edge security (W3-OPS-4)
+
+Added on 2026-11-15, plan only, like the rest. `cloudflare-security` gives each environment:
+
+- **Custom firewall rules** (`http_request_firewall_custom`) on the API host: only the usual methods, only `/v1/` paths, no path traversal, the demo's fake provider and mailbox routes blocked, and no public write without a user agent (verified bots aside). The Stripe webhook path is untouched.
+- **Edge rate limits** (`http_ratelimit`), per client address in each Cloudflare location. What a rule may match depends on the zone's plan: Free matches the URI path only, Pro adds the host, Business the method. Production starts with one rule that works on Free: every request to `/v1/public/` paths, 60 per 10 seconds, blocked for 10 seconds. On Business or above, narrow it to writes, add a sign-in rule, and lengthen the block. These sit in front of the Worker's own limiters and the database's limits, which stay.
+- **The guest Turnstile widget**, in managed mode, for the domains in `turnstile_domains`. Cloudflare returns the widget's secret and the provider keeps it in state, so the widget is created here only when `allow_secrets_in_state` is true (D1). Otherwise the owner makes it in the dashboard and stores the secret as the API's `TURNSTILE_SECRET_KEY`; `wrangler_inputs.turnstile_site_key` is then null. The site key goes on the API Worker as `TURNSTILE_SITE_KEY`, which hands it to the guest site.
+- **Token permissions.** Owning the zone's rules needs the Terraform token's zone permission WAF Edit (it covers custom firewall and rate limit rulesets). Creating the widget needs the account permission Turnstile Sites Edit. The [apply runbook](../../docs/runbooks/terraform-apply.md) lists both.
+
+Each zone has one ruleset per phase, so owning one replaces any rules made in the dashboard. Production owns its zone's (`manage_zone_rules = true`). Staging shares the preview's `tidegrid.us` zone and leaves its firewall alone (`false`), so it needs no API host; its next plan adds nothing until `turnstile_domains` is set, and then only the widget. Production needs `api_host` (for example `api.<zone_name>`) beside `zone_name` when it is first planned. The signed waiver bucket and its object lock were already here (`cloudflare-r2`, `waiver-evidence`); the API side is the `WAIVER_EVIDENCE` binding.
 
 ## Choices pending the owner (coordinator defaults)
 

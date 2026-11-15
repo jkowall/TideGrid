@@ -6,6 +6,7 @@ output "wrangler_inputs" {
     bucket_names                    = module.environment.bucket_names
     hyperdrive_id                   = module.environment.hyperdrive_id
     custom_hostname_fallback_origin = module.environment.custom_hostname_fallback_origin
+    turnstile_site_key              = module.environment.turnstile_site_key
   }
 }
 

@@ -97,6 +97,19 @@ module "custom_hostnames" {
   fallback_record_name = var.custom_hostname_fallback
 }
 
+module "security" {
+  source = "../cloudflare-security"
+
+  account_id              = var.cloudflare_account_id
+  zone_id                 = local.zone_id
+  name_prefix             = local.prefix
+  manage_zone_rules       = var.edge_security.manage_zone_rules
+  api_host                = var.edge_security.api_host
+  rate_limits             = var.edge_security.rate_limits
+  turnstile_domains       = var.edge_security.turnstile_domains
+  create_turnstile_widget = var.allow_secrets_in_state
+}
+
 module "neon" {
   source = "../neon"
 

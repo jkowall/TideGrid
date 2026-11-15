@@ -50,3 +50,8 @@ output "neon_branch_ids" {
   description = "Long-lived Neon branch ids by name."
   value       = module.neon.branch_ids
 }
+
+output "turnstile_site_key" {
+  description = "The guest Turnstile widget's public site key, or null when the owner makes it in the dashboard."
+  value       = module.security.turnstile_site_key
+}
