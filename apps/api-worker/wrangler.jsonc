@@ -153,7 +153,10 @@
     // TURNSTILE_SECRET_KEY, FAKE_PAYMENT_WEBHOOK_SECRET, and
     // EMAIL_ALLOWED_RECIPIENTS (outside production an empty list sends
     // nothing). Without the first three, staging refuses bookings and
-    // signings rather than running unprotected.
+    // signings rather than running unprotected. TURNSTILE_SITE_KEY, the
+    // public key paired with TURNSTILE_SECRET_KEY, goes in "vars" below once
+    // the staging widget exists; until then guests send no token and staging
+    // refuses the protected public commands (human_check_required).
     "staging": {
       "routes": [{ "pattern": "api-staging.tidegrid.us", "custom_domain": true }],
       "workers_dev": false,
@@ -171,6 +174,12 @@
         "PAYMENT_PROVIDER": "fake",
         "EMAIL_PROVIDER": "cloudflare",
         "EMAIL_FROM_ADDRESS": "bookings@mail.tidegrid.us",
+        // Guest links in staging email and the console (dock code, assisted
+        // signing) must never open the production guest site, whose API
+        // cannot redeem a staging credential. No staging guest site exists
+        // yet, so these names do not resolve: a staging link fails instead of
+        // reaching production. A staging guest deployment takes this pattern.
+        "GUEST_LINK_ORIGIN": "https://{slug}.book-staging.tidegrid.us",
         "PUBLIC_CORS": "dynamic"
       },
       "send_email": [
