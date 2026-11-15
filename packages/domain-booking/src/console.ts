@@ -37,6 +37,7 @@ import { type RawBuilder, sql } from "kysely";
 import { type BalanceView, getBookingBalance } from "./balance-read.ts";
 import { openBookers } from "./booker.ts";
 import type { ComplimentaryReason } from "./checkout.ts";
+import { openParticipantRows } from "./participant-contact.ts";
 import { iso, isoOrNull } from "./views.ts";
 
 // Views ------------------------------------------------------------------------------
@@ -1017,16 +1018,19 @@ export async function getTripRoster(
     rows.map((r) => r.order_id),
   );
   // The party as its guests have named it (lane 1, G2.11c), by place.
-  const { rows: named } = await sql<{
+  const { rows: namedRows } = await sql<{
     booking_id: string;
     position: number;
     full_name: string;
     is_minor: boolean;
+    contact_sealed: string | null;
   }>`
-    select booking_id, position, full_name, is_minor from booking_participants
+    select booking_id, position, full_name, is_minor, contact_sealed from booking_participants
      where tenant_id = ${tenantId} and booking_id = any(${rows.map((r) => r.id)}::uuid[])
        and removed_at is null
      order by booking_id, position`.execute(trx);
+  // Sealed participants (0056) are opened for their names.
+  const named = await openParticipantRows(trx, tenantId, namedRows);
   const participants = new Map<string, { position: number; name: string; minor: boolean }[]>();
   for (const p of named) {
     const list = participants.get(p.booking_id) ?? [];

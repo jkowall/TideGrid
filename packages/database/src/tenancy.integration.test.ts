@@ -815,9 +815,12 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // Guest self-service (lane 1, G2.11c): a participant's details may be
         // corrected, and a booking may move to canceled with its cancellation.
         booking_participants: [
+          "contact_sealed",
           "email",
+          "email_index",
           "full_name",
           "guardian_email",
+          "guardian_email_index",
           "guardian_name",
           "is_minor",
           "removed_at",

@@ -859,11 +859,17 @@ export interface BookingParticipantsTable {
   booking_id: Fixed<string>;
   /** 1 to the booking's party size; unique per booking. */
   position: Fixed<number>;
-  full_name: string;
+  /** Null when the details are sealed (0056). */
+  full_name: string | null;
   is_minor: boolean;
   email: string | null;
   guardian_name: string | null;
   guardian_email: string | null;
+  /** `{name, email, guardianName, guardianEmail}` sealed (0056), or null for a plain row. */
+  contact_sealed: string | null;
+  /** Blind index tokens of the sealed addresses (0056). */
+  email_index: string | null;
+  guardian_email_index: string | null;
   created_at: Stamped;
   updated_at: Stamped;
   /** Set once, by the trigger's clock, with the party change that gave up the place (0035). */
@@ -930,6 +936,8 @@ export interface EmailMessagesTable {
   subject_ref: FixedDefault<string | null>;
   to_email: Fixed<string>;
   to_name: FixedDefault<string | null>;
+  /** The blind index token of to_email, where a keyring is set (0056). */
+  to_email_index: FixedDefault<string | null>;
   from_name: Fixed<string>;
   reply_to: FixedDefault<string | null>;
   subject: Fixed<string>;

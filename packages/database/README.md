@@ -428,6 +428,14 @@ W3-G2.12-rest. `complimentary_grants` records an owner's decision to waive a sta
 - **Bookings.** `payment_id` may be null, only for source `complimentary` (`bookings_complimentary_payment`); `app.stamp_booking_source` sets that source when a grant exists, and `app.check_booking` requires the grant, an open checkout, a pending order, and the confirmed hold in place of a succeeded payment. `app.check_checkout_session` (replaced) lets such a checkout move to confirmed with no payment.
 - **Cancellations and fees.** `booking_cancellations.payment_id` may be null, exactly when `paid_amount` is 0 (`booking_cancellations_complimentary`); a complimentary booking cancels with remedy none, no refund share, and no override. `app.check_fee_assessment` requires an order total and eligible amount of 0 for one.
 
+## Sealed guest contact details, part 2 (0056)
+
+W3-OPS-4, phase 2: the people in a party. A participant written where the transaction has a keyring keeps `{name, email, guardianName, guardianEmail}` in `contact_sealed`, sealed for the tenant and the column, with `email_index` and `guardian_email_index` (purpose `email`, the same tokens as a booker's) beside it; the plain columns stay null. There are no name tokens: nothing searches participants by name.
+
+- **One shape a row.** `booking_participants_guardian` now holds a row plain (no tokens, a name, the 0009 guardian rule) or sealed (no plain detail, and a minor exactly when there is a guardian token). `app.check_booking_participant` refuses an update that moves a row between the two (`booking_participants_contact_place`), and a removed participant's sealed value and tokens cannot change either.
+- **Invitations.** `email_messages.to_email_index` holds the recipient's token where the message was written with a keyring (written once, no UPDATE grant). `app.check_profile_invitation` matches an invitation to a sealed participant by that token (the guardian's for a minor), to a plain one by address, as before, and the delivery job re-checks the recipient the same way before it sends.
+- **Still plain until phase 3.** The email outbox (`to_email`, `to_name`), waiver deliveries' `recipient_email`, and the do-not-email list.
+
 ## Sealed guest contact details, part 1 (0055)
 
 W3-OPS-4, owner decision 2026-11-15: every guest contact detail is sealed by the application, in phases. Part 1 covers the three places the database matches to each other by email: a checkout's booker, a credit account, and an imported customer.

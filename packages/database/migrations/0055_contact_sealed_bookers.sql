@@ -1,5 +1,7 @@
 -- 0055 guest contact details sealed by the application, part 1 (W3-OPS-4)
 --
+-- migration-check: allow constraint_without_not_valid 0055 merged minutes before the safety check (2026-11-15) and is applied to no shared database yet; its checks land on tables with no live rows before the pilot. Later files add checks NOT VALID.
+--
 -- Owner decision 2026-11-15: encrypt every guest contact detail, in phases.
 -- This first part covers the booker on each checkout, the credit account a
 -- booker's email keys, and the customers a CSV import saves, because the

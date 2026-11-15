@@ -12,6 +12,8 @@ type JsonObject = Record<string, unknown>;
  * - waiver_evidence (0054): the signer's and participant's details.
  * - checkout_sessions (0055): the booker's name and email.
  * - import_customers (0055): the imported customer's name, email, and phone.
+ * - booking_participants (0056): a party member's name and email, and a
+ *   minor's guardian's name and email.
  *
  * The blind index tokens stay in the export: a credit account written sealed
  * is keyed by its email token alone, and the same token on a checkout is how
@@ -65,6 +67,21 @@ export function openSealedEvidence(tenantId: string, fields: FieldKeyring | unde
         full_name: opened.name ?? null,
         email: opened.email ?? null,
         phone: opened.phone ?? null,
+      } as unknown as T;
+    }
+    if (table === "booking_participants" && typeof row.contact_sealed === "string") {
+      const opened = await openContact(
+        keyring(),
+        { tenantId, field: "booking_participants.contact_sealed" },
+        row.contact_sealed,
+      );
+      const { contact_sealed: _sealed, ...rest } = row;
+      return {
+        ...rest,
+        full_name: opened.name ?? null,
+        email: opened.email ?? null,
+        guardian_name: opened.guardianName ?? null,
+        guardian_email: opened.guardianEmail ?? null,
       } as unknown as T;
     }
     return row;

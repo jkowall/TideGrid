@@ -21,6 +21,7 @@ import {
   type WaiverRevokedReason,
   type WaiverSignerRole,
 } from "@tidegrid/database";
+import { openParticipantRows } from "@tidegrid/domain-booking";
 import { sql } from "kysely";
 import { MAX_ALL_GENERATIONS, MAX_GENERATIONS, sendsUsed } from "./delivery.ts";
 import {
@@ -155,6 +156,10 @@ interface Row {
   position: number | null;
   full_name: string | null;
   is_minor: boolean | null;
+  /** The participant's addresses, opened when sealed (0056); read for current_recipient. */
+  email: string | null;
+  guardian_email: string | null;
+  contact_sealed: string | null;
   request_id: string | null;
   state: WaiverRequestState | null;
   revoked_reason: WaiverRevokedReason | null;
@@ -214,6 +219,7 @@ async function rows(
   const { rows: found } = await sql<Row>`
     select b.id as booking_id, b.reference, b.state as booking_state, b.party_size,
            o.product_id, p.id as participant_id, p.position, p.full_name, p.is_minor,
+           p.email, p.guardian_email, p.contact_sealed,
            r.id as request_id, r.state, r.revoked_reason, r.required_signer,
            t.name as template_name, r.template_version, r.created_at as assigned_at,
            e.id as evidence_id, e.signed_at, e.signer_name, e.personal_sealed,
@@ -224,16 +230,11 @@ async function rows(
            m.last_error_code as message_error,
            ${closedSinceInvitation(tenantId, sql<string>`r.id`)} as latest_closed,
            ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
-           cr.address as current_recipient, f.retry_after as refusal_retry_after,
+           null::text as current_recipient, null::timestamptz as refusal_retry_after,
            st.starts_at,
            (select max(x.after_generation) from waiver_send_resets x
              where x.tenant_id = b.tenant_id and x.request_id = r.id) as reset_at,
-           (r.required_signer = 'guardian' and cr.address is not null
-            and exists (select 1 from booking_participants q
-                         where q.tenant_id = b.tenant_id and q.booking_id = b.id
-                           and q.removed_at is null
-                           and q.id <> p.id and not q.is_minor
-                           and nullif(lower(btrim(q.email)), '') = cr.address)) as shared_address,
+           null::boolean as shared_address,
            (select json_agg(json_build_object(
                      'slot', w.slot, 'queued_at', w.created_at, 'state', wm.state,
                      'at', coalesce(wm.sent_at, wm.failed_at, wm.canceled_at, w.created_at))
@@ -270,16 +271,10 @@ async function rows(
          order by y.generation desc
          limit 1) d on true
       left join email_messages m on m.tenant_id = b.tenant_id and m.id = d.message_id
-      left join lateral (
-        select nullif(lower(btrim(case when r.required_signer = 'guardian' then p.guardian_email
-                                       else p.email end)), '') as address) cr on true
-      left join lateral (
-        select x.retry_after
-          from app.waiver_send_refusal(b.tenant_id, b.id, p.id, cr.address, now()) x
-         where r.state = 'pending' and cr.address is not null) f on true
       left join import_waiver_statuses lw on lw.tenant_id = b.tenant_id and lw.participant_id = p.id
      where b.tenant_id = ${tenantId} and ${where}
      order by b.confirmed_at, b.id, p.position`.execute(trx);
+  await addresses(trx, tenantId, found);
   for (const row of found) {
     if (row.personal_sealed && row.evidence_id) {
       const opened = await openEvidenceFields(
@@ -292,6 +287,60 @@ async function rows(
     }
   }
   return found;
+}
+
+const addressOf = (value: string | null) => value?.trim().toLowerCase() || null;
+
+/**
+ * Each request's current address, whether a guardian's address is also an
+ * adult's in the same party, and when the sending limits next allow a send.
+ * Read here, not in the query, since a sealed participant's addresses (0056)
+ * are only known once opened. The rows hold every listed participant of
+ * their bookings, so the party is all there.
+ */
+async function addresses(trx: TenantTransaction, tenantId: string, found: Row[]): Promise<void> {
+  const opened = await openParticipantRows(trx, tenantId, found);
+  opened.forEach((o, i) => {
+    const row = found[i] as Row;
+    row.full_name = o.full_name;
+    row.email = o.email;
+    row.guardian_email = o.guardian_email;
+    row.contact_sealed = null;
+    row.current_recipient = addressOf(
+      row.required_signer === "guardian" ? row.guardian_email : row.email,
+    );
+  });
+  for (const row of found) {
+    row.shared_address =
+      row.required_signer === "guardian" &&
+      row.current_recipient !== null &&
+      found.some(
+        (q) =>
+          q.booking_id === row.booking_id &&
+          q.participant_id !== null &&
+          q.participant_id !== row.participant_id &&
+          q.is_minor === false &&
+          addressOf(q.email) === row.current_recipient,
+      );
+  }
+  const asking = found.filter(
+    (r) => r.state === "pending" && r.current_recipient !== null && r.participant_id !== null,
+  );
+  if (asking.length === 0) return;
+  const { rows: refusals } = await sql<{ i: number; retry_after: Date | null }>`
+    select x.i, f.retry_after
+      from unnest(${asking.map((r) => r.booking_id)}::uuid[],
+                  ${asking.map((r) => r.participant_id)}::uuid[],
+                  ${asking.map((r) => r.current_recipient)}::text[])
+           with ordinality as x(booking_id, participant_id, address, i)
+      cross join lateral app.waiver_send_refusal(${tenantId}::uuid, x.booking_id,
+                                                 x.participant_id, x.address, now()) f`.execute(
+    trx,
+  );
+  for (const r of refusals) {
+    const row = asking[Number(r.i) - 1];
+    if (row) row.refusal_retry_after = r.retry_after;
+  }
 }
 
 function statusOf(row: Row, required: boolean): WaiverStatusCode {
