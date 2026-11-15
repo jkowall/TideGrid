@@ -149,7 +149,8 @@
     // Nothing is inherited but routes and crons, so every binding is named
     // here. Before the first deploy these must exist as Worker secrets on
     // tidegrid-api-staging: DATABASE_URL (the tidegrid_app role on the Neon
-    // "staging" branch; there is no staging Hyperdrive), FIELD_ENCRYPTION_KEYS,
+    // "staging" branch; the fallback to the Hyperdrive binding below),
+    // FIELD_ENCRYPTION_KEYS,
     // TURNSTILE_SECRET_KEY, FAKE_PAYMENT_WEBHOOK_SECRET, and
     // EMAIL_ALLOWED_RECIPIENTS (outside production an empty list sends
     // nothing). Without the first three, staging refuses bookings and
@@ -190,6 +191,9 @@
       "send_email": [
         { "name": "EMAIL", "allowed_sender_addresses": ["bookings@mail.tidegrid.us"] }
       ],
+      // The tidegrid-staging config made by tools/staging/configure.sh (staging
+      // run 43751150410): staging's direct host, query caching disabled.
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "9c9970c1c7fd4433813445cbbfdf3ad1" }],
       "placement": { "mode": "smart" },
       // Account-unique namespace ids, apart from production's 7211 and 7212.
       "ratelimits": [
