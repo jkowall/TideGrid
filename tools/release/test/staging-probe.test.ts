@@ -87,6 +87,20 @@ describe("staging probes", () => {
     expect(r).toMatchObject({ outcome: "fail", ok: 4, stale: 1 });
   });
 
+  it("counts a refused write apart from a stale read", async () => {
+    const o = fakeApi(() => 200);
+    let posts = 0;
+    const flaky: ProbeOptions = {
+      ...o,
+      fetch: async (url, init) => {
+        if (init?.method === "POST" && ++posts === 2) return json(429, {});
+        return o.fetch(url, init);
+      },
+    };
+    const r = await readAfterWrite(flaky, 8);
+    expect(r).toMatchObject({ outcome: "pass", ok: 7, stale: 0, writeFailures: 1 });
+  });
+
   it("refuses to restart a compute that is not staging's", async () => {
     const o = fakeApi(() => 200);
     const t = { apiKey: "k", project: "p", branchId: "br-s", endpointId: "ep-1" };

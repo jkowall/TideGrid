@@ -154,6 +154,7 @@ export async function readAfterWrite(o: ProbeOptions, pairs = 20, gapMs = 2_500)
   const target = await quoteTarget(o);
   let ok = 0;
   let stale = 0;
+  let writeFailures = 0;
   const errors: string[] = [];
   const writeMs: number[] = [];
   const readMs: number[] = [];
@@ -165,6 +166,8 @@ export async function readAfterWrite(o: ProbeOptions, pairs = 20, gapMs = 2_500)
       body: JSON.stringify({ tripId: target.tripId, party: target.party, addOns: [] }),
     });
     if (w.res.status !== 201) {
+      // A refused write says nothing about consistency; counted apart.
+      writeFailures++;
       errors.push(`write ${w.res.status}`);
       continue;
     }
@@ -185,10 +188,13 @@ export async function readAfterWrite(o: ProbeOptions, pairs = 20, gapMs = 2_500)
   }
   return {
     probe: "read-after-write",
-    outcome: ok === pairs ? "pass" : "fail",
+    // Fails on any stale or wrong read. Refused writes only fail it when
+    // fewer than three quarters of the pairs could be checked at all.
+    outcome: ok === pairs - writeFailures && ok >= Math.ceil(pairs * 0.75) ? "pass" : "fail",
     pairs,
     ok,
     stale,
+    writeFailures,
     errors: errors.slice(0, 10),
     write: summarize(writeMs),
     read: summarize(readMs),
@@ -295,14 +301,20 @@ export function optionsFromEnv(env: NodeJS.ProcessEnv): { api: string; origin: s
 }
 
 export function neonFromEnv(env: NodeJS.ProcessEnv): NeonTarget {
-  const t = {
-    apiKey: env.NEON_API_KEY ?? "",
-    project: env.NEON_PROJECT_ID ?? "",
-    branchId: env.STAGING_BRANCH_ID ?? "",
-    endpointId: env.STAGING_ENDPOINT_ID ?? "",
+  for (const name of [
+    "NEON_API_KEY",
+    "NEON_PROJECT_ID",
+    "STAGING_BRANCH_ID",
+    "STAGING_ENDPOINT_ID",
+  ]) {
+    if (!env[name]) throw new Error(`${name} is required for restart`);
+  }
+  return {
+    apiKey: env.NEON_API_KEY as string,
+    project: env.NEON_PROJECT_ID as string,
+    branchId: env.STAGING_BRANCH_ID as string,
+    endpointId: env.STAGING_ENDPOINT_ID as string,
   };
-  for (const [k, v] of Object.entries(t)) if (!v) throw new Error(`${k} is required for restart`);
-  return t;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
