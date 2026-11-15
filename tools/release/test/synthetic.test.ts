@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { optionsFromEnv, runSynthetic, syntheticBooker } from "../src/synthetic.ts";
+import {
+  optionsFromEnv,
+  runSynthetic,
+  syntheticBooker,
+} from "../src/synthetic.ts";
 
 const now = Date.parse("2026-11-15T12:00:00Z");
 const api = "https://api.example.test";
@@ -52,10 +56,16 @@ function fakeApi(overrides: Record<string, Answer> = {}) {
         },
       },
     },
-    "POST /v1/public/quotes": { status: 201, body: { quote: { quoteId: "q-1" } } },
+    "POST /v1/public/quotes": {
+      status: 201,
+      body: { quote: { quoteId: "q-1" } },
+    },
     "POST /v1/public/checkout-sessions": {
       status: 201,
-      body: { checkoutSession: { id: "c-1", state: "open" }, payment: { provider: "fake" } },
+      body: {
+        checkoutSession: { id: "c-1", state: "open" },
+        payment: { provider: "fake" },
+      },
     },
     "POST /v1/public/checkout-sessions/c-1/cancel": {
       status: 200,
@@ -86,7 +96,11 @@ describe("synthetic booking check", () => {
   it("holds seats on a shared trip, then cancels, sending the tenant's Origin", async () => {
     const f = fakeApi();
     const result = await run(f);
-    expect(result).toMatchObject({ outcome: "pass", failedStep: null, reason: null });
+    expect(result).toMatchObject({
+      outcome: "pass",
+      failedStep: null,
+      reason: null,
+    });
     expect(Object.keys(result.ms)).toEqual([
       "health",
       "trips",
@@ -123,7 +137,10 @@ describe("synthetic booking check", () => {
 
   it("fails on a degraded database, naming the step, and opens nothing", async () => {
     const f = fakeApi({
-      "GET /v1/health": { status: 200, body: { status: "degraded", database: "error" } },
+      "GET /v1/health": {
+        status: 200,
+        body: { status: "degraded", database: "error" },
+      },
     });
     const result = await run(f);
     expect(result).toMatchObject({
@@ -138,11 +155,19 @@ describe("synthetic booking check", () => {
     const f = fakeApi({
       "POST /v1/public/quotes": {
         status: 409,
-        body: { error: { code: "insufficient_capacity", message: "guest text could be here" } },
+        body: {
+          error: {
+            code: "insufficient_capacity",
+            message: "guest text could be here",
+          },
+        },
       },
     });
     const result = await run(f);
-    expect(result).toMatchObject({ failedStep: "quote", reason: "HTTP 409 insufficient_capacity" });
+    expect(result).toMatchObject({
+      failedStep: "quote",
+      reason: "HTTP 409 insufficient_capacity",
+    });
   });
 
   it("cancels a checkout it opened even when the check fails after opening", async () => {
@@ -158,7 +183,9 @@ describe("synthetic booking check", () => {
       failedStep: "checkout",
       reason: "no provider payment",
     });
-    expect(f.calls.at(-1)?.path).toBe("/v1/public/checkout-sessions/c-1/cancel");
+    expect(f.calls.at(-1)?.path).toBe(
+      "/v1/public/checkout-sessions/c-1/cancel",
+    );
   });
 
   it("finds and cancels a checkout kept behind a provider outage, by replaying its key", async () => {
@@ -176,7 +203,10 @@ describe("synthetic booking check", () => {
           // The replay: the provider answered this time.
           return new Response(
             JSON.stringify({
-              checkoutSession: { id: "0b7f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69", state: "open" },
+              checkoutSession: {
+                id: "0b7f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69",
+                state: "open",
+              },
               payment: {},
             }),
             { status: 201 },
@@ -192,7 +222,13 @@ describe("synthetic booking check", () => {
         keys.push(h["Idempotency-Key"] ?? "");
       return fetch(input, init);
     };
-    const result = await runSynthetic({ api, origin, days: 30, fetch: watching, now: () => now });
+    const result = await runSynthetic({
+      api,
+      origin,
+      days: 30,
+      fetch: watching,
+      now: () => now,
+    });
     expect(result).toMatchObject({ failedStep: "checkout" });
     expect(result.reason).toContain("payment_provider_unavailable");
     expect(keys).toHaveLength(2);
@@ -244,7 +280,9 @@ describe("synthetic booking check", () => {
   });
 
   it("fails when no trip is on sale long enough", async () => {
-    const f = fakeApi({ "GET /v1/public/trips": { status: 200, body: { trips: [] } } });
+    const f = fakeApi({
+      "GET /v1/public/trips": { status: 200, body: { trips: [] } },
+    });
     expect(await run(f)).toMatchObject({
       failedStep: "trips",
       reason: "no bookable trip in range",
@@ -252,21 +290,50 @@ describe("synthetic booking check", () => {
   });
 
   it("checks its settings", () => {
-    expect(optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: `${origin}/` })).toEqual({
+    expect(
+      optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: `${origin}/` }),
+    ).toEqual({
       api,
       origin,
       days: 30,
+      party: 1,
     });
     expect(() =>
-      optionsFromEnv({ SYNTHETIC_API: "http://api.example.test", SYNTHETIC_ORIGIN: origin }),
+      optionsFromEnv({
+        SYNTHETIC_API: "http://api.example.test",
+        SYNTHETIC_ORIGIN: origin,
+      }),
     ).toThrow(/https/);
     expect(() =>
-      optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: `${origin}/book` }),
+      optionsFromEnv({
+        SYNTHETIC_API: api,
+        SYNTHETIC_ORIGIN: `${origin}/book`,
+      }),
     ).toThrow(/origin/);
-    expect(() => optionsFromEnv({ SYNTHETIC_API: api })).toThrow(/SYNTHETIC_ORIGIN/);
+    expect(() => optionsFromEnv({ SYNTHETIC_API: api })).toThrow(
+      /SYNTHETIC_ORIGIN/,
+    );
     expect(() =>
-      optionsFromEnv({ SYNTHETIC_API: api, SYNTHETIC_ORIGIN: origin, SYNTHETIC_DAYS: "100" }),
+      optionsFromEnv({
+        SYNTHETIC_API: api,
+        SYNTHETIC_ORIGIN: origin,
+        SYNTHETIC_DAYS: "100",
+      }),
     ).toThrow(/DAYS/);
+    expect(() =>
+      optionsFromEnv({
+        SYNTHETIC_API: api,
+        SYNTHETIC_ORIGIN: origin,
+        SYNTHETIC_PARTY: "0",
+      }),
+    ).toThrow(/PARTY/);
+    expect(
+      optionsFromEnv({
+        SYNTHETIC_API: api,
+        SYNTHETIC_ORIGIN: origin,
+        SYNTHETIC_PARTY: "2",
+      }).party,
+    ).toBe(2);
     expect(
       optionsFromEnv({
         SYNTHETIC_API: "http://localhost:8961",

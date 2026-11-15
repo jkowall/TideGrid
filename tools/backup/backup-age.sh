@@ -39,8 +39,9 @@ fi
 key=$(printf '%s' "$newest" | awk '{print $1}')
 when=$(printf '%s' "$newest" | awk '{print $2}')
 then_s=$(date -u -d "$when" +%s)
-age_h=$(( ($(date -u +%s) - then_s) / 3600 ))
-if [ "$age_h" -gt "$max_hours" ]; then
+age_s=$(( $(date -u +%s) - then_s ))
+age_h=$(( age_s / 3600 ))
+if [ "$age_s" -gt $(( max_hours * 3600 )) ]; then
   echo "backup-age: FAIL newest backup $(basename "$key") is ${age_h} h old (limit ${max_hours} h)"
   exit 1
 fi

@@ -64,6 +64,7 @@ jobs:
         env:
           SYNTHETIC_API: ${{ vars.SYNTHETIC_API || 'https://api.tidegrid.us' }}
           SYNTHETIC_ORIGIN: ${{ vars.SYNTHETIC_ORIGIN }}
+          SYNTHETIC_PARTY: ${{ vars.SYNTHETIC_PARTY || '1' }}
         run: pnpm --silent --filter @tidegrid/release synthetic | tee -a "$RUNNER_TEMP/report.txt"
       - name: Signals (payments not booked, background jobs, dead letters, email account)
         id: signals

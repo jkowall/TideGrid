@@ -18,19 +18,22 @@ select format('payment_events_stuck|%s|0', count(*))
 
 -- Paid, no booking (2 of 2): reconciliation asked the provider and the
 -- provider says paid, but no payment event ever arrived (a webhook that is
--- misconfigured or lost), and the payment still reads pending here.
+-- misconfigured or lost), and the payment still reads pending here. A paid
+-- reading recorded as amount_mismatch counts too.
 select format('paid_without_event|%s|0', count(*))
   from public.payment_reconciliation_exceptions x
   join public.payments p on p.tenant_id = x.tenant_id and p.id = x.payment_id
- where x.reason = 'succeeded_without_event'
+ where (x.reason = 'succeeded_without_event' or x.provider_status = 'succeeded')
    and p.state = 'pending';
 
 -- Background jobs handed to the queue but not delivered after 30 minutes.
 -- Counts only published events: no deployed API binds the outbox queue yet,
 -- so unpublished events wait by design. Events with an open dead letter are
--- left to dead_letters_open.
+-- left to dead_letters_open. Age counts from created_at: published_at moves on
+-- every resend, so a stopped consumer would keep it young. An event published
+-- long after it was written shows old until it is delivered.
 select format('outbox_stuck_minutes|%s|30',
-         coalesce(floor(extract(epoch from now() - min(e.published_at)) / 60)::int, 0))
+         coalesce(floor(extract(epoch from now() - min(e.created_at)) / 60)::int, 0))
   from public.outbox_events e
  where e.published_at is not null
    and e.delivered_at is null
