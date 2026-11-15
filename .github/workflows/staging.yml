@@ -91,6 +91,30 @@ jobs:
         run: tools/staging/resolve.sh >> "$GITHUB_ENV"
 
       # ---- deploy ----
+      - name: Preflight (token can deploy, staging is not ahead of this SHA)
+        # Both checks run before anything changes, so a run that would stop
+        # halfway stops here instead.
+        if: inputs.action == 'deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cf="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          for what in workers/scripts hyperdrive/configs; do
+            ok=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$cf/$what" | jq -r '.success // false')
+            [ "$ok" = true ] || { echo "::error::the infra-staging Cloudflare token cannot read $what; it needs the permissions in docs/runbooks/staging.md"; exit 1; }
+          done
+          (cd packages/database/migrations && ls -1 *.sql | LC_ALL=C sort) > "$RUNNER_TEMP/tree.txt"
+          exists=$(psql "$STAGING_ADMIN_URL" -XAtq -v ON_ERROR_STOP=1 -c "select to_regclass('public.schema_migrations') is not null")
+          if [ "$exists" = t ]; then
+            psql "$STAGING_ADMIN_URL" -XAtq -v ON_ERROR_STOP=1 -c "select name from public.schema_migrations" | LC_ALL=C sort > "$RUNNER_TEMP/catalog.txt"
+          else
+            : > "$RUNNER_TEMP/catalog.txt"
+          fi
+          ahead=$(LC_ALL=C comm -13 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog.txt")
+          if [ -n "$ahead" ]; then
+            echo "::error::staging has migrations this SHA does not: $(echo $ahead). Deploy a newer SHA"; exit 1
+          fi
       - name: Migrate and seed staging
         if: inputs.action == 'deploy'
         run: |
