@@ -90,7 +90,12 @@ export {
   waiverSubject,
 } from "./links.ts";
 export { bookingParticipantDirectory, defaultWaiverDeps } from "./participants.ts";
-export type { ParticipantDirectory, WaiverDeps, WaiverParticipant } from "./ports.ts";
+export type {
+  EvidenceDocumentStore,
+  ParticipantDirectory,
+  WaiverDeps,
+  WaiverParticipant,
+} from "./ports.ts";
 export {
   dueSlot,
   REMINDER_CUTOFF_HOURS,
@@ -128,6 +133,7 @@ export {
 export { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 export {
   ESIGN_CONSENT,
+  evidenceDocumentKey,
   expectedSigner,
   getSigningView,
   loadEvidenceDocument,
@@ -139,6 +145,7 @@ export {
   type SignResult,
   signWaiver,
   WaiverDocumentMismatchError,
+  WaiverDocumentMissingError,
 } from "./signing.ts";
 export {
   type BookingWaivers,

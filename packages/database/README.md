@@ -428,6 +428,10 @@ W3-G2.12-rest. `complimentary_grants` records an owner's decision to waive a sta
 - **Bookings.** `payment_id` may be null, only for source `complimentary` (`bookings_complimentary_payment`); `app.stamp_booking_source` sets that source when a grant exists, and `app.check_booking` requires the grant, an open checkout, a pending order, and the confirmed hold in place of a succeeded payment. `app.check_checkout_session` (replaced) lets such a checkout move to confirmed with no payment.
 - **Cancellations and fees.** `booking_cancellations.payment_id` may be null, exactly when `paid_amount` is 0 (`booking_cancellations_complimentary`); a complimentary booking cancels with remedy none, no refund share, and no override. `app.check_fee_assessment` requires an order total and eligible amount of 0 for one.
 
+## Waiver documents in the evidence bucket (0053)
+
+W3-OPS-4. A signed PDF lives in exactly one place: the evidence row's `document` bytes (rows written before, and local and preview without a bucket), or the private evidence bucket, named by `document_key` with its `document_size`. `waiver_evidence_document_place` holds every row to one of the two and fixes the key to `waivers/<tenant_id>/<document_sha256>.pdf`, so a row cannot name another tenant's object or other bytes. The database cannot hash bytes it does not hold, so every read hashes them again (`loadEvidenceDocument` in the [waivers README](../domain-waivers/README.md#where-the-pdf-lives)). Evidence stays append-only for every role.
+
 ## Import runs (0040)
 
 W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import: the batch id, run number, source system, mapping version (`std-csv-v0`), mode (`dry_run`), the files' SHA-256 (`content_hash`, without the manifest's `batch_mode` and `run_number` rows), whether it was clean, error and warning counts, rows per file, and declared and computed control totals (`files` and `controls`, numbers only). Nothing from the files' rows is stored. Append-only, forced row-level security, SELECT and INSERT only.
