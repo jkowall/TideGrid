@@ -224,6 +224,7 @@ Show the standard price before the pilot credit:
 - Native add-on: $4,500 setup plus $399 per month and 0.25% of net managed booking value, with a 12-month commitment.
 - Two active boats are included. Additional active boats are $75 per month. Provider, registration, domain, messaging, payment-processing, and app-store costs pass through at cost.
 - Pilot Native offer: the first three qualified pilot operators pay $2,250 Native setup, receive Managed Launch at no charge, and pay the full recurring and pass-through charges.
+- Core pilot offer: the app is optional. A qualified pilot operator that does not want it pays the full Booking Core price and $1,000 for Managed Launch, with no credit, and can add Native later.
 
 Explain that the operator remains merchant of record and that TideGrid's percentage applies to TideGrid-managed booking value, including approved externally paid bookings. Taxes, tips, complimentary value, promotional credit, and refunded value are excluded under the current plan.
 
@@ -266,7 +267,9 @@ Before the meeting:
 
 During the meeting, ask the buyer to explain the scope, fee base, full recurring price, pass-through charges, store responsibilities, and conditions in their own words. Resolve misunderstandings without negotiating a source fork, unpriced feature, guaranteed store approval, or undisclosed concession.
 
-For a qualified prospect, ask whether the authorized buyer will provide a dated written conditional commitment to enter the 12-month arrangement and pay the $2,250 setup fee after TideGrid completes paid-pilot readiness and presents a final agreement matching the reviewed scope and economics. The commitment is demand evidence, not a deposit, contract, reservation, or promise by TideGrid to build.
+The follow-up also runs for prospects that fit the [Core pilot gate](../v2/05-roadmap-validation.md#core-pilot-gate), which does not require Native-qualified prospects; skip the store-account items for them.
+
+For a qualified prospect, ask whether the authorized buyer will provide a dated written conditional commitment to enter the 12-month arrangement and pay the $2,250 setup fee (or, for a Core pilot, the $1,000 Managed Launch fee) after TideGrid completes paid-pilot readiness and presents a final agreement matching the reviewed scope and economics. The commitment is demand evidence, not a deposit, contract, reservation, or promise by TideGrid to build.
 
 ## Qualification rules
 
@@ -322,8 +325,8 @@ Verbal enthusiasm, a survey checkbox, permission to follow up, a referral, a let
 |---|---|---|
 | Complete the validation round | 12 completed interviews with 12 distinct operators across the declared segment mix | Do not make the paid-pilot-readiness or build decision from an early favorable subset |
 | Direct-first gate passes | At least five of 12 meet every direct-first discovery-profile rule | Continue evaluating the three-customer pilot |
-| Feasibility-spike gate passes | At least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up, in addition to the five direct-first operators | Run only the bounded technical and cost spikes required before the commercial follow-ups |
-| Conditional-demand gate passes | Three distinct, qualified Native pilot operators across at least two operator types provide written conditional commitments | Proceed to the separately approved paid-pilot-readiness and funding decision; do not count this as a signed sale |
+| Feasibility-spike gate passes | At least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up, in addition to the five direct-first operators. Under the Core pilot gate, the Native-qualified count is not required and the native spike is skipped | Run only the bounded technical and cost spikes required before the commercial follow-ups |
+| Conditional-demand gate passes | Three distinct, qualified Native pilot operators, or three distinct, qualified Core pilot operators, across at least two operator types provide written conditional commitments | Proceed to the separately approved paid-pilot-readiness and funding decision; do not count this as a signed sale |
 | Gate fails | Fewer than five of 12 fit, fewer than three qualified written commitments result, or all three come from one operator type | Do not form customer obligations or start the production build; change the segment, scope, offer, or price and run a new declared test |
 | OTA dependency is systematic | Five otherwise qualified prospects are blocked by OTA dependency | Evaluate a one-way intake adapter before considering full channel management |
 

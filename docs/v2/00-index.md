@@ -60,6 +60,7 @@ This package replaces the V1 product direction for new planning work. It does no
 | Managed Launch | $1,000 | None | Optional |
 | Native add-on | $4,500 | $399/month + 0.25% | 12 months |
 | Pilot Native offer | $2,250 | Full recurring price | First three qualified pilot operators only |
+| Core pilot offer | $1,000 Managed Launch, paid | Full Booking Core recurring price | First three qualified pilot operators; no phone app required |
 
 Stripe processing, app-store memberships, domains, Twilio registration, numbers, carrier fees, and message usage pass through at cost. [Commercial model](03-commercial-model.md) defines the fee base and setup boundaries.
 

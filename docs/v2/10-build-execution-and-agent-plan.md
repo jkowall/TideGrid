@@ -28,14 +28,16 @@ Before the first live use of each area (money, tenancy, recovery, security-sensi
 
 ## Goal map
 
-No production goal may cross the [Validation gate](05-roadmap-validation.md#validation-gate). Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
+No production goal may cross the [Validation gate](05-roadmap-validation.md#validation-gate) or, for Core work, the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate). Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
 
 The Gate column names the gate in [Gates](05-roadmap-validation.md#gates) that the goal feeds. The G2 series is Core live gate work and must be complete before an operator's first real booking. The G3 series is Staged Core module work; an operator may already be live while it is built, and each module is enabled per operator only after its own acceptance. The G4 series is Native pilot gate work and does not block the PWA or the Core live gate. The G0 series is pre-build evidence inside the Validation gate.
+
+Native goals are conditional. The phone app is optional, and the owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15. G0.2, G4.1 through G4.6, the Native parts of G4.7, and the O4 and O6 operational goals start only after three paid Native operators exist or the owner records a decision to fund Native from Core revenue. A Core-only cohort runs G0.1, G0.3, the G2 and G3 series, the Core parts of G4.7, G4.8, and O5. For a Core-only cohort, G4.8 compares Core packets only.
 
 | Goal | Gate | Outcome | Principal proof |
 |---|---|---|---|
 | G0.1 Domain and infrastructure spikes | Validation gate (feasibility spike) | Validate transaction seams, tenant manifest, hosting topology, and database connection behavior | Recorded spike results and accepted decisions; no production provisioning |
-| G0.2 Native factory dry run | Validation gate (feasibility spike) | Generate two branded development variants from one source without manual native edits | Reproducible manifests, builds, timing, and gap report |
+| G0.2 Native factory dry run | Validation gate (feasibility spike; not required for the Core pilot gate) | Generate two branded development variants from one source without manual native edits | Reproducible manifests, builds, timing, and gap report |
 | G0.3 Pilot harness | Validation gate (feasibility spike) | Build the standard import prototype, deterministic provider fixtures, and acceptance-test skeleton | Stage 0 technical evidence; no live customer data |
 | G2.1 Workspace foundation | Core live gate | Establish the monorepo, pinned toolchain, contract generation, migration runner, environment configuration, and CI baseline | Clean bootstrap plus repeatable build, migration, and test commands |
 | G2.2 Tenant access and audit | Core live gate | Implement tenant identity, request context, roles, row-level security, and immutable audit records | Two-tenant escape tests and role-denial tests |

@@ -222,4 +222,6 @@ Paid-pilot readiness is complete only after the interview and conditional-demand
 - each prospective pilot operator's entity, account, store, domain, content, and Stripe prerequisites are verified; and
 - the sole owner or properly activated emergency custodian can produce the current costs, contracts, provider owners, customer-export procedure, and safe-shutdown procedure without relying on a personal inbox or undocumented account.
 
+For a Core-only pilot under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate), the native-store, app-store-responsibility, and Native-insurance items leave this gate's scope, and the operator check covers the entity, website, domain email, authorized representative, content, and Stripe prerequisites without store accounts or a D-U-N-S record.
+
 Only after the paid-pilot-readiness gate may TideGrid execute the pilot agreements and accept the setup payments; the commercial conditions for starting the full production build are in the roadmap [gates](05-roadmap-validation.md#gates).

@@ -138,6 +138,12 @@ Only after the interview thresholds of the [Validation gate](05-roadmap-validati
 - verify each pilot operator's entity, D-U-N-S record, organization developer accounts, domain, approved content, and Stripe configuration; and
 - sign all three recurring agreements and collect all three settled $2,250 Pilot Native setup payments before starting the full production build.
 
+The phone app is optional. Under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate), adopted by the owner on 2026-11-15, this step changes for operators that do not want it:
+
+- the native-store responsibilities, app-store responsibility, and Native insurance items drop out of the readiness scope;
+- operator verification covers the entity, public website, domain email, authorized representative, and Stripe configuration, with no D-U-N-S record or Apple and Google organization accounts; and
+- TideGrid signs three 12-month Booking Core agreements at the full recurring price and collects three settled $1,000 Managed Launch payments before starting the full production build. A prepaid first quarter is not required.
+
 The itemized live-customer-readiness estimate remains $6,405 to $17,100, with $8,000 to $18,000 retained as a conservative authorization ceiling until quotes replace assumptions. That amount is not the price of filing the LLC.
 
 ## Immediate owner decisions
