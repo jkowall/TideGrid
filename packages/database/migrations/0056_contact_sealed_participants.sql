@@ -23,14 +23,27 @@
 
 -- 1. Participants --------------------------------------------------------------------
 
+-- Each check is added NOT VALID, so adding it never scans the table under
+-- lock: it holds every row written from now on, and 0057 validates the rows
+-- already there (new columns are null in every one of them).
 ALTER TABLE public.booking_participants
   ALTER COLUMN full_name DROP NOT NULL,
-  ADD COLUMN contact_sealed text
-    CHECK (contact_sealed ~ '^tgf1:[a-z0-9]{1,16}:[A-Za-z0-9_-]{24,}$' AND char_length(contact_sealed) <= 4000),
-  ADD COLUMN email_index text CHECK (email_index ~ '^[0-9a-f]{64}$'),
-  ADD COLUMN guardian_email_index text CHECK (guardian_email_index ~ '^[0-9a-f]{64}$');
+  ADD COLUMN contact_sealed text,
+  ADD COLUMN email_index text,
+  ADD COLUMN guardian_email_index text;
+ALTER TABLE public.booking_participants
+  ADD CONSTRAINT booking_participants_contact_sealed_format
+    CHECK (contact_sealed ~ '^tgf1:[a-z0-9]{1,16}:[A-Za-z0-9_-]{24,}$'
+           AND char_length(contact_sealed) <= 4000) NOT VALID;
+ALTER TABLE public.booking_participants
+  ADD CONSTRAINT booking_participants_email_index_format
+    CHECK (email_index ~ '^[0-9a-f]{64}$') NOT VALID;
+ALTER TABLE public.booking_participants
+  ADD CONSTRAINT booking_participants_guardian_email_index_format
+    CHECK (guardian_email_index ~ '^[0-9a-f]{64}$') NOT VALID;
 
 -- As 0009, for both shapes. coalesce: a CHECK that evaluates to NULL passes.
+-- NOT VALID as above; the rows already there kept 0009's rule, the plain shape.
 -- A sealed minor has a guardian, so a guardian's address token; a sealed
 -- adult has none.
 ALTER TABLE public.booking_participants DROP CONSTRAINT booking_participants_guardian;
@@ -43,7 +56,7 @@ ALTER TABLE public.booking_participants
     OR (contact_sealed IS NOT NULL AND full_name IS NULL AND email IS NULL
         AND guardian_name IS NULL AND guardian_email IS NULL
         AND is_minor = (guardian_email_index IS NOT NULL)),
-    false));
+    false)) NOT VALID;
 
 -- 0035's rules, with the sealed columns: a removal changes none of them, and
 -- a correction never moves a participant between plain and sealed.
@@ -139,8 +152,10 @@ GRANT UPDATE (contact_sealed, email_index, guardian_email_index)
 
 -- 2. The address token on each message -----------------------------------------------
 
+ALTER TABLE public.email_messages ADD COLUMN to_email_index text;
 ALTER TABLE public.email_messages
-  ADD COLUMN to_email_index text CHECK (to_email_index ~ '^[0-9a-f]{64}$');
+  ADD CONSTRAINT email_messages_to_email_index_format
+    CHECK (to_email_index ~ '^[0-9a-f]{64}$') NOT VALID;
 
 -- The runtime is granted no UPDATE on it: like the address, it is fixed once
 -- the message is written.
