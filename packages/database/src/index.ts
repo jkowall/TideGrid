@@ -5,6 +5,17 @@ import type { Database } from "./types.ts";
 
 export { type AuditEntry, recordAudit } from "./audit.ts";
 export {
+  bindFieldPolicy,
+  contactKeys,
+  contactKeysToOpen,
+  emailToken,
+  type FieldPolicy,
+  nameTokens,
+  nameWords,
+  openContact,
+  sealContact,
+} from "./contact-crypto.ts";
+export {
   type CleanupReport,
   type ConsumeOutcome,
   consumeDelivery,
@@ -73,11 +84,16 @@ export {
   type TenantContext,
   type TenantTransaction,
 } from "./tenant.ts";
+
+import { bindFieldPolicy, type FieldPolicy } from "./contact-crypto.ts";
+
 export type * from "./types.ts";
 
 export interface DbOptions {
   /** Maximum connections. Workers keep this small; Hyperdrive pools upstream. */
   max?: number;
+  /** How this handle's transactions get the field keyring (contact-crypto.ts). */
+  fields?: FieldPolicy;
 }
 
 /**
@@ -102,6 +118,7 @@ export interface DbOptions {
 export function createDb(connectionString: string, options: DbOptions = {}) {
   const sql = postgres(connectionString, { max: options.max ?? 5 });
   const db = new Kysely<Database>({ dialect: new PostgresJSDialect({ postgres: sql }) });
+  if (options.fields) bindFieldPolicy(db, options.fields);
   return {
     db,
     sql,

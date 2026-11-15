@@ -26,6 +26,7 @@
  * Lock order: checkout session, then booking (as cancellation, moves, and
  * party changes take them), then the booker's queued email.
  */
+
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import {
   BALANCE_REMINDER_TEMPLATE,
@@ -35,6 +36,7 @@ import {
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { enqueueBalanceReminders } from "./balance.ts";
+import { type BookerRow, bookerColumns, openBooker } from "./booker.ts";
 import {
   enqueueBalanceEmail,
   enqueueConfirmationEmail,
@@ -147,12 +149,14 @@ export async function changeBookerContact(
      where tenant_id = ${tenantId} and id = ${input.bookingId}`.execute(trx);
   const sessionId = located[0]?.checkout_session_id;
   if (!sessionId) return { kind: "not_found" };
-  const { rows: checkouts } = await sql<{ booker_name: string; booker_email: string | null }>`
-    select booker_name, booker_email from checkout_sessions
+  const { rows: checkouts } = await sql<BookerRow>`
+    select booker_name, booker_email, booker_sealed from checkout_sessions
      where tenant_id = ${tenantId} and id = ${sessionId}
        for update`.execute(trx);
-  const before = checkouts[0];
-  if (!before) throw new Error("a booking's checkout was not found");
+  const stored = checkouts[0];
+  if (!stored) throw new Error("a booking's checkout was not found");
+  const opened = await openBooker(trx, tenantId, stored);
+  const before = { booker_name: opened.name, booker_email: opened.email };
   const { rows: booked } = await sql<{ state: string; departed: boolean }>`
     select b.state, t.starts_at <= now() as departed
       from bookings b
@@ -200,8 +204,14 @@ export async function changeBookerContact(
 
   // Under the booking's lock, the trip's start, the count, and this update
   // agree with the trigger's own checks, which write the history row.
+  const next = await bookerColumns(trx, tenantId, name, email, {
+    sealed: Boolean(stored.booker_sealed),
+  });
   await sql`
-    update checkout_sessions set booker_name = ${name}, booker_email = ${email}
+    update checkout_sessions
+       set booker_name = ${next.booker_name}, booker_email = ${next.booker_email},
+           booker_sealed = ${next.booker_sealed}, booker_email_index = ${next.booker_email_index},
+           booker_name_index = ${next.booker_name_index}::text[]
      where tenant_id = ${tenantId} and id = ${sessionId}`.execute(trx);
   // The trigger names its row in this transaction's settings: never find it
   // by time, as a correction that waited on the lock would find another's.

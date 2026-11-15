@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { FieldKeyringError } from "@tidegrid/database";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import type { Context, Next } from "hono";
 import { cors } from "hono/cors";
@@ -136,6 +137,21 @@ export function createApp(deps: AppDeps = {}) {
     if (err instanceof ApiError) {
       if (err.status >= 500) c.get("log")?.error(err.code, { "error.type": err.name });
       return c.json({ error: { code: err.code, message: err.message, requestId } }, err.status);
+    }
+    // Guest contact details are sealed here and no keyring is set, or it is
+    // malformed (W3-OPS-4): refuse rather than write or read them plain.
+    if (err instanceof FieldKeyringError) {
+      c.get("log")?.error("field_keys_unavailable", { "error.type": err.name });
+      return c.json(
+        {
+          error: {
+            code: "field_keys_unavailable",
+            message: "Guest details cannot be stored or read right now",
+            requestId,
+          },
+        },
+        503,
+      );
     }
     if (err instanceof HTTPException && err.status < 500) {
       return c.json(

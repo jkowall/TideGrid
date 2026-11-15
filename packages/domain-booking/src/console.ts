@@ -35,6 +35,7 @@ import {
 } from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
 import { type BalanceView, getBookingBalance } from "./balance-read.ts";
+import { openBookers } from "./booker.ts";
 import type { ComplimentaryReason } from "./checkout.ts";
 import { iso, isoOrNull } from "./views.ts";
 
@@ -569,8 +570,10 @@ export async function listDayBookings(
                 from bookings b2
                 join scheduled_trips t2 on t2.tenant_id = b2.tenant_id and t2.id = b2.trip_id
                where b2.tenant_id = ${tenantId} and b2.id = ${query.after}::uuid)`;
-  const bookerColumn: RawBuilder<unknown> = query.withBooker ? sql`, s.booker_name` : sql``;
-  const { rows } = await sql<{
+  const bookerColumn: RawBuilder<unknown> = query.withBooker
+    ? sql`, s.booker_name, s.booker_sealed`
+    : sql``;
+  const { rows: read } = await sql<{
     id: string;
     reference: string;
     trip_id: string;
@@ -586,6 +589,7 @@ export async function listDayBookings(
     refund_state: RefundState | null;
     refund_amount: number | null;
     booker_name?: string;
+    booker_sealed?: string | null;
   }>`
     select b.id, b.reference, b.trip_id, b.state, b.source, s.channel, b.party_size,
            b.confirmed_at, p.kind as product_kind,
@@ -609,6 +613,7 @@ export async function listDayBookings(
        ${cursor}
      order by t.starts_at, t.id, b.confirmed_at, b.id
      limit ${query.limit + 1}`.execute(trx);
+  const rows = await openBookers(trx, tenantId, read);
 
   const page = rows.slice(0, query.limit);
   const lines = await partyLines(
@@ -661,9 +666,9 @@ export async function getBookingDetail(
 ): Promise<BookingDetailView | null> {
   if (!isUuid(bookingId)) return null;
   const booker: RawBuilder<unknown> = options.withBooker
-    ? sql`s.booker_name, s.booker_email, g.note as g_note,`
+    ? sql`s.booker_name, s.booker_email, s.booker_sealed, g.note as g_note,`
     : sql``;
-  const { rows } = await sql<
+  const { rows: read } = await sql<
     TimingRow & {
       id: string;
       reference: string;
@@ -693,6 +698,7 @@ export async function getBookingDetail(
       policy_version: number;
       booker_name?: string;
       booker_email?: string;
+      booker_sealed?: string | null;
       order_id: string;
       order_status: OrderStatus;
       subtotal_amount: number;
@@ -757,6 +763,7 @@ export async function getBookingDetail(
       left join tenant_memberships gm
         on gm.tenant_id = g.tenant_id and gm.user_id::text = g.actor_id
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}::uuid`.execute(trx);
+  const rows = await openBookers(trx, tenantId, read);
   const row = rows[0];
   if (!row) return null;
   const { rows: lineRows } = await sql<{
@@ -979,7 +986,7 @@ export async function getTripRoster(
      where t.tenant_id = ${tenantId} and t.id = ${tripId}::uuid`.execute(trx);
   const trip = tripRows[0];
   if (!trip) return null;
-  const { rows } = await sql<{
+  const { rows: read } = await sql<{
     id: string;
     reference: string;
     source: BookingSource;
@@ -987,11 +994,12 @@ export async function getTripRoster(
     party_size: number;
     order_id: string;
     booker_name: string;
+    booker_sealed: string | null;
     payment_state: PaymentState | "complimentary" | "imported";
     refund_state: RefundState | null;
     refund_amount: number | null;
   }>`
-    select b.id, b.reference, b.source, s.channel, b.party_size, b.order_id, s.booker_name,
+    select b.id, b.reference, b.source, s.channel, b.party_size, b.order_id, s.booker_name, s.booker_sealed,
            coalesce(pay.state, case when b.source = 'imported' then 'imported'
                                    else 'complimentary' end) as payment_state,
            r.state as refund_state, r.amount as refund_amount
@@ -1002,6 +1010,7 @@ export async function getTripRoster(
      where b.tenant_id = ${tenantId} and b.trip_id = ${tripId}::uuid
        and b.state = 'confirmed'
      order by b.confirmed_at, b.id`.execute(trx);
+  const rows = await openBookers(trx, tenantId, read);
   const lines = await partyLines(
     trx,
     tenantId,
@@ -1111,7 +1120,7 @@ export async function listExceptionsPage(
                where e2.tenant_id = ${tenantId} and e2.id = ${query.before}::uuid)`;
   const withNote = query.withNote ?? query.withBooker;
   const booker: RawBuilder<unknown> = query.withBooker
-    ? sql`, s.booker_name, s.booker_email`
+    ? sql`, s.booker_name, s.booker_email, s.booker_sealed`
     : sql``;
   const note: RawBuilder<unknown> = withNote ? sql`, res.note as resolution_note` : sql``;
   const status =
@@ -1120,7 +1129,7 @@ export async function listExceptionsPage(
       : query.status === "resolved"
         ? sql`and res.id is not null`
         : sql``;
-  const { rows } = await sql<
+  const { rows: read } = await sql<
     TripRow & {
       id: string;
       reason: FinalizationReason;
@@ -1143,6 +1152,7 @@ export async function listExceptionsPage(
       settled_at: Date | string | null;
       booker_name?: string;
       booker_email?: string;
+      booker_sealed?: string | null;
       resolution_id: string | null;
       resolution_reason: ExceptionResolutionReason | null;
       resolution_note?: string | null;
@@ -1180,6 +1190,7 @@ export async function listExceptionsPage(
        ${cursor}
      order by e.created_at desc, e.id desc
      limit ${query.limit + 1}`.execute(trx);
+  const rows = await openBookers(trx, tenantId, read);
   const page = rows.slice(0, query.limit);
   return {
     kind: "ok",

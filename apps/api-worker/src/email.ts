@@ -20,6 +20,7 @@ import type { Kysely } from "kysely";
 import type { AppDeps, AppEnv } from "./context.ts";
 import { getDb } from "./db.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
+import { contactFieldPolicy } from "./field-keys.ts";
 
 /**
  * Transactional email for this deployment. Off unless EMAIL_PROVIDER names
@@ -297,7 +298,7 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
   const startedAt = clock();
   c.executionCtx.waitUntil(
     (async () => {
-      const handle = createDb(url, { max: 1 });
+      const handle = createDb(url, { max: 1, fields: contactFieldPolicy(c.env) });
       try {
         const provider = deps.emailProvider
           ? deps.emailProvider(handle.db, env)

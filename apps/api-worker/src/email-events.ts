@@ -4,6 +4,7 @@ import { createLogger, newRequestId } from "@tidegrid/observability";
 import type { Kysely } from "kysely";
 import { DEFAULT_FROM_ADDRESS } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
+import { contactFieldPolicy } from "./field-keys.ts";
 
 /**
  * The email events consumer (W1-EMAIL-EVENTS). Cloudflare publishes Email
@@ -91,7 +92,7 @@ export async function consumeEmailEvents(
       batch.retryAll({ delaySeconds: offDelaySeconds });
       return;
     }
-    const handle = createDb(url, { max: 1 });
+    const handle = createDb(url, { max: 1, fields: contactFieldPolicy(env) });
     db = handle.db;
     end = () => handle.end();
   }

@@ -14,6 +14,7 @@
  * COMMITTED. The booker's name and email are selected only with
  * `withBooker`; otherwise the query never joins the checkout that holds them.
  */
+
 import type {
   BookingSource,
   BookingState,
@@ -23,6 +24,7 @@ import type {
   TenantTransaction,
 } from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
+import { openBookers } from "./booker.ts";
 import { iso } from "./views.ts";
 
 /** More bookings than this on one day is refused rather than cut short: totals must be whole. */
@@ -125,6 +127,7 @@ interface ReportRow {
   generated_at: Date | string;
   booker_name?: string;
   booker_email?: string;
+  booker_sealed?: string | null;
 }
 
 /** The day's control totals: each column summed over the rows. Integer cents throughout. */
@@ -171,12 +174,12 @@ export async function buildDayReport(
 ): Promise<DayReportOutcome> {
   const limit = Math.min(query.limit ?? DAY_REPORT_LIMIT, DAY_REPORT_LIMIT);
   const bookerColumns: RawBuilder<unknown> = query.withBooker
-    ? sql`, s.booker_name, s.booker_email`
+    ? sql`, s.booker_name, s.booker_email, s.booker_sealed`
     : sql``;
   const bookerJoin: RawBuilder<unknown> = query.withBooker
     ? sql`join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id`
     : sql``;
-  const { rows } = await sql<ReportRow>`
+  const { rows: read } = await sql<ReportRow>`
     select b.id, b.reference, b.state, b.source, b.confirmed_at, b.party_size,
            t.id as trip_id, p.name as product_name, p.kind as product_kind,
            bt.name as boat_name, t.time_zone,
@@ -209,7 +212,8 @@ export async function buildDayReport(
      where b.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
      order by t.starts_at, t.id, b.confirmed_at, b.id
      limit ${limit + 1}`.execute(trx);
-  if (rows.length > limit) return { kind: "too_large" };
+  if (read.length > limit) return { kind: "too_large" };
+  const rows = await openBookers(trx, tenantId, read);
 
   const reportRows = rows.map((r): DayReportRow => {
     // A complimentary booking sold nothing for money: every money column is zero.

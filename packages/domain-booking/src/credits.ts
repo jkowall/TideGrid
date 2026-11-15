@@ -91,18 +91,56 @@ function entryView(row: EntryRow): CreditEntryView {
   };
 }
 
+/**
+ * How a customer's account is keyed: the address where the booker is plain,
+ * or the address's blind index token where the booker is sealed (0055).
+ * Exactly one is set.
+ */
+export interface CreditKey {
+  email: string | null;
+  index: string | null;
+}
+
+/** The credit key of a booking's booker, as the booking stores it; null when it has no email. */
+export async function bookerCreditKey(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<CreditKey | null> {
+  const { rows } = await sql<{ booker_email: string | null; booker_email_index: string | null }>`
+    select s.booker_email, s.booker_email_index from bookings b
+      join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
+  const row = rows[0];
+  if (!row) return null;
+  if (row.booker_email_index) return { email: null, index: row.booker_email_index };
+  return row.booker_email ? { email: row.booker_email, index: null } : null;
+}
+
 /** The customer's account with this operator, created at zero when it is new. */
 export async function ensureCreditAccount(
   trx: TenantTransaction,
-  ctx: TenantContext,
-  customerEmail: string,
+  ctx: Pick<TenantContext, "tenantId">,
+  key: CreditKey,
 ): Promise<string> {
-  await sql`insert into credit_accounts (tenant_id, customer_email)
-            values (${ctx.tenantId}, ${customerEmail})
-            on conflict (tenant_id, customer_email) do nothing`.execute(trx);
+  if ((key.email === null) === (key.index === null)) {
+    throw new Error("a credit account is keyed by an email or its token, exactly one");
+  }
+  if (key.index !== null) {
+    await sql`insert into credit_accounts (tenant_id, customer_email_index)
+              values (${ctx.tenantId}, ${key.index})
+              on conflict (tenant_id, customer_email_index) do nothing`.execute(trx);
+  } else {
+    await sql`insert into credit_accounts (tenant_id, customer_email)
+              values (${ctx.tenantId}, ${key.email})
+              on conflict (tenant_id, customer_email) do nothing`.execute(trx);
+  }
   const { rows } = await sql<{ id: string }>`
     select id from credit_accounts
-     where tenant_id = ${ctx.tenantId} and customer_email = ${customerEmail}`.execute(trx);
+     where tenant_id = ${ctx.tenantId}
+       and ${key.index !== null ? sql`customer_email_index = ${key.index}` : sql`customer_email = ${key.email}`}`.execute(
+    trx,
+  );
   const id = rows[0]?.id;
   if (!id) throw new Error("a credit account was not found after it was ensured");
   return id;
@@ -118,7 +156,8 @@ export async function creditAccountForBooking(
   const { rows } = await sql<{ id: string }>`
     select a.id from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
-      join credit_accounts a on a.tenant_id = s.tenant_id and a.customer_email = s.booker_email
+      join credit_accounts a on a.tenant_id = s.tenant_id
+       and (a.customer_email = s.booker_email or a.customer_email_index = s.booker_email_index)
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
   const id = rows[0]?.id;
   return id ? getCreditAccount(trx, tenantId, id) : null;
@@ -157,7 +196,8 @@ export async function creditBalanceForBooking(
   const { rows } = await sql<{ balance: number }>`
     select a.balance from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
-      join credit_accounts a on a.tenant_id = s.tenant_id and a.customer_email = s.booker_email
+      join credit_accounts a on a.tenant_id = s.tenant_id
+       and (a.customer_email = s.booker_email or a.customer_email_index = s.booker_email_index)
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
   return rows[0]?.balance ?? 0;
 }

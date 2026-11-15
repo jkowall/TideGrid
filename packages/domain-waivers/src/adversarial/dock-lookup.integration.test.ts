@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  bindFieldPolicy,
   inTenantTransaction,
   newFieldKeyringSecret,
   parseFieldKeyring,
@@ -236,6 +237,24 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
     // It reads the party, sealed signature and all, and gets as far as the
     // send's own wait: the first email went out moments ago.
     expect(resent).toMatchObject({ kind: "refused", reason: "too_soon" });
+  }, 120_000);
+
+  it("matches a sealed booker's last name (W3-OPS-4, 0055)", async () => {
+    const keyring = await parseFieldKeyring(newFieldKeyringSecret());
+    bindFieldPolicy(world.db, { keyring: async () => keyring, required: true });
+    try {
+      const { booked } = await todaysBooking("SealedBooker");
+      const [row] = await world.admin<{ booker_name: string | null; booker_sealed: string | null }[]>`
+        select s.booker_name, s.booker_sealed from public.bookings b
+          join public.checkout_sessions s on s.id = b.checkout_session_id
+         where b.id = ${booked.bookingId}`;
+      expect(row?.booker_name).toBeNull();
+      expect(row?.booker_sealed).toMatch(/^tgf1:/);
+      expect((await lookUp(A.id, booked.reference, "booker")).kind).toBe("matched");
+      expect((await lookUp(A.id, booked.reference, "Bookerr")).kind).toBe("not_found");
+    } finally {
+      bindFieldPolicy(world.db, null);
+    }
   }, 120_000);
 
   it("starts a signing on the guest's phone, and the evidence records the dock lookup", async () => {

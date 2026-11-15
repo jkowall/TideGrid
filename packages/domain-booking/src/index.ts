@@ -26,6 +26,16 @@ export {
   type BalanceView,
   getBookingBalance,
 } from "./balance-read.ts";
+// The booker's name and email, plain or sealed (W3-OPS-4, 0055).
+export {
+  type Booker,
+  type BookerColumns,
+  type BookerRow,
+  bookerColumns,
+  customerKey,
+  openBooker,
+  openBookers,
+} from "./booker.ts";
 // Correcting the booker's own name and email (W3-G2.11-rest, 0037).
 export {
   type BookerContactChangeRecord,
@@ -95,9 +105,11 @@ export {
 export {
   adjustCredit,
   appendCreditEntry,
+  bookerCreditKey,
   type CreditAccountView,
   type CreditCommandResult,
   type CreditEntryView,
+  type CreditKey,
   CreditKeyReusedError,
   creditAccountForBooking,
   creditBalanceForBooking,

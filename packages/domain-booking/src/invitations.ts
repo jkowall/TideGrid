@@ -25,6 +25,7 @@
  * Lock order: the booking row, then the participant at the place, both FOR NO
  * KEY UPDATE, as `putParticipant` takes them.
  */
+
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import {
   type EmailBlock,
@@ -35,6 +36,7 @@ import {
   resolveGuestSession,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
+import { openBookers } from "./booker.ts";
 import { importedEmailHeld } from "./emails.ts";
 import { clean, firstName, singleLine, tripWhen } from "./format.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
@@ -186,6 +188,7 @@ interface InvitationTrip {
   meeting_point: string | null;
   meeting_instructions: string | null;
   booker_name: string;
+  booker_sealed?: string | null;
 }
 
 async function invitationTrip(
@@ -195,14 +198,14 @@ async function invitationTrip(
 ): Promise<InvitationTrip> {
   const { rows } = await sql<InvitationTrip>`
     select p.name as product_name, t.starts_at, t.time_zone, l.name as location_name,
-           l.meeting_point, l.meeting_instructions, s.booker_name
+           l.meeting_point, l.meeting_instructions, s.booker_name, s.booker_sealed
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
       join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
       join locations l on l.tenant_id = p.tenant_id and l.id = p.location_id
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
-  const row = rows[0];
+  const [row] = await openBookers(trx, tenantId, rows);
   if (!row) throw new Error("an invitation's booking was not found");
   return row;
 }
@@ -389,12 +392,13 @@ export async function getParticipantProfile(
     meeting_point: string | null;
     meeting_instructions: string | null;
     booker_name: string;
+    booker_sealed: string | null;
   }>`
     select pt.id, pt.position, pt.full_name, pt.is_minor, pt.email, pt.guardian_name,
            pt.guardian_email, pt.created_at, pt.updated_at,
            b.state, p.name as product_name, t.starts_at, t.time_zone,
            t.starts_at <= now() as departed,
-           l.name as location_name, l.meeting_point, l.meeting_instructions, s.booker_name
+           l.name as location_name, l.meeting_point, l.meeting_instructions, s.booker_name, s.booker_sealed
       from booking_participants pt
       join bookings b on b.tenant_id = pt.tenant_id and b.id = pt.booking_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -409,7 +413,7 @@ export async function getParticipantProfile(
        and g.revoked_at is null and g.expires_at > now()
      where pt.tenant_id = ${tenantId} and pt.booking_id = ${session.bookingId}
        and pt.id = ${session.participantId} and pt.removed_at is null`.execute(trx);
-  const row = rows[0];
+  const [row] = await openBookers(trx, tenantId, rows);
   if (!row) return null;
   return {
     participant: {

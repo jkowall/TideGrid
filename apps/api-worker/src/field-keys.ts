@@ -1,4 +1,4 @@
-import { type FieldKeyring, parseFieldKeyring } from "@tidegrid/database";
+import { type FieldKeyring, type FieldPolicy, parseFieldKeyring } from "@tidegrid/database";
 import type { Bindings } from "./env.ts";
 
 /**
@@ -30,4 +30,13 @@ export async function fieldKeyring(env: Bindings): Promise<FieldKeyring | undefi
  */
 export function sealingRequired(env: Bindings): boolean {
   return env.ENVIRONMENT === "staging" || env.ENVIRONMENT === "production";
+}
+
+/**
+ * The field policy a database handle carries (W3-OPS-4, 0055): guest contact
+ * details are sealed wherever the keyring is set, and staging and production
+ * refuse to write one plain (packages/database/src/contact-crypto.ts).
+ */
+export function contactFieldPolicy(env: Bindings): FieldPolicy {
+  return { keyring: () => fieldKeyring(env), required: sealingRequired(env) };
 }

@@ -35,7 +35,12 @@ import {
 import { releaseHold } from "@tidegrid/domain-inventory";
 import { cancelMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
-import { appendCreditEntry, creditBalanceForBooking, ensureCreditAccount } from "./credits.ts";
+import {
+  appendCreditEntry,
+  bookerCreditKey,
+  creditBalanceForBooking,
+  ensureCreditAccount,
+} from "./credits.ts";
 import {
   BALANCE_LINK_EMAIL,
   BALANCE_REMINDER_EMAIL,
@@ -674,12 +679,9 @@ async function applyCancellation(
       .execute();
   }
   if (creditEntryId) {
-    const { rows: booker } = await sql<{ booker_email: string }>`
-      select booker_email from checkout_sessions
-       where tenant_id = ${tenantId} and id = ${row.checkout_session_id}`.execute(trx);
-    const email = booker[0]?.booker_email;
-    if (!email) throw new Error("a booking's checkout has no booker email");
-    const accountId = await ensureCreditAccount(trx, ctx, email);
+    const key = await bookerCreditKey(trx, tenantId, bookingId);
+    if (!key) throw new Error("a booking's checkout has no booker email");
+    const accountId = await ensureCreditAccount(trx, ctx, key);
     const issued = await appendCreditEntry(trx, ctx, {
       id: creditEntryId,
       accountId,

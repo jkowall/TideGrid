@@ -794,7 +794,14 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // Checkout and confirmation (G2.7): only the columns that carry a
         // transition; triggers stamp the times and check the evidence.
         // The booker's name and email (0037), in one checked shape only.
-        checkout_sessions: ["booker_email", "booker_name", "state"],
+        checkout_sessions: [
+          "booker_email",
+          "booker_email_index",
+          "booker_name",
+          "booker_name_index",
+          "booker_sealed",
+          "state",
+        ],
         orders: ["status"],
         payments: [
           "checked_at",

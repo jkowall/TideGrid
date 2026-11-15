@@ -3,6 +3,7 @@ import { createDb } from "@tidegrid/database";
 import { parseHostname } from "@tidegrid/domain-hostnames";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { type Bindings, databaseUrl } from "../env.ts";
+import { contactFieldPolicy } from "../field-keys.ts";
 import { hostPolicy, loadPublicExperience, type PublicExperience } from "../public-tenant.ts";
 import { TtlProjection } from "./projection.ts";
 
@@ -299,7 +300,7 @@ export type GuestHostLookup = (env: Bindings, host: string) => Promise<PublicExp
 const lookupPublicExperience: GuestHostLookup = async (env, host) => {
   const url = databaseUrl(env);
   if (!url) throw new Error("database_unconfigured");
-  const handle = createDb(url, { max: 1 });
+  const handle = createDb(url, { max: 1, fields: contactFieldPolicy(env) });
   try {
     return await loadPublicExperience(handle.db, host);
   } finally {

@@ -15,14 +15,19 @@ import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import {
   type BookingSource,
   type BookingState,
+  contactKeys,
+  emailToken,
   isUuid,
+  nameTokens,
   type PaymentState,
   type ProductKind,
   type RefundState,
+  nameWords as sealedNameWords,
   type TenantTransaction,
   type TripSalesState,
 } from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
+import { openBookers } from "./booker.ts";
 import { iso } from "./views.ts";
 
 export type BookingSearchField = "reference" | "booker_name" | "booker_email";
@@ -132,6 +137,7 @@ interface SearchRow {
   refund_amount: number | null;
   booker_name?: string;
   booker_email?: string;
+  booker_sealed?: string | null;
 }
 
 /**
@@ -139,7 +145,12 @@ interface SearchRow {
  * may see guests, a name matches when it holds every word, and an email when
  * it holds the text, ignoring case. Nothing the role may match is `false`.
  */
-function textCondition(q: string, withBooker: boolean): RawBuilder<unknown> {
+async function textCondition(
+  trx: TenantTransaction,
+  tenantId: string,
+  q: string,
+  withBooker: boolean,
+): Promise<RawBuilder<unknown>> {
   const parts: RawBuilder<unknown>[] = [];
   const prefix = referencePrefix(q);
   if (prefix) parts.push(sql`b.reference like ${`${prefix}%`}`);
@@ -150,6 +161,20 @@ function textCondition(q: string, withBooker: boolean): RawBuilder<unknown> {
     if (words.length > 0) parts.push(sql`(${sql.join(words, sql` and `)})`);
     const email = emailFragment(q);
     if (email) parts.push(sql`s.booker_email like ${`%${escapeLike(email)}%`} escape '\\'`);
+    // A sealed booker (0055) matches by its tokens: every whole word of the
+    // name, or the whole email address. Never part of a word or an address.
+    const keyring = await contactKeys(trx);
+    if (keyring) {
+      const sealedWords = sealedNameWords(q).slice(0, 6);
+      if (sealedWords.length > 0) {
+        const tokens = await Promise.all(
+          sealedWords.map((w) => nameTokens(keyring, tenantId, w).then((t) => t[0] as string)),
+        );
+        parts.push(sql`s.booker_name_index @> ${tokens}::text[]`);
+      }
+      if (email)
+        parts.push(sql`s.booker_email_index = ${await emailToken(keyring, tenantId, email)}`);
+    }
   }
   return parts.length === 0 ? sql`false` : sql`(${sql.join(parts, sql` or `)})`;
 }
@@ -190,7 +215,8 @@ export async function searchBookings(
   const conditions: RawBuilder<unknown>[] = [sql`b.tenant_id = ${tenantId}`];
   if (query.from !== undefined) conditions.push(sql`t.local_date >= ${query.from}::date`);
   if (query.to !== undefined) conditions.push(sql`t.local_date <= ${query.to}::date`);
-  if (query.q !== undefined) conditions.push(textCondition(query.q, withBooker));
+  if (query.q !== undefined)
+    conditions.push(await textCondition(trx, tenantId, query.q, withBooker));
   // A parameter, never text: the route has checked it is a source. On the booking itself,
   // so finance's search still never joins the checkout.
   if (query.source !== undefined) conditions.push(sql`b.source = ${query.source}`);
@@ -223,7 +249,7 @@ export async function searchBookings(
                where b2.tenant_id = ${tenantId} and b2.id = ${after}::uuid)`;
   // The details' own scope reads the booker through its own alias, s1.
   const bookerColumns: RawBuilder<unknown> = withBooker
-    ? sql`, s1.booker_name, s1.booker_email`
+    ? sql`, s1.booker_name, s1.booker_email, s1.booker_sealed`
     : sql``;
   const detailBookerJoin: RawBuilder<unknown> = withBooker
     ? sql`join checkout_sessions s1 on s1.tenant_id = pb.tenant_id and s1.id = pb.checkout_session_id`
@@ -292,7 +318,11 @@ export async function searchBookings(
 
   const head = statementRows[0];
   if (after !== undefined && head?.cursor_found !== true) return { kind: "cursor_invalid" };
-  const rows = statementRows.filter((r): r is StatementRow & SearchRow => typeof r.id === "string");
+  const rows = await openBookers(
+    trx,
+    tenantId,
+    statementRows.filter((r): r is StatementRow & SearchRow => typeof r.id === "string"),
+  );
   const page = rows.slice(0, query.limit);
   return {
     kind: "ok",
