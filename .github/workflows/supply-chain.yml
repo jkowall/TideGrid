@@ -1,0 +1,80 @@
+name: supply-chain
+# Added 2026-11-15 (W3-OPS-3). The hosting plan's pull-request checks ask for
+# an SBOM, a dependency-license report, a known-vulnerability check, a build
+# manifest, and validated configuration. Kept out of ci.yml so the four jobs
+# nov1's CI gate requires are unchanged. No secrets.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly, so a new advisory against an unchanged lockfile is still seen.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: SBOM, licenses, vulnerabilities, build manifest
+        # Fails on a license outside config/supply-chain-policy.json or a high
+        # or critical advisory without a dated exception there.
+        run: |
+          out="$RUNNER_TEMP/supply-chain"
+          status=0
+          node scripts/supply-chain.mjs "$out" || status=$?
+          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: supply-chain-${{ github.sha }}
+          path: ${{ runner.temp }}/supply-chain
+          if-no-files-found: ignore
+          retention-days: 90
+
+  workflows:
+    # Lints every workflow file: syntax, expressions, job wiring, and inputs
+    # used in scripts. Pinned binary, checked against its published hash.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      ACTIONLINT_VERSION: 1.7.7
+      ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
+          tar xzf actionlint.tgz actionlint
+          cd "$GITHUB_WORKSPACE"
+          # Shell scripts are reviewed by hand; shellcheck's style findings
+          # are not a gate here.
+          "$RUNNER_TEMP/actionlint" -color -shellcheck= -pyflakes=
