@@ -45,7 +45,12 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   let ownerB: string;
   let day = "";
   let laterDays: [string, string] = ["", ""];
-  /** Two days out: still worth a trip reminder, and a day of its own. */
+  /**
+   * Six days out, on a day of its own: a 10:00 UTC trip there is always more
+   * than two days off, so its reminder (24 hours before, at least 24 hours
+   * from now) is always worth queuing. Two days out stopped being worth it
+   * after 10:00 UTC each day.
+   */
   let soon = "";
   let exportedAt = "";
 
@@ -222,7 +227,7 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
       { day: string; day2: string; day4: string; day5: string; exported: string }[]
     >`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
-             ((now() at time zone 'UTC')::date + 2)::text as day2,
+             ((now() at time zone 'UTC')::date + 6)::text as day2,
              ((now() at time zone 'UTC')::date + 4)::text as day4,
              ((now() at time zone 'UTC')::date + 5)::text as day5,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
