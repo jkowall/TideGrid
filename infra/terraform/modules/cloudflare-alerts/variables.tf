@@ -41,9 +41,10 @@ variable "policies" {
   }))
   default = {
     certificates = {
-      alert_type  = "universal_ssl_event_type"
-      description = "Edge certificate issuance, renewal, or validation problems on TideGrid zones."
-      zone_scoped = true
+      alert_type = "universal_ssl_event_type"
+      # The Universal SSL alert takes no filters; Cloudflare refuses a zones
+      # filter on it (error 17007), so it covers every zone in the account.
+      description = "Edge certificate issuance, renewal, or validation problems."
     }
     cloudflare-incidents = {
       alert_type      = "incident_alert"
