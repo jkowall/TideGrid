@@ -244,7 +244,9 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
     bindFieldPolicy(world.db, { keyring: async () => keyring, required: true });
     try {
       const { booked } = await todaysBooking("SealedBooker");
-      const [row] = await world.admin<{ booker_name: string | null; booker_sealed: string | null }[]>`
+      const [row] = await world.admin<
+        { booker_name: string | null; booker_sealed: string | null }[]
+      >`
         select s.booker_name, s.booker_sealed from public.bookings b
           join public.checkout_sessions s on s.id = b.checkout_session_id
          where b.id = ${booked.bookingId}`;
