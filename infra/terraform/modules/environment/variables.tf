@@ -193,7 +193,7 @@ variable "edge_security" {
   EOT
   type = object({
     manage_zone_rules = bool
-    api_host          = string
+    api_host          = optional(string)
     rate_limits = optional(map(object({
       expression          = string
       requests_per_period = number

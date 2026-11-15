@@ -25,8 +25,14 @@ variable "manage_zone_rules" {
 }
 
 variable "api_host" {
-  description = "The API's hostname, for example api.tidegrid.us."
+  description = "The API's hostname, for example api.tidegrid.us. Needed only when manage_zone_rules is true."
   type        = string
+  default     = null
+
+  validation {
+    condition     = !var.manage_zone_rules || try(length(var.api_host) > 0, false)
+    error_message = "api_host is required when manage_zone_rules is true."
+  }
 }
 
 variable "rate_limits" {

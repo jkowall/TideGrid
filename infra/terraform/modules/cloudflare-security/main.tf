@@ -5,7 +5,7 @@
 # it reaches a Worker at all.
 
 locals {
-  api = "http.host eq \"${var.api_host}\""
+  api = "http.host eq \"${coalesce(var.api_host, "unset.invalid")}\""
 }
 
 resource "cloudflare_ruleset" "firewall" {
