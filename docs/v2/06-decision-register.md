@@ -8,6 +8,22 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: W2-COREPILOT-DOCS, the adopted Core pilot gate applied across the documents (coordinator readings pending owner confirmation)
+
+The [Core pilot gate](#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted) that the owner adopted earlier on 2026-11-15 ("yes, the app is optional") is now written into the documents its proposal listed: the [roadmap gates](05-roadmap-validation.md#core-pilot-gate) (its new canonical home), the product strategy, the commercial model (a Core pilot offer row and [Core pilot offer controls](03-commercial-model.md#core-pilot-offer-controls)), the paid-pilot readiness gate, Step 6 of the pre-customer plan, the goal map, the root README, the customer brief and deck, the pricing worksheet, the operator validation guide, the evidence register template, the product scope, the hosting plan, and the index. Stage 0 now links the two drafts the owner approved the same day and the CSV import draft approved on 2026-11-13. This decision table's Pilot scope, Pilot cohort evidence, and Pilot-customer subsidy rows gain the Core route, and a Core pilot offer row is added.
+
+The proposal did not settle some details. These are coordinator readings until the owner says otherwise:
+
+- **R1.** The Core pilot offer is limited to the first three qualified pilot operators, like the Pilot Native offer.
+- **R2.** The Core pilot conditions copy the Pilot Native ones where they fit: full extra-boat, pass-through, and custom-work charges; approved content and clean data on schedule; one operator, brand, and location; no source fork.
+- **R3.** A prospect uses one pilot offer, not both.
+- **R4.** For a Core-only cohort, Stage 4 is only the launch rehearsal, with no native work.
+- **R5.** The $1,000 Managed Launch payment becomes non-refundable once the operator passes verification, as the Native payment does.
+
+Open for the owner: which Native setup price applies if a Core pilot operator adds Native later (the full price or the $2,250 pilot price), and whether a mixed cohort (for example two Native and one Core operator) can pass either gate. The documents stay silent on both.
+
+The customer deck was edited in place (slide 8 gains "Possible future pilot without the app", and the footers read November 2026) and its PDF regenerated. The shared Drive copy of the deck PDF is unchanged; replacing it is an owner step.
+
 ### 2026-11-15: owner answers on waiver evidence retention, the two Stage 0 drafts, the Core pilot gate, and the parked live tests (owner decisions; coordinator defaults where noted)
 
 On 2026-11-15 at 02:46 UTC the owner answered four open items in one message, numbered as they were asked: "1. check florida law 2. look good 3. yes, the app is optional 4. tested them, fine for now."
@@ -1614,7 +1630,7 @@ Run-time decisions, each asked as a go/no-go prompt at its step with the default
 
 ### Proposed, not adopted: Core pilot gate (drafted 2026-09-19)
 
-**Update, 2026-11-15:** adopted by the owner; see the [2026-11-15 owner answers](#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted). The heading keeps its old wording so links still work.
+**Update, 2026-11-15:** adopted by the owner; see the [2026-11-15 owner answers](#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted). The heading keeps its old wording so links still work. The documents listed at the end were updated on 2026-11-15 (W2-COREPILOT-DOCS).
 
 **Status:** Draft for sole-owner review. This entry has no authority until the owner moves it into the dated decision log above and updates the documents listed at the end. Until then, the [Validation gate](05-roadmap-validation.md#validation-gate) and the three-paid-Native rule remain the only path to a production build.
 
@@ -1650,14 +1666,15 @@ Run-time decisions, each asked as a go/no-go prompt at its step with the default
 | Boat model | Boats are inventory inside the operator experience; no per-boat codebase or binary |
 | Customer surfaces | Custom-domain PWA for all operators; guest-facing iOS and Android pair as a paid add-on |
 | Staff surface | Shared TideGrid operator web console |
-| Pilot scope | Three named gates replace the single pre-pilot rule: the Core live gate before an operator's first real booking; Staged Core modules that an operator may enable after each passes its own acceptance, all required for pilot completion; and the Native pilot gate for the operator-owned apps, which does not block the PWA. Each pilot operator passes all three before Stage 5 counts as complete. Scope detail stays in [`02-product-scope.md`](02-product-scope.md); the gate definitions live in [Gates](05-roadmap-validation.md#gates) |
+| Pilot scope | Three named gates replace the single pre-pilot rule: the Core live gate before an operator's first real booking; Staged Core modules that an operator may enable after each passes its own acceptance, all required for pilot completion; and the Native pilot gate for the operator-owned apps, which does not block the PWA. Each pilot operator passes the Core live gate and every staged module's acceptance, and the Native pilot gate if it bought the Native add-on, before Stage 5 counts as complete. Scope detail stays in [`02-product-scope.md`](02-product-scope.md); the gate definitions live in [Gates](05-roadmap-validation.md#gates) |
 | Core price | $149/month plus 1.5% of net managed booking value; 12 months; $3,000 annual minimum |
 | Core setup | $0 for self-setup; optional $1,000 Managed Launch |
 | Managed Launch boundary | Target four or fewer TideGrid hours for catalog and policy configuration, standard CSV import, waiver setup, staff training, and cutover assistance. Eight hours is the pilot ceiling; before customer four, narrow or reprice the service if the pilot median exceeds four hours |
 | Native price | $4,500 setup plus $399/month and 0.25%; 12 months |
 | Pilot Native offer | The first three qualified pilot operators pay $2,250 native setup, receive Managed Launch at no charge, and pay full recurring and provider fees. Pilot status creates no ownership or control right; see the Ownership and control row |
-| Pilot cohort evidence | Require three qualified conditional commitments and then three paid operators across at least two operator types so one narrow workflow does not validate the shared product by itself |
-| Pilot-customer subsidy | Apply the per-operator delivery limits and $500 Native direct-cost ceiling first. Treat $25,000 across all three pilot operators as an absolute stop, not an authorized budget, and track shared product development separately |
+| Core pilot offer | Adopted 2026-11-15. The phone app is optional: up to three qualified pilot operators sign 12-month Booking Core at the full price and pay $1,000 for Managed Launch, with no credit and no prepaid quarter required. Defined in the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) and the [commercial model](03-commercial-model.md#core-pilot-offer-controls) |
+| Pilot cohort evidence | Require three qualified conditional commitments and then three paid operators across at least two operator types so one narrow workflow does not validate the shared product by itself. The paid operators are Native pilot operators or, under the Core pilot gate, Core pilot operators |
+| Pilot-customer subsidy | Apply the per-operator delivery limits and $500 Native direct-cost ceiling first. Treat $25,000 across all three Native pilot operators, or $5,000 across all Core-only pilots, as an absolute stop, not an authorized budget, and track shared product development separately |
 | Native setup bands | Keep $4,500 only at 22 or fewer median customer-specific hours and below $500 direct cost; charge $7,500 for 23 to 40 hours; quote at least $10,000 or discontinue above 40 hours |
 | Native price evidence | Treat the $4,500 and 22-hour band as provisional until one public-store launch is reproduced for a second operator without source edits |
 | Native customer target | The pilot may test Native at $25,000 or more in average monthly managed booking value when repeat usage creates a specific learning case. Standard sales target operators near $50,000 or more until measured service cost proves the 75% recurring-margin gate at lower volume |
