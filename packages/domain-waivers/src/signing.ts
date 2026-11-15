@@ -453,8 +453,10 @@ export async function signWaiver(
   // With a bucket, the PDF is written before the evidence row, under its
   // content address, so a committed row always has its object. A signature
   // that then rolls back leaves an object no row names, which the bucket's
-  // lock keeps until its retention ends; it holds nothing a committed row
-  // does not, and the same signature retried writes the same key.
+  // lock keeps until its retention ends. Each attempt's PDF carries its own
+  // evidence id and time, so a retry writes a new object and each failed
+  // attempt leaves one orphan; the object inventory finds them by comparing
+  // keys with evidence rows.
   const stored = deps.documents
     ? { key: evidenceDocumentKey(ctx.tenantId, documentSha256), size: document.byteLength }
     : null;

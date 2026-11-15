@@ -63,8 +63,14 @@ export function r2EvidenceStore(bucket: R2Bucket): EvidenceDocumentStore {
       if (existing) {
         // Content-addressed, so an object already there should hold these
         // very bytes (a retried signature). Check rather than trust the name.
-        const held = await bucket.get(key);
-        if (held && (await sha256Of(new Uint8Array(await held.arrayBuffer()))) === sha256) return;
+        let heldHash: string | null;
+        try {
+          const held = await bucket.get(key);
+          heldHash = held ? await sha256Of(new Uint8Array(await held.arrayBuffer())) : null;
+        } catch {
+          throw storageUnavailable();
+        }
+        if (heldHash === sha256) return;
         throw new Error(`evidence object ${key} holds other bytes than its name`);
       }
       try {
