@@ -113,6 +113,7 @@ jobs:
             "create policy drill_leak_w on public.boats for insert with check (true)"
             "revoke select on public.boats from tidegrid_app"
             "alter table public.boats disable row level security"
+            "revoke update (state) on public.checkout_sessions from tidegrid_app"
             "create policy drill_leak_cols on public.staff_users for select using (true)"
             "create role drill_plain nologin; do \$\$ declare f regprocedure; begin select p.oid::regprocedure into f from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'app') and p.prosecdef limit 1; execute format('alter function %s owner to drill_plain', f); end \$\$"
           )
