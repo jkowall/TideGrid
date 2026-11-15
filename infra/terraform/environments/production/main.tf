@@ -21,6 +21,9 @@ module "environment" {
 
   waiver_evidence_lock_days = var.waiver_evidence_lock_days
   backup_expire_days        = 35
+  # Recent backups cannot be deleted, even by the token that writes them
+  # (W3-OPS-6, coordinator default pending the owner).
+  backup_lock_days = 7
 
   hyperdrive          = var.hyperdrive
   hyperdrive_password = var.hyperdrive_password
@@ -30,6 +33,27 @@ module "environment" {
   alert_webhook_destination_ids = var.alert_webhook_destination_ids
 
   custom_hostname_fallback = var.custom_hostname_fallback
+
+  edge_security = {
+    manage_zone_rules = true
+    api_host          = var.api_host
+    rate_limits = {
+      # Free rate limiting rules match on the URI path only (Pro adds the
+      # host, Business the method), with a 10 second period and block. So
+      # this one rule counts every request to the public API paths, reads
+      # included, with room for a page that loads several at once. With the
+      # API on its own host in production's own zone, the path is enough. On
+      # Business or above, narrow it to writes and lengthen the block (see
+      # the module's description).
+      public_api = {
+        expression          = "starts_with(http.request.uri.path, \"/v1/public/\")"
+        requests_per_period = 60
+        period              = 10
+        mitigation_timeout  = 10
+      }
+    }
+    turnstile_domains = var.turnstile_domains
+  }
 
   neon_project_id = var.neon_project_id
   neon_project = {

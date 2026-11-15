@@ -2,7 +2,7 @@
 
 **Status:** Proposed pilot baseline; provisional until the [Validation gate](05-roadmap-validation.md#validation-gate) passes
 
-This document turns the V2 architecture direction into a build and operating plan. It does not authorize production work or provider spending. TideGrid should provision production infrastructure only after three pilot operators pay the native setup fee and sign the recurring agreement in [`05-roadmap-validation.md`](05-roadmap-validation.md).
+This document turns the V2 architecture direction into a build and operating plan. It does not authorize production work or provider spending. TideGrid should provision production infrastructure only after three pilot operators pay the native setup fee and sign the recurring agreement in [`05-roadmap-validation.md`](05-roadmap-validation.md), or after the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) passes with three paid Core pilot operators.
 
 The current V2 design defines the tenant boundary, transactional authority, and shared native model. It does not yet provide an implementation contract. TideGrid must test the choices in this document during Stage 0 and record accepted changes in [`06-decision-register.md`](06-decision-register.md) or a new ADR. [`10-build-execution-and-agent-plan.md`](10-build-execution-and-agent-plan.md) defines how to divide that work into bounded goals and subagent assignments.
 
@@ -330,6 +330,8 @@ TideGrid must approve and rehearse these runbooks before the first live booking:
 - native build, internal testing, store submission, review response, phased release, and urgent compatibility block.
 
 Each runbook names an owner, approval threshold, safe first action, customer-impact check, evidence location, rollback or recovery limit, communication owner, and closure test.
+
+Drafts of all ten, not yet approved or rehearsed, are in [docs/runbooks/operations](../runbooks/operations/README.md) (2026-11-15, W3-OPS-7).
 
 ## Required build and release artifacts
 

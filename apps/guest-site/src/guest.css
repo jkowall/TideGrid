@@ -646,3 +646,17 @@
 .guest-state__footer p {
   margin: 0 auto;
 }
+
+/* The Turnstile check (W3-OPS-4, src/humanCheck.ts). Empty for most guests;
+   when Cloudflare wants an interaction, its box shows here, above the page. */
+.human-check {
+  position: fixed;
+  inset: auto 0 max(16px, env(safe-area-inset-bottom, 0px)) 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 50;
+}
+.human-check > * {
+  pointer-events: auto;
+}

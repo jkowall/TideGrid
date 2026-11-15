@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   ManageWaiverResendRequest,
   ManageWaiversResponse,
+  TurnstileToken,
   WaiverLinkRedeemRequest,
   WaiverLinkRenewalRequest,
   WaiverLinkRenewalResponse,
@@ -35,7 +36,9 @@ import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
+import { sealingRequired } from "../field-keys.ts";
 import { withPublicTenant } from "../public-tenant.ts";
+import { requireHuman, TURNSTILE_HEADER } from "../turnstile.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
 import { errorBody } from "./responses.ts";
 
@@ -243,7 +246,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(openRoute, async (c) => {
     const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const opened = await redeemWaiverToken(trx, ctx, { token });
       if (opened.kind !== "opened") throw linkRefusal(opened);
@@ -263,12 +266,16 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       "The answer is the same 202 whatever happened, including an unknown token, so it says nothing about an address, a booking, or whether a link exists. Rate limited per client address and operator like other public commands.",
     ].join("\n\n"),
     request: {
+      headers: z.object({ [TURNSTILE_HEADER]: TurnstileToken }),
       body: {
         required: true,
         content: { "application/json": { schema: WaiverLinkRenewalRequest } },
       },
     },
     responses: {
+      403: errorBody(
+        "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed)",
+      ),
       202: {
         content: { "application/json": { schema: WaiverLinkRenewalResponse } },
         description: "Taken; a new link is emailed when the waiver still needs one",
@@ -276,12 +283,14 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       400: errorBody("Request did not match the contract"),
       404: errorBody("No operator at this address"),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+      503: errorBody("The Turnstile check could not be made (human_check_unavailable); try again"),
     },
   });
 
   app.openapi(renewalRoute, async (c) => {
     const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    await requireHuman(c, deps, "waiver_renewal");
+    const wdeps = await waiverDeps(deps, c.env);
     let renewedFor: string | null = null;
     await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const renewed = await renewWaiverLink(trx, ctx, wdeps, { token });
@@ -335,7 +344,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(readRoute, async (c) => {
     const secret = sessionSecret(c);
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, {}, async (trx, ctx) => {
       const session = await openSession(trx, ctx.tenantId, secret);
       return { waiver: signingJson(await getSigningView(trx, ctx.tenantId, wdeps, session)) };
@@ -376,13 +385,25 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         description: "Something to fix first, field by field (signature_invalid)",
       },
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+      503: errorBody(
+        "The evidence bucket could not store the signed PDF, or the bucket or the field keys are not configured where they are required; nothing was signed (waiver_storage_unavailable)",
+      ),
     },
   });
 
   app.openapi(signRoute, async (c) => {
     const secret = sessionSecret(c);
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
+    if (sealingRequired(c.env) && !wdeps.fields) {
+      // Staging and production never record a signature's personal fields
+      // in plain columns (W3-OPS-4).
+      throw new ApiError(
+        503,
+        "waiver_storage_unavailable",
+        "Signed waivers cannot be stored right now; nothing was signed. Try again shortly.",
+      );
+    }
     const meta = signingMeta(c);
     let outcome:
       | { kind: "signed" | "already_signed"; waiver: WaiverSigning }
@@ -494,7 +515,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     let doc: { reference: string; bytes: Uint8Array<ArrayBuffer> } | undefined;
     await withPublicTenant(c, {}, async (trx, ctx) => {
       const session = await openSession(trx, ctx.tenantId, secret);
-      const found = await loadEvidenceDocument(trx, ctx.tenantId, { requestId: session.requestId });
+      const found = await loadEvidenceDocument(
+        trx,
+        ctx.tenantId,
+        { requestId: session.requestId },
+        (await waiverDeps(deps, c.env)).documents,
+      );
       if (!found) {
         throw new ApiError(404, "waiver_document_not_found", "This waiver is not signed yet");
       }
@@ -536,7 +562,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           "This booking session has ended; open your link again",
         );
       }
-      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      const found = await listGuestBookingWaivers(
+        trx,
+        ctx.tenantId,
+        session.bookingId,
+        (await waiverDeps(deps, c.env)).fields,
+      );
       if (!found) {
         throw new ApiError(404, "booking_not_found", "No such booking at this address");
       }
@@ -582,7 +613,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   app.openapi(resendRoute, async (c) => {
     const token = bookingSessionToken(c);
     const { position, name } = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
     // A refusal writes nothing, so the transaction commits empty and the
     // answer is built outside it.
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
@@ -619,7 +650,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           "This booking session has ended; open your link again",
         );
       }
-      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      const found = await listGuestBookingWaivers(
+        trx,
+        ctx.tenantId,
+        session.bookingId,
+        (await waiverDeps(deps, c.env)).fields,
+      );
       if (!found) throw new Error("a booking that just sent a waiver was not found");
       return { tenantId: ctx.tenantId, waivers: guestWaiversJson(found) } as JsonObject;
     });

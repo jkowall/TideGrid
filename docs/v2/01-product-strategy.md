@@ -10,7 +10,7 @@ The operator works from a shared TideGrid web console. TideGrid maintains one pr
 
 TideGrid remains exploratory. Paid validation determines whether the company should fund the build.
 
-The order before any production build is fixed: approve the validation materials, form the bare-bones Florida LLC (administrative preparation, not demand evidence), meet the 12-interview thresholds of the [Validation gate](05-roadmap-validation.md#validation-gate), obtain three written conditional commitments across at least two operator types, complete paid-pilot readiness, and collect three setup payments; [Gates](05-roadmap-validation.md#gates) holds the sequence, and the [pre-customer plan](11-pre-customer-formation-and-validation.md) and [company formation plan](07-company-formation-and-costs.md) hold the steps and cost boundaries.
+The order before any production build is fixed: approve the validation materials, form the bare-bones Florida LLC (administrative preparation, not demand evidence), meet the 12-interview thresholds of the [Validation gate](05-roadmap-validation.md#validation-gate), obtain three written conditional commitments across at least two operator types, complete paid-pilot readiness, and collect three setup payments. The payments are either three $2,250 Native setup payments under the Validation gate or, since the owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15, three $1,000 Managed Launch payments with 12-month Booking Core agreements and no phone app; [Gates](05-roadmap-validation.md#gates) holds the sequence, and the [pre-customer plan](11-pre-customer-formation-and-validation.md) and [company formation plan](07-company-formation-and-costs.md) hold the steps and cost boundaries.
 
 ## First customer segment
 
@@ -47,7 +47,7 @@ When plans change, I want one reliable source for the trip status, balance, refu
 
 TideGrid gives the operator a direct branded channel and connects the commercial records that most affect a booking. The product reduces duplicate entry and makes incomplete payment, waiver, participant, equipment, and customer-notification work visible.
 
-The native add-on serves operators that can earn repeat use. Saved profiles, upcoming trips, waiver status, trip card balances, booking management, and push notifications give the app utility beyond a wrapped website.
+The native add-on is optional. A pilot can start without it, and an operator can add it later. It serves operators that can earn repeat use. Saved profiles, upcoming trips, waiver status, trip card balances, booking management, and push notifications give the app utility beyond a wrapped website.
 
 TideGrid competes through maritime-specific workflow fit and hands-on launch service. It does not compete on the lowest booking fee or an OTA distribution network.
 
@@ -92,7 +92,7 @@ The pilot excludes:
 
 ## Go-to-market
 
-Use owner-led sales and a paid pilot-customer program. The first three native customers receive a visible pilot credit on setup work while paying the full recurring price and provider costs.
+Use owner-led sales and a paid pilot-customer program with two routes. Under the Pilot Native offer, the first three native customers receive a visible pilot credit on setup work while paying the full recurring price and provider costs. Under the Core pilot offer, an operator that does not want the phone app signs 12-month Booking Core at the full price and pays $1,000 for Managed Launch, with no credit.
 
 Use the customer-facing [validation brief](../customer/tidegrid-validation-brief.md) only after the past-behavior section of the internal [operator validation guide](../customer/operator-validation-guide.md). The brief is a research artifact, not a released-product claim or binding offer.
 
@@ -116,7 +116,7 @@ Track these supporting measures:
 - total owner operating hours, support backlog, and remaining monthly capacity;
 - native install, active-use, and booking-management rates.
 
-**Current proof target:** three paid Native pilot operators across at least two operator types, each passing the [Core live gate](05-roadmap-validation.md#core-live-gate) and the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), with every Staged Core module accepted, before the pilot cohort review counts as complete.
+**Current proof target:** three paid pilot operators across at least two operator types, each passing the [Core live gate](05-roadmap-validation.md#core-live-gate) with every Staged Core module accepted, before the pilot cohort review counts as complete. Operators that bought the Native add-on also pass the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate). A Core-only cohort is a complete pilot; it gives no evidence about Native pricing.
 
 ## Capabilities TideGrid must build
 
@@ -135,7 +135,7 @@ These advantages only matter if operators switch, guests return through the bran
 
 ## Load-bearing hypotheses
 
-1. Three operators will pay the pilot setup fee and full recurring price before TideGrid builds the production system.
+1. Three operators will pay the pilot setup fee (Native setup, or Managed Launch under the Core pilot gate) and full recurring price before TideGrid builds the production system.
 2. At least five of 12 interviewed operators receive 80% or more of bookings through direct channels.
 3. Operators accept a fee on all TideGrid-managed booking value, including externally paid bookings.
 4. Native apps increase repeat booking or reduce customer-service work enough to justify their price.

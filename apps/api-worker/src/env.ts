@@ -117,6 +117,33 @@ export interface Bindings {
    * Unset means the cron does not publish and events wait in PostgreSQL.
    */
   OUTBOX_QUEUE?: Queue;
+  /**
+   * The private evidence bucket for signed waiver PDFs, with object lock
+   * (W3-OPS-4, src/evidence-store.ts). Only env.test declares it today; the
+   * owner creates the staging and production buckets and adds the binding.
+   * Staging and production refuse to sign without it; local and preview keep
+   * the PDF in the evidence row.
+   */
+  WAIVER_EVIDENCE?: R2Bucket;
+  /**
+   * Secret, never a var, never in the repository (W3-OPS-4,
+   * src/field-keys.ts). The field keyring: JSON with the current key id, the
+   * AES-256 keys by id, and the blind index key. Staging and production refuse
+   * to sign a waiver without it; local and preview write plain fields.
+   */
+  FIELD_ENCRYPTION_KEYS?: string;
+  /**
+   * Secret, never a var (W3-OPS-4, src/turnstile.ts). The guest Turnstile
+   * widget's secret key. With it, opening a checkout, asking for a new waiver
+   * link, and the dock lookup need a confirmed Turnstile token. Staging and
+   * production refuse those requests without it; local and preview skip it.
+   */
+  TURNSTILE_SECRET_KEY?: string;
+  /**
+   * The widget's public site key, returned to the guest site in the tenant
+   * bootstrap so it can draw the check. Not a secret.
+   */
+  TURNSTILE_SITE_KEY?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

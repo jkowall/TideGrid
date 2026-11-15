@@ -1,4 +1,5 @@
 import { type PublicBrand, PublicExperienceResponse } from "@tidegrid/contracts";
+import { setHumanCheck } from "./humanCheck.ts";
 import { followExperience } from "./sw/register.ts";
 
 /**
@@ -70,7 +71,8 @@ export async function loadExperience(
     if (!res.ok) return { kind: "failed" };
     const parsed = PublicExperienceResponse.safeParse(body);
     if (!parsed.success) return { kind: "failed" };
-    const { tenant, brand } = parsed.data;
+    const { tenant, brand, humanCheck } = parsed.data;
+    setHumanCheck(humanCheck);
     if (!brand) return { kind: "not-ready", tenant };
     const ready: Experience = { kind: "ready", tenant, brand };
     followExperience(ready);

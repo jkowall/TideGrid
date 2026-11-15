@@ -34,7 +34,7 @@ import { FAKE_MINIMUM_AMOUNT } from "@tidegrid/domain-payments";
 import type postgres from "postgres";
 import { createWaiverHooks } from "./hooks.ts";
 import { defaultWaiverDeps } from "./participants.ts";
-import type { WaiverDeps } from "./ports.ts";
+import type { EvidenceDocumentStore, WaiverDeps } from "./ports.ts";
 import { createWaiverTemplate, publishWaiverTemplateVersion } from "./templates.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -94,6 +94,45 @@ export async function createWaiverFixture(
 
 export function fixtureDeps(): WaiverDeps {
   return defaultWaiverDeps;
+}
+
+/**
+ * An evidence bucket in memory (W3-OPS-4), keeping what R2 with object lock
+ * would: an object once written is never replaced by other bytes. `failNext`
+ * makes the next put throw, as an unreachable bucket would; `objects` lets a
+ * test change or drop bytes under the store, as storage damage would.
+ */
+export class MemoryEvidenceStore implements EvidenceDocumentStore {
+  readonly objects = new Map<string, Uint8Array>();
+  puts = 0;
+  failNext = false;
+
+  async put(key: string, bytes: Uint8Array, sha256: string): Promise<void> {
+    this.puts += 1;
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("evidence bucket unavailable");
+    }
+    const { createHash } = await import("node:crypto");
+    if (createHash("sha256").update(bytes).digest("hex") !== sha256) {
+      throw new Error("the bytes do not match their SHA-256");
+    }
+    const held = this.objects.get(key);
+    if (held && Buffer.compare(Buffer.from(held), Buffer.from(bytes)) !== 0) {
+      throw new Error("a locked object cannot be replaced");
+    }
+    if (!held) this.objects.set(key, new Uint8Array(bytes));
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    const held = this.objects.get(key);
+    return held ? new Uint8Array(held) : null;
+  }
+}
+
+/** The fixture's deps with an evidence bucket in memory. */
+export function fixtureDepsWithStore(store: EvidenceDocumentStore): WaiverDeps {
+  return { ...defaultWaiverDeps, documents: store };
 }
 
 /** The waiver hooks, as the API wires them. */

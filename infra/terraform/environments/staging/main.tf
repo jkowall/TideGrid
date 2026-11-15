@@ -35,15 +35,23 @@ module "environment" {
   # No operator domain is attached before the pilot.
   custom_hostname_fallback = null
 
+  # Staging shares the preview's zone, so its firewall stays as it is: no
+  # zone rules, and a Turnstile widget only once turnstile_domains is set.
+  edge_security = {
+    manage_zone_rules = false
+    turnstile_domains = var.turnstile_domains
+  }
+
   # The nonproduction project already exists, so it is referenced by id.
   neon_project_id = var.neon_project_id
   neon_branches = {
     staging = {
       protected = false
       compute = {
-        min_cu                  = 0.25
-        max_cu                  = 1
-        suspend_timeout_seconds = 300
+        min_cu = 0.25
+        max_cu = 1
+        # Scale to zero after Neon's default 5 minutes. The Free plan refuses
+        # an explicit suspend_timeout_seconds (HTTP 412).
       }
     }
   }

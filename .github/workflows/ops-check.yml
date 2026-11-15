@@ -1,0 +1,153 @@
+name: ops-check
+# The hourly ops check (hosting plan, observability; goal W3-OPS-5). See
+# docs/runbooks/ops-checks.md.
+#
+# No paging and no long-term logs for the paid pilots (owner, 2026-11-08), so
+# an alert is a GitHub issue labeled ops-alert: GitHub emails the repository's
+# watchers when it opens, and this workflow closes it when a later run is
+# clean. Off until the owner turns it on: the schedule runs only when the
+# repository variable OPS_CHECK_ENABLED is "true".
+run-name: ops check
+
+on:
+  schedule:
+    # Hourly at 41 minutes past. The API's own cron already wakes the
+    # database every 15 minutes, so this adds no Neon compute to speak of.
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-check
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || vars.OPS_CHECK_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Reuses the backup environment (main only, no reviewer) for the owner
+    # database URL and the backup bucket's token, which can also write: the
+    # same credentials as the daily backup, now used hourly. A narrower role
+    # and a read-only token are a follow-up (register, W3-OPS-5 D4). Repository variables:
+    # SYNTHETIC_API (https://api.tidegrid.us) and SYNTHETIC_ORIGIN (the
+    # synthetic tenant's booking site origin).
+    environment: backup
+    outputs:
+      synthetic: ${{ steps.synthetic.outcome }}
+      signals: ${{ steps.signals.outcome }}
+      backup: ${{ steps.backup.outcome }}
+      report: ${{ steps.report.outputs.text }}
+    steps:
+      - name: Runs from main only
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run this from main"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Synthetic booking (hold seats, then cancel)
+        id: synthetic
+        continue-on-error: true
+        if: vars.SYNTHETIC_ORIGIN != ''
+        env:
+          SYNTHETIC_API: ${{ vars.SYNTHETIC_API || 'https://api.tidegrid.us' }}
+          SYNTHETIC_ORIGIN: ${{ vars.SYNTHETIC_ORIGIN }}
+          SYNTHETIC_PARTY: ${{ vars.SYNTHETIC_PARTY || '1' }}
+        run: pnpm --silent --filter @tidegrid/release synthetic | tee -a "$RUNNER_TEMP/report.txt"
+      - name: Signals (payments not booked, background jobs, dead letters, email account)
+        id: signals
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "signals: ALERT not_configured BACKUP_DATABASE_URL" | tee -a "$RUNNER_TEMP/report.txt"; exit 1; }
+          . tools/backup/lib.sh
+          tg_mask_url "$DATABASE_URL"
+          tools/ops/check-signals.sh | tee -a "$RUNNER_TEMP/report.txt"
+      - name: Backup age
+        id: backup
+        continue-on-error: true
+        if: vars.BACKUP_ENABLED == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: tools/backup/backup-age.sh --max-hours 26 | tee -a "$RUNNER_TEMP/report.txt"
+      - name: Keep the report
+        id: report
+        if: always()
+        run: |
+          touch "$RUNNER_TEMP/report.txt"
+          { echo '```'; cat "$RUNNER_TEMP/report.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # Counts, ages, step timings, and the newest backup's file name
+          # (label and time) only; it can reach a public issue.
+          {
+            echo "text<<REPORT_END"
+            grep -E '^(signals|backup-age|\{)' "$RUNNER_TEMP/report.txt" | cut -c1-300 || true
+            echo "REPORT_END"
+          } >> "$GITHUB_OUTPUT"
+
+  alert:
+    # Opens, updates, or closes the one ops-alert issue. Runs after the check
+    # whatever happened, and holds no database or bucket secret.
+    needs: check
+    if: always() && needs.check.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update, or close the ops-alert issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CHECK: ${{ needs.check.result }}
+          SYNTHETIC: ${{ needs.check.outputs.synthetic }}
+          SIGNALS: ${{ needs.check.outputs.signals }}
+          BACKUP: ${{ needs.check.outputs.backup }}
+          REPORT: ${{ needs.check.outputs.report }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          failed=""
+          [ "$CHECK" = success ] || failed="$failed check-job"
+          [ "$SYNTHETIC" = failure ] && failed="$failed synthetic-booking"
+          [ "$SIGNALS" = failure ] && failed="$failed signals"
+          [ "$BACKUP" = failure ] && failed="$failed backup-age"
+          # What exactly fails: the failed parts plus each alerting signal and
+          # the synthetic step, so a new failure under an open issue still
+          # gets its own comment (and email).
+          detail=$(printf '%s\n' "$REPORT" | grep -oE 'ALERT [a-z_]+|"failedStep":"[a-z]+"|backup-age: FAIL' | sort -u | tr '\n' ' ' | sed 's/ $//' || true)
+          summary="Failed:${failed:- none}${detail:+ ($detail)}"
+          gh label create ops-alert --color B60205 --description "Opened and closed by the ops-check workflow" 2>/dev/null || true
+          open=$(gh issue list --label ops-alert --state open --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n\nRun: %s\n\n```\n%s\n```\n\nWhat each line means: docs/runbooks/ops-checks.md\n' "$summary" "$RUN_URL" "$REPORT")
+          if [ -n "$failed" ]; then
+            if [ -z "$open" ]; then
+              gh issue create --label ops-alert --title "Ops check failed:$failed" --body "$body"
+            else
+              # One comment per change in what fails, not one an hour.
+              # Only this workflow's own posts start with "Failed:"; a person's
+              # reply in between must not count as a change.
+              last=$(gh issue view "$open" --json body,comments --jq '([.body] + [.comments[].body]) | map(select(startswith("Failed:"))) | last // "" | split("\n") | .[0]')
+              if [ "$last" != "$summary" ]; then
+                gh issue comment "$open" --body "$body"
+                gh issue edit "$open" --title "Ops check failed:$failed"
+              fi
+            fi
+            exit 1
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "Clean again: $RUN_URL"
+          fi

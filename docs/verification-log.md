@@ -2,6 +2,17 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-15
+
+### Security before real data (W3-OPS-4), built November 15, 2026
+
+Goal branch `claude/project-thread-kgaejw`, PRs 174 (migration `0053_waiver_document_storage.sql`), 175 (migration `0054_waiver_evidence_sealed.sql`), 180 (Turnstile, no migration), and the Terraform and register PR. Synthetic data only; no provider call, no deploy, no apply.
+
+- **Built.** Signed waiver PDFs go to a private R2 bucket under a key fixed by the tenant and hash, written before the evidence row commits and hashed again on every read. Personal fields in new evidence rows are sealed with AES-256-GCM under a keyring held as a Worker secret, bound to tenant, table, and column. A Turnstile token is required on checkout, waiver link renewal, and the dock lookup. Terraform plans for the API's firewall rules, an edge rate limit on public writes, and the guest Turnstile widget.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `evidence-storage` and `evidence-sealed` adversarial suites in `domain-waivers` (wrong key or size refused by the database, a changed or missing object refused on read, sealed rows hold no personal text, another tenant's place does not open them, plain rows still read), a sealed party through the dock lookup, dock signing, and booker resend; `turnstile.integration.test.ts` and the waiver API suite in `api-worker` (409 of 409); `field-crypto` unit tests. `terraform fmt` passes; `validate` runs in CI because the registry is not reachable from the build machine.
+- **Review.** The automated pull request reviews found that a read failure on an existing bucket object answered 500 (now 503), that retries can leave orphan locked PDFs (now documented, see D6), that the dock and booker resend read sealed evidence without the keys (fixed, with a test), and that a tamper test could pass by chance (fixed).
+- **Still open.** Coordinator defaults D1 to D6 await the owner, and so does the choice on sealing every guest contact detail.
+
 ## 2026-11-14
 
 ### Tax rates in the console (W3-G2.5-TAX follow-up), built November 14, 2026

@@ -625,7 +625,16 @@ export const DEFAULT_EXPORT_ROW_LIMIT = 10_000;
 export async function exportTenantData(
   trx: TenantTransaction,
   tenant: { id: string; slug: string; name: string },
-  options: { rowLimit?: number; now?: Date } = {},
+  options: {
+    rowLimit?: number;
+    now?: Date;
+    /**
+     * Opens a row's sealed fields (W3-OPS-4), so the export holds what the
+     * operator recorded rather than ciphertext. Runs before the excluded
+     * columns are dropped.
+     */
+    openRow?: (table: string, row: JsonObject) => Promise<JsonObject>;
+  } = {},
 ): Promise<TenantExportResponse> {
   const rowLimit = options.rowLimit ?? DEFAULT_EXPORT_ROW_LIMIT;
   const sections: TenantExportResponse["sections"] = {};
@@ -660,8 +669,12 @@ export async function exportTenantData(
        where t.tenant_id = ${tenant.id}
        limit ${rowLimit + 1}
     `.execute(trx);
+    const kept = rows.slice(0, rowLimit).map((r) => r.row);
+    const opened = options.openRow
+      ? await Promise.all(kept.map((row) => options.openRow?.(table, row) ?? row))
+      : kept;
     sections[table] = {
-      rows: rows.slice(0, rowLimit).map((r) => exportRow(r.row)),
+      rows: opened.map((row) => exportRow(row)),
       truncated: rows.length > rowLimit,
     };
   }

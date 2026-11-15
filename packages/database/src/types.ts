@@ -1242,13 +1242,16 @@ export interface WaiverEvidenceTable {
   template_version: Fixed<number>;
   content_sha256: Fixed<string>;
   rendering_version: Fixed<number>;
-  participant_name: Fixed<string>;
+  /** Null on a sealed row (0054): it is inside personal_sealed. */
+  participant_name: FixedDefault<string | null>;
   participant_minor: Fixed<boolean>;
   signer_role: Fixed<WaiverSignerRole>;
-  signer_name: Fixed<string>;
+  /** Null on a sealed row (0054). */
+  signer_name: FixedDefault<string | null>;
   guardian_relationship: FixedDefault<GuardianRelationship | null>;
   signature_method: Fixed<"typed_name">;
-  signature_text: Fixed<string>;
+  /** Null on a sealed row (0054). */
+  signature_text: FixedDefault<string | null>;
   acknowledgments: Fixed<string[]>;
   consent_version: Fixed<string>;
   consent_text: Fixed<string>;
@@ -1262,8 +1265,20 @@ export interface WaiverEvidenceTable {
   signed_at: Stamped;
   source_ip: FixedDefault<string | null>;
   user_agent: FixedDefault<string | null>;
-  document: Fixed<Uint8Array>;
+  /** The PDF in the row; null when it lives in the evidence bucket (0053). */
+  document: FixedDefault<Uint8Array | null>;
   document_sha256: Fixed<string>;
+  /** The evidence bucket's key, waivers/<tenant>/<sha256>.pdf, or null for a PDF in the row (0053). */
+  document_key: FixedDefault<string | null>;
+  /** The PDF's size in bytes when it lives in the bucket (0053). */
+  document_size: FixedDefault<number | null>;
+  /**
+   * The personal fields sealed by the application (0054): names, typed
+   * signature, address, client address, device. Null on older rows.
+   */
+  personal_sealed: FixedDefault<string | null>;
+  /** On a sealed email-link row, the email whose link the signer followed (0054). */
+  link_message_id: FixedDefault<string | null>;
 }
 
 /**

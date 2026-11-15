@@ -9,9 +9,12 @@
  */
 import {
   enqueueOutbox,
+  type FieldKeyring,
   type GuardianRelationship,
   isUuid,
+  openField,
   recordAudit,
+  sealField,
   type TenantContext,
   type TenantTransaction,
   type WaiverAccessMethod,
@@ -25,7 +28,7 @@ import { sha256Hex } from "./content.ts";
 import { lockRequest } from "./delivery.ts";
 import { cleanLine, comparableName, formatInstant } from "./format.ts";
 import { closeRequestAccess } from "./links.ts";
-import type { WaiverDeps, WaiverParticipant } from "./ports.ts";
+import type { EvidenceDocumentStore, WaiverDeps, WaiverParticipant } from "./ports.ts";
 import { maskEmail, RENDERING_VERSION, renderWaiverPdf } from "./render.ts";
 import { loadTemplateVersion, type TemplateVersionText } from "./templates.ts";
 
@@ -86,10 +89,49 @@ async function findParticipant(
   return all.find((p) => p.id === participantId) ?? null;
 }
 
+/** The personal fields a sealed evidence row holds (0054), as the API seals them. */
+export interface SealedEvidenceFields {
+  participantName: string;
+  signerName: string;
+  signatureText: string;
+  recipientEmail: string | null;
+  sourceIp: string | null;
+  userAgent: string | null;
+}
+
+/** Where evidence's sealed fields live; the place binds the ciphertext to it. */
+const SEALED_PLACE = "waiver_evidence.personal_sealed";
+
+/** A sealed evidence row read with no keyring to open it. */
+export class WaiverEvidenceSealedError extends Error {
+  constructor(readonly evidenceId: string) {
+    super(`waiver evidence ${evidenceId} is sealed and no field keyring is configured`);
+    this.name = "WaiverEvidenceSealedError";
+  }
+}
+
+/**
+ * Opens a sealed evidence row's personal fields. Throws
+ * WaiverEvidenceSealedError with no keyring, and FieldDecryptError when the
+ * key is gone or the value was moved or damaged.
+ */
+export async function openEvidenceFields(
+  fields: FieldKeyring | undefined,
+  tenantId: string,
+  evidenceId: string,
+  sealed: string,
+): Promise<SealedEvidenceFields> {
+  if (!fields) throw new WaiverEvidenceSealedError(evidenceId);
+  return JSON.parse(
+    await openField(fields, { tenantId, field: SEALED_PLACE }, sealed),
+  ) as SealedEvidenceFields;
+}
+
 async function loadSigned(
   trx: TenantTransaction,
   tenantId: string,
   requestId: string,
+  fields: FieldKeyring | undefined,
 ): Promise<
   (SignedSummary & { sessionId: string; participantName: string; minor: boolean }) | null
 > {
@@ -105,20 +147,24 @@ async function loadSigned(
       "document_sha256",
       "participant_name",
       "participant_minor",
+      "personal_sealed",
     ])
     .where("tenant_id", "=", tenantId)
     .where("request_id", "=", requestId)
     .executeTakeFirst();
   if (!row) return null;
+  const opened = row.personal_sealed
+    ? await openEvidenceFields(fields, tenantId, row.id, row.personal_sealed)
+    : null;
   return {
     evidenceId: row.id,
     sessionId: row.session_id,
     signedAt: row.signed_at,
-    signerName: row.signer_name,
+    signerName: opened?.signerName ?? row.signer_name ?? "",
     signerRole: row.signer_role,
     relationship: row.guardian_relationship,
     documentSha256: row.document_sha256,
-    participantName: row.participant_name,
+    participantName: opened?.participantName ?? row.participant_name ?? "",
     minor: row.participant_minor,
   };
 }
@@ -173,7 +219,7 @@ export async function getSigningView(
     request.template_version,
   );
   if (!version) throw new Error("a request's version was not found");
-  const signed = await loadSigned(trx, tenantId, session.requestId);
+  const signed = await loadSigned(trx, tenantId, session.requestId, deps.fields);
   let participant: SigningView["participant"] = null;
   if (signed) {
     participant = {
@@ -337,7 +383,7 @@ export async function signWaiver(
   const request = await lockRequest(trx, ctx.tenantId, session.requestId);
   if (!request) throw new Error("a session's request was not found");
   if (request.state === "signed") {
-    const signed = await loadSigned(trx, ctx.tenantId, request.id);
+    const signed = await loadSigned(trx, ctx.tenantId, request.id, deps.fields);
     if (signed?.sessionId === session.id) {
       return {
         kind: "already_signed",
@@ -386,11 +432,13 @@ export async function signWaiver(
   const { rows } = await sql<{
     now: Date;
     recipient_email: string | null;
+    message_id: string | null;
     mode: "staff_device" | "participant_qr" | "dock_lookup" | null;
     staff_id: string | null;
     staff_name: string | null;
   }>`
     select now() as now, coalesce(d.recipient_email, w.recipient_email) as recipient_email,
+           l.message_id,
            a.mode, a.actor_id as staff_id,
            m.display_name as staff_name
       from waiver_signing_sessions s
@@ -450,6 +498,37 @@ export async function signWaiver(
     userAgent: meta.userAgent,
   });
   const documentSha256 = await sha256Hex(document);
+  // With a bucket, the PDF is written before the evidence row, under its
+  // content address, so a committed row always has its object. A signature
+  // that then rolls back leaves an object no row names, which the bucket's
+  // lock keeps until its retention ends. Each attempt's PDF carries its own
+  // evidence id and time, so a retry writes a new object and each failed
+  // attempt leaves one orphan; the object inventory finds them by comparing
+  // keys with evidence rows.
+  const stored = deps.documents
+    ? { key: evidenceDocumentKey(ctx.tenantId, documentSha256), size: document.byteLength }
+    : null;
+  if (deps.documents && stored) {
+    await deps.documents.put(stored.key, document, documentSha256);
+  }
+  // With a field keyring (W3-OPS-4, 0054), the personal fields go into one
+  // sealed value and the plain columns stay null; an email link's row names
+  // the link's email instead of the address, which the database checks.
+  const recipientEmail = dock || assisted ? null : facts.recipient_email;
+  const sealed = deps.fields
+    ? await sealField(
+        deps.fields,
+        { tenantId: ctx.tenantId, field: SEALED_PLACE },
+        JSON.stringify({
+          participantName: participant.name,
+          signerName,
+          signatureText: signature,
+          recipientEmail,
+          sourceIp: meta.sourceIp,
+          userAgent: meta.userAgent,
+        } satisfies SealedEvidenceFields),
+      )
+    : null;
   await trx
     .insertInto("waiver_evidence")
     .values({
@@ -463,24 +542,28 @@ export async function signWaiver(
       template_version: version.version,
       content_sha256: version.contentSha256,
       rendering_version: RENDERING_VERSION,
-      participant_name: participant.name,
+      participant_name: sealed ? null : participant.name,
       participant_minor: participant.minor,
       signer_role: request.required_signer,
-      signer_name: signerName,
+      signer_name: sealed ? null : signerName,
       guardian_relationship: relationship,
       signature_method: "typed_name",
-      signature_text: signature,
+      signature_text: sealed ? null : signature,
       acknowledgments: version.acknowledgments,
       consent_version: ESIGN_CONSENT.version,
       consent_text: ESIGN_CONSENT.text,
       access_method: dock ? "dock_lookup" : assisted ? assisted.mode : "email_link",
-      recipient_email: dock || assisted ? null : facts.recipient_email,
+      recipient_email: sealed ? null : recipientEmail,
       match_method: dock ? "booking_lookup" : assisted ? "staff_confirmed" : "signer_confirmed",
       assisted_by: assisted ? assisted.staffId : null,
-      source_ip: meta.sourceIp,
-      user_agent: meta.userAgent,
-      document,
+      source_ip: sealed ? null : meta.sourceIp,
+      user_agent: sealed ? null : meta.userAgent,
+      personal_sealed: sealed,
+      link_message_id: sealed && recipientEmail !== null ? facts.message_id : null,
+      document: stored ? null : document,
       document_sha256: documentSha256,
+      document_key: stored?.key ?? null,
+      document_size: stored?.size ?? null,
     })
     .execute();
   await sql`
@@ -557,14 +640,34 @@ export class WaiverDocumentMismatchError extends Error {
 }
 
 /**
+ * A PDF the evidence row places in the bucket that the bucket does not have,
+ * or no bucket configured to read it from. It is never papered over; the API
+ * answers 500 and logs this error's name.
+ */
+export class WaiverDocumentMissingError extends Error {
+  constructor(readonly evidenceId: string) {
+    super(`waiver evidence ${evidenceId}: the stored PDF is missing from the evidence bucket`);
+    this.name = "WaiverDocumentMissingError";
+  }
+}
+
+/** The bucket key of a signed PDF: fixed by the tenant and the bytes' SHA-256 (0053). */
+export function evidenceDocumentKey(tenantId: string, sha256: string): string {
+  return `waivers/${tenantId}/${sha256}.pdf`;
+}
+
+/**
  * The signed PDF, for the session that signed it or for staff; null otherwise.
- * The bytes are hashed again on every read and must match the recorded
- * SHA-256, or it throws WaiverDocumentMismatchError.
+ * It comes from the evidence row or, when the row names a key, from the
+ * evidence bucket. The bytes are hashed again on every read and must match
+ * the recorded SHA-256, or it throws WaiverDocumentMismatchError; a key with
+ * no object (or no bucket to read) throws WaiverDocumentMissingError.
  */
 export async function loadEvidenceDocument(
   trx: TenantTransaction,
   tenantId: string,
   filter: { requestId: string } | { evidenceId: string },
+  documents?: EvidenceDocumentStore,
 ): Promise<{
   evidenceId: string;
   bookingReference: string;
@@ -576,10 +679,11 @@ export async function loadEvidenceDocument(
   const { rows } = await sql<{
     id: string;
     reference: string;
-    document: Uint8Array;
+    document: Uint8Array | null;
+    document_key: string | null;
     document_sha256: string;
   }>`
-    select e.id, b.reference, e.document, e.document_sha256
+    select e.id, b.reference, e.document, e.document_key, e.document_sha256
       from waiver_evidence e
       join bookings b on b.tenant_id = e.tenant_id and b.id = e.booking_id
      where e.tenant_id = ${tenantId}
@@ -588,7 +692,13 @@ export async function loadEvidenceDocument(
   );
   const row = rows[0];
   if (!row) return null;
-  const document = new Uint8Array(row.document);
+  let bytes: Uint8Array | null = row.document;
+  if (row.document_key !== null) {
+    bytes = documents ? await documents.get(row.document_key) : null;
+    if (!bytes) throw new WaiverDocumentMissingError(row.id);
+  }
+  if (!bytes) throw new WaiverDocumentMissingError(row.id);
+  const document = new Uint8Array(bytes);
   if ((await sha256Hex(document)) !== row.document_sha256) {
     throw new WaiverDocumentMismatchError(row.id);
   }

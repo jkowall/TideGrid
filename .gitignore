@@ -15,3 +15,7 @@ worker-configuration.d.ts
 
 # Agent worktrees created by Claude Code
 .claude/worktrees/
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -253,9 +253,9 @@ test("loads Stripe.js only from its own address, under the page's policy", async
   expect(scripts.filter((url) => !url.startsWith(hostUrl(host, "/")))).toEqual([STRIPE_JS]);
   const csp = response?.headers()["content-security-policy"];
   expect(csp).toContain(
-    "script-src 'self' https://static.cloudflareinsights.com https://js.stripe.com",
+    "script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://js.stripe.com",
   );
   expect(csp).toContain(
-    "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
   );
 });

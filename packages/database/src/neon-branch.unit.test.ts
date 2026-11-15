@@ -58,6 +58,23 @@ describe("neon-branch create options", () => {
     });
   });
 
+  it("branches from a past instant for a point-in-time restore drill", () => {
+    const { options } = parseCreateArgs(
+      ["drill-pitr", "--ttl", "2", "--at", "2026-11-01T11:50:00Z"],
+      now,
+    );
+    expect(createBody("drill-pitr", options, now).branch).toEqual({
+      name: "drill-pitr",
+      parent_timestamp: "2026-11-01T11:50:00.000Z",
+      expires_at: "2026-11-01T14:00:00.000Z",
+    });
+    expect(() => parseCreateArgs(["b", "--at", "2026-11-01T12:00:01Z"], now)).toThrow(/past/);
+    expect(() => parseCreateArgs(["b", "--at", "2026-11-01 11:00"], now)).toThrow(/ISO 8601/);
+    expect(() => parseCreateArgs(["b", "--at", "2026-11-01T11:00:00+01:00"], now)).toThrow(/ISO/);
+    expect(() => parseCreateArgs(["b", "--at"], now)).toThrow(/ISO/);
+    expect(() => parseCreateArgs(["b", "--at", "2026-04-31T11:50:00Z"], now)).toThrow(/ISO/);
+  });
+
   it("refuses contradictions and bad input", () => {
     expect(() => parseCreateArgs(["b", "--ttl", "5", "--no-expiry"])).toThrow(/contradict/);
     expect(() => parseCreateArgs(["b", "--ttl", "0"])).toThrow(/--ttl/);
@@ -71,6 +88,18 @@ describe("neon-branch create options", () => {
 });
 
 describe("neon-branch requests (injected fetch, no network)", () => {
+  it("deletes the new branch when its connection string cannot be read", async () => {
+    const { calls, deps } = recorder({
+      "/connection_uri": { status: 500, body: "" },
+      "/branches/br-9": { status: 200, body: "" },
+      "/branches": { status: 201, body: JSON.stringify({ branch: { id: "br-9" } }) },
+    });
+    const { options } = parseCreateArgs(["drill-x", "--ttl", "2", "--out", "/tmp/never"]);
+    await expect(createBranch("drill-x", options, deps)).rejects.toThrow(/500/);
+    expect(calls.map((c) => c.method)).toEqual(["POST", "GET", "DELETE"]);
+    expect(calls[2]?.url).toContain("/branches/br-9");
+  });
+
   it("skips the connection_uri call without --out", async () => {
     const { calls, deps } = recorder({
       "/branches": { status: 201, body: JSON.stringify({ branch: { id: "br-1" } }) },

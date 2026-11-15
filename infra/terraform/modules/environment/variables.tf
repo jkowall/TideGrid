@@ -88,6 +88,22 @@ variable "backup_expire_days" {
   default     = 35
 }
 
+variable "backup_lock_days" {
+  description = <<-EOT
+    Days each backup object is locked against deletion or overwrite, or null
+    for no lock. A lock means the token that writes backups (and anyone who
+    steals it) cannot delete recent ones. Must be shorter than
+    backup_expire_days.
+  EOT
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.backup_lock_days == null || try(var.backup_lock_days >= 1, false)
+    error_message = "backup_lock_days must be at least one day, or null."
+  }
+}
+
 variable "hyperdrive" {
   description = "Neon direct endpoint for Hyperdrive. Used only when allow_secrets_in_state is true."
   type = object({
@@ -173,10 +189,33 @@ variable "neon_branches" {
     parent_id = optional(string)
     protected = optional(bool, false)
     compute = optional(object({
-      min_cu                  = optional(number, 0.25)
-      max_cu                  = optional(number, 1)
-      suspend_timeout_seconds = optional(number, 300)
+      min_cu = optional(number, 0.25)
+      max_cu = optional(number, 1)
+      # null leaves Neon's default (5 minutes). Neon's Free plan refuses any
+      # explicit value (HTTP 412), so set it only on a paid plan.
+      suspend_timeout_seconds = optional(number)
     }))
   }))
   default = {}
+}
+
+# Edge security (W3-OPS-4) ---------------------------------------------------
+
+variable "edge_security" {
+  description = <<-EOT
+    Firewall rules, edge rate limits, and the guest Turnstile widget. See the
+    cloudflare-security module. manage_zone_rules must stay false on a zone
+    another environment shares.
+  EOT
+  type = object({
+    manage_zone_rules = bool
+    api_host          = optional(string)
+    rate_limits = optional(map(object({
+      expression          = string
+      requests_per_period = number
+      period              = number
+      mitigation_timeout  = number
+    })), {})
+    turnstile_domains = optional(list(string), [])
+  })
 }

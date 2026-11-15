@@ -1248,6 +1248,15 @@ export const PublicExperienceResponse = z
     brand: PublicBrand.optional().describe(
       "The tenant's active brand. Absent until the tenant publishes one; a guest surface must not render without it.",
     ),
+    humanCheck: z
+      .object({
+        provider: z.literal("turnstile"),
+        siteKey: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/),
+      })
+      .optional()
+      .describe(
+        "W3-OPS-4: present where the API checks Turnstile. The guest site draws the check with this public site key and sends its token in the Turnstile-Token header on a checkout, a waiver link renewal, and a dock lookup.",
+      ),
   })
   .describe(
     "Public experience bootstrap for a verified hostname: tenant identity and active brand. Grants no permission.",

@@ -35,7 +35,9 @@ import { requirePrincipal } from "../auth/principal.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
+import { openSealedEvidence } from "../export-sealed.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
+import { waiverDeps } from "../waivers.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const memberStatusPath = "/v1/staff/tenants/{tenantId}/members/{userId}/status";
@@ -404,6 +406,7 @@ export function registerTenantAccessStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
       async (trx, ctx) =>
         (await exportTenantData(trx, ctx.access.tenant, {
           now: deps.now?.() ?? new Date(),
+          openRow: openSealedEvidence(tenantId, (await waiverDeps(deps, c.env)).fields),
         })) as unknown as JsonObject,
     );
     c.header(

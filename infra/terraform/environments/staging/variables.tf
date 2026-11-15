@@ -57,3 +57,9 @@ variable "alert_email_destinations" {
   type        = list(string)
   default     = []
 }
+
+variable "turnstile_domains" {
+  description = "Hostnames where the guest Turnstile check runs. Empty creates no widget."
+  type        = list(string)
+  default     = []
+}

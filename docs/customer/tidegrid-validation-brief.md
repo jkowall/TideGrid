@@ -2,9 +2,9 @@
 
 **TideGrid concept brief for customer validation**
 
-**September 2026**
+**November 2026**
 
-**Validation version:** 0.2
+**Validation version:** 0.3
 
 TideGrid is a concept under validation. This brief is not an offer, a contract, or a promise to build or deliver the product by a particular date, and it asks for no commitment from you. We are testing the concept, its features, pricing, delivery sequence, and timing with operators before deciding what to build.
 
@@ -33,7 +33,7 @@ Dive, fishing, sightseeing, and private-charter operators are all relevant to th
 
 Each operator gets a mobile-first booking experience on its own web domain. The progressive web app, or PWA, works in a browser and can be installed on a guest's phone without an app-store download.
 
-An optional Native add-on provides one operator-branded iOS app and one Android app. All of the operator's boats appear inside the same app. The native experience focuses on repeat use: upcoming trips, saved guest profiles, booking changes, waiver status, trip-card balances, deep links, and push notifications.
+An optional Native add-on provides one operator-branded iOS app and one Android app. The app is not required: an operator can run on the web booking experience alone and add the app later. All of the operator's boats appear inside the same app. The native experience focuses on repeat use: upcoming trips, saved guest profiles, booking changes, waiver status, trip-card balances, deep links, and push notifications.
 
 An **Important links** section in the web experience and optional native app lets you add and update resources guests need before a trip, such as where to get a fishing license. Guests also find the relevant links alongside their arrival instructions.
 
@@ -58,7 +58,7 @@ Bookings, payments, waivers, and transactional email are part of the core from t
 
 The operator remains the seller and merchant of record. Online payments are direct charges in the operator's Stripe account. TideGrid provides the booking and payment-management interface but does not hold operator funds, set card-processing prices, or take a processing spread.
 
-The operator approves its prices, taxes, booking policies, waiver language, customer remedies, and every weather-related trip action. It also owns its Apple and Google organization accounts and remains the publisher of its native apps. TideGrid prepares the shared product, configured branding, builds, and submission materials without creating a separate source-code fork for each customer.
+The operator approves its prices, taxes, booking policies, waiver language, customer remedies, and every weather-related trip action. If it chooses the optional app, it also owns its Apple and Google organization accounts and remains the publisher of its native apps. TideGrid prepares the shared product, configured branding, builds, and submission materials without creating a separate source-code fork for each customer.
 
 ## Deliberate first-version boundaries
 
@@ -83,8 +83,11 @@ These prices are proposed and unvalidated by paid use, and this table is neither
 | Managed Launch | $1,000 | None | Optional, standard scope only |
 | Native add-on | $4,500 | $399/month + 0.25% of net managed booking value | 12 months; Booking Core required |
 | Pilot Native offer | $2,250 | Full Booking Core and Native recurring price | First three qualified pilot operators only; Managed Launch free |
+| Core pilot offer | $1,000 Managed Launch | Full Booking Core recurring price | First three qualified pilot operators only; no app required |
 
 Booking Core includes two active boats; each additional active boat costs $75 per month. With two boats, Booking Core plus Native is $548 per month plus 1.75% of net managed booking value, subject to the Core annual minimum.
+
+A pilot does not require the app. The proposed Core pilot is for a direct-first operator that wants Booking Core without a native app. It pays the full Booking Core price with the $3,000 annual minimum and $1,000 for Managed Launch, and receives no pilot credit. The first pilot covers one legal operator, one brand, and one location, and the operator can add the Native add-on later.
 
 The proposed Native pilot is aimed at a direct-first operator averaging at least $25,000 per month in trailing net managed booking value with a demonstrated repeat-customer or customer-service use case for an app. The first pilot covers one legal operator, one brand, one location, and one iOS and Android pair. Until TideGrid measures delivery and support costs, standard Native sales target operators closer to $50,000 or more per month. Operators with five or more active boats, above $100,000 per month, or with several locations or brands need a custom quote.
 

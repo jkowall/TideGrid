@@ -168,7 +168,12 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       deps,
       { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
-        const waivers = await listBookingWaivers(trx, tenantId, bookingId);
+        const waivers = await listBookingWaivers(
+          trx,
+          tenantId,
+          bookingId,
+          (await waiverDeps(deps, c.env)).fields,
+        );
         if (!waivers) {
           throw new ApiError(404, "booking_not_found", "No such booking for this tenant");
         }
@@ -263,7 +268,12 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       deps,
       { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
-        const trip = await listTripWaivers(trx, tenantId, tripId);
+        const trip = await listTripWaivers(
+          trx,
+          tenantId,
+          tripId,
+          (await waiverDeps(deps, c.env)).fields,
+        );
         if (!trip) throw new ApiError(404, "trip_not_found", "No such trip for this tenant");
         return {
           tripId: trip.tripId,
@@ -310,7 +320,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     const { tenantId, requestId } = c.req.valid("param");
     const key = c.req.valid("header")["idempotency-key"];
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
     const notFound = () =>
       new ApiError(404, "waiver_request_not_found", "No such waiver request for this tenant");
     const { body, replayed } = await withStaffTenant(
@@ -434,7 +444,12 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       deps,
       { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
-        const found = await loadEvidenceDocument(trx, tenantId, { evidenceId });
+        const found = await loadEvidenceDocument(
+          trx,
+          tenantId,
+          { evidenceId },
+          (await waiverDeps(deps, c.env)).documents,
+        );
         if (!found) {
           throw new ApiError(
             404,
@@ -485,7 +500,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
   app.openapi(assistedRoute, async (c) => {
     const { tenantId, requestId } = c.req.valid("param");
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(deps);
+    const wdeps = await waiverDeps(deps, c.env);
     const settings = deliverySettings(c.env);
     let issued: { url: string; expiresAt: string; mode: typeof input.mode } | undefined;
     await withStaffTenant(c, deps, { tenantId, permission: "waivers.manage" }, async (trx, ctx) => {

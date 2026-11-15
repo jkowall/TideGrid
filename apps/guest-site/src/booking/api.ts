@@ -19,6 +19,7 @@ import {
 } from "@tidegrid/contracts";
 import type { z } from "zod";
 import { apiBase } from "../bootstrap.ts";
+import { humanCheckFailed, humanToken } from "../humanCheck.ts";
 
 /**
  * The guest checkout's calls to the API. The browser sends the page's Origin
@@ -69,6 +70,8 @@ interface RequestOptions<S extends z.ZodType> {
   timeoutMs?: number;
   /** Let the request finish after the page has gone, as a release on leaving does. */
   keepalive?: boolean;
+  /** A Turnstile token, sent as `Turnstile-Token` (W3-OPS-4, src/humanCheck.ts). */
+  humanToken?: string | null;
 }
 
 /**
@@ -89,6 +92,7 @@ export async function call<S extends z.ZodType>(
     signal,
     timeoutMs = readTimeoutMs,
     keepalive = false,
+    humanToken: token = null,
   } = options;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopListening = () => {};
@@ -105,6 +109,7 @@ export async function call<S extends z.ZodType>(
     if (body !== undefined) headers["content-type"] = "application/json";
     if (key) headers["idempotency-key"] = key;
     if (bearer) headers.authorization = `Bearer ${bearer}`;
+    if (token) headers["turnstile-token"] = token;
     const res = await fetch(`${apiBase}${path}`, {
       method,
       credentials: "omit",
@@ -233,10 +238,18 @@ export async function openCheckout(
   key: string,
   signal?: AbortSignal,
 ): Promise<Result<OpenedCheckout>> {
+  // A new token on every attempt, retries included: each works once.
+  let token: string | null;
+  try {
+    token = await humanToken("checkout");
+  } catch {
+    return { ...humanCheckFailed, message: "The check on the page did not pass; try it again" };
+  }
   const result = await call("/v1/public/checkout-sessions", {
     method: "POST",
     body,
     key,
+    humanToken: token,
     schema: CheckoutSessionCreateResponse,
     signal,
     timeoutMs: commandTimeoutMs,
