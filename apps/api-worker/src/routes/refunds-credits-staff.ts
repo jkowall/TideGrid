@@ -13,6 +13,7 @@ import {
 import { isUuid, type TenantContext } from "@tidegrid/database";
 import {
   adjustCredit,
+  bookerCreditKey,
   type CancellationRecord,
   type CreditAccountView,
   CreditKeyReusedError,
@@ -355,13 +356,10 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
       },
       async (trx, ctx) => {
         if (!isUuid(bookingId)) throw notFound();
-        const { rows } = await sql<{ booker_email: string }>`
-          select s.booker_email from bookings b
-            join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
-           where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
-        const email = rows[0]?.booker_email;
-        if (!email) throw notFound();
-        const accountId = await ensureCreditAccount(trx, ctx, email);
+        // Not `key`: that is the client's Idempotency-Key, digested below.
+        const customer = await bookerCreditKey(trx, tenantId, bookingId);
+        if (!customer) throw notFound();
+        const accountId = await ensureCreditAccount(trx, ctx, customer);
         try {
           const adjusted = await adjustCredit(trx, ctx, {
             accountId,

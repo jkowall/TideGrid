@@ -33,6 +33,7 @@ import {
 } from "../email.ts";
 import { type Bindings, databaseUrl } from "../env.ts";
 import { ApiError } from "../errors.ts";
+import { contactFieldPolicy } from "../field-keys.ts";
 import { providerFor, providerOver } from "../payments.ts";
 import { errorBody } from "./responses.ts";
 
@@ -326,7 +327,7 @@ function processAfterResponse(
   const emailStartedAt = clock();
   c.executionCtx.waitUntil(
     (async () => {
-      const handle = createDb(url, { max: 1 });
+      const handle = createDb(url, { max: 1, fields: contactFieldPolicy(c.env) });
       try {
         const provider = providerOver(handle.db, env, deps);
         if (!provider) throw new Error("the payment provider is not configured");

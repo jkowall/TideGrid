@@ -9,6 +9,7 @@
  * module's order). The quote and the client's address are serialized with
  * transaction-scoped advisory locks taken before any of those.
  */
+
 import {
   type BookingChannel,
   type CheckoutSessionState,
@@ -34,6 +35,7 @@ import {
   ProviderUnavailableError,
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
+import { bookerColumns } from "./booker.ts";
 import { requestPaymentCancellation } from "./payment-cancel.ts";
 import { checkoutSecretPattern, clientKeyFor, hashCheckoutSecret } from "./secrets.ts";
 import { type CheckoutSessionView, loadSessionView, record } from "./views.ts";
@@ -256,12 +258,15 @@ export async function createCheckoutSession(
   const hold = held.hold;
 
   // The session copies the hold's expiry in SQL, at full precision.
+  const stored = await bookerColumns(trx, ctx.tenantId, booker.name, booker.email);
   await sql`
     insert into checkout_sessions (id, tenant_id, quote_id, trip_id, party_size, hold_id,
-      policy_version, expires_at, secret_hash, client_key, booker_name, booker_email, channel)
+      policy_version, expires_at, secret_hash, client_key, booker_name, booker_email,
+      booker_sealed, booker_email_index, booker_name_index, channel)
     select ${sessionId}, ${ctx.tenantId}, ${quote.id}, h.trip_id, h.party_size, h.id,
-           ${quote.policy_version}, h.expires_at, ${secretHash}, ${clientKey}, ${booker.name},
-           ${booker.email}, ${input.staff?.channel ?? null}
+           ${quote.policy_version}, h.expires_at, ${secretHash}, ${clientKey}, ${stored.booker_name},
+           ${stored.booker_email}, ${stored.booker_sealed}, ${stored.booker_email_index},
+           ${stored.booker_name_index}::text[], ${input.staff?.channel ?? null}
       from capacity_holds h
      where h.tenant_id = ${ctx.tenantId} and h.id = ${hold.id}`.execute(trx);
 

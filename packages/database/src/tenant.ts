@@ -1,4 +1,5 @@
 import { type Kysely, sql, type Transaction } from "kysely";
+import { inheritFieldPolicy } from "./contact-crypto.ts";
 import type { ActorType, Database } from "./types.ts";
 
 /**
@@ -85,6 +86,7 @@ export function inTenantTransaction<T>(
     ? db.transaction().setIsolationLevel(options.isolation).setAccessMode("read only")
     : db.transaction();
   return builder.execute(async (trx) => {
+    inheritFieldPolicy(db, trx);
     await setTenantContext(trx, ctx);
     return fn(trx);
   });

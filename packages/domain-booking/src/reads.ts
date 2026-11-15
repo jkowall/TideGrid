@@ -2,6 +2,7 @@
  * Staff reads (G2.7): a trip's bookings and the finalization exceptions that
  * need an operator. Read-only, under the caller's tenant transaction.
  */
+
 import {
   type BookingSource,
   type BookingState,
@@ -12,6 +13,7 @@ import {
   type TenantTransaction,
 } from "@tidegrid/database";
 import { sql } from "kysely";
+import { openBookers } from "./booker.ts";
 import { type ConsoleExceptionView, listExceptionsPage } from "./console.ts";
 import { iso } from "./views.ts";
 
@@ -61,6 +63,7 @@ interface StaffBookingRow {
   confirmed_at: Date | string;
   booker_name: string;
   booker_email: string;
+  booker_sealed?: string | null;
   order_id: string;
   order_status: OrderStatus;
   total_amount: number;
@@ -119,7 +122,7 @@ async function tripBookingRows(
   const limit = page === null ? sql`` : sql`limit ${page.limit + 1}`;
   const { rows } = await sql<StaffBookingRow>`
     select b.id, b.reference, b.trip_id, b.state, b.source, b.party_size, b.reacquired, b.confirmed_at,
-           s.booker_name, s.booker_email,
+           s.booker_name, s.booker_email, s.booker_sealed,
            o.id as order_id, o.status as order_status, o.total_amount,
            p.id as payment_id, p.provider, p.state as payment_state, p.amount
       from bookings b
@@ -130,7 +133,7 @@ async function tripBookingRows(
        ${cursor}
      order by b.confirmed_at, b.id
      ${limit}`.execute(trx);
-  return rows;
+  return openBookers(trx, tenantId, rows);
 }
 
 /**

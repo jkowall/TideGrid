@@ -5,7 +5,14 @@
  * and tenants kept apart.
  */
 import { randomUUID } from "node:crypto";
-import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
+import {
+  bindFieldPolicy,
+  createDb,
+  inTenantTransaction,
+  newFieldKeyringSecret,
+  parseFieldKeyring,
+  type TenantContext,
+} from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { sql } from "kysely";
 import postgres from "postgres";
@@ -14,7 +21,8 @@ import { openBalancePayment, sendBalanceLink } from "../balance.ts";
 import { getBookingBalance } from "../balance-read.ts";
 import { changeBookerContact } from "../booker-contact.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
-import { adjustCredit } from "../credits.ts";
+import { getBookingDetail } from "../console.ts";
+import { adjustCredit, creditAccountForBooking } from "../credits.ts";
 import { inviteParticipant } from "../invitations.ts";
 import { buildMoneyReport } from "../money-report.ts";
 import { recordExternalSettlement } from "../reconciliation.ts";
@@ -229,18 +237,18 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     };
   }
 
-  async function dryRun(t: CheckoutFixture, user: string, o: BatchOpts) {
+  async function dryRun(t: CheckoutFixture, user: string, o: BatchOpts, db = runtime.db) {
     const ctx = staffCtx(t.id, user);
-    const result = await inTenantTransaction(runtime.db, ctx, (trx) =>
+    const result = await inTenantTransaction(db, ctx, (trx) =>
       runImportDryRun(trx, ctx, batch(t, { ...o, mode: "dry_run" })),
     );
     if (result.kind !== "checked") throw new Error(JSON.stringify(result));
     return result;
   }
 
-  async function commit(t: CheckoutFixture, user: string, o: BatchOpts) {
+  async function commit(t: CheckoutFixture, user: string, o: BatchOpts, db = runtime.db) {
     const ctx = staffCtx(t.id, user);
-    return inTenantTransaction(runtime.db, ctx, (trx) =>
+    return inTenantTransaction(db, ctx, (trx) =>
       runImportCommit(trx, ctx, batch(t, { ...o, mode: "commit" })),
     );
   }
@@ -942,6 +950,67 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
                     ${`test:${randomUUID()}`})`.execute(trx),
       ),
     ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("saves a sealed batch: customers, bookers, and credit keyed by the email token (0055)", async () => {
+    const keyring = await parseFieldKeyring(newFieldKeyringSecret());
+    const sealed = createDb(env?.runtimeUrl ?? "", { max: 2 });
+    bindFieldPolicy(sealed.db, { keyring: async () => keyring, required: true });
+    try {
+      const E = await createCheckoutFixture(admin, sealed.db, "imc-e", { days: 6 });
+      const ownerE = await member(E.id, "owner");
+      await dryRun(E, ownerE, { batchId: "SEAL-1", credit: 4200 }, sealed.db);
+      const saved = await commit(E, ownerE, { batchId: "SEAL-1", run: 2, credit: 4200 }, sealed.db);
+      if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+      expect(saved.counts).toMatchObject({ customers: 2, bookings: 3, credits: 1 });
+      // No contact detail is stored plain: customers, bookers, and the account.
+      const customers = await admin<
+        {
+          full_name: string | null;
+          email: string | null;
+          phone: string | null;
+          sealed: boolean;
+          indexed: boolean;
+        }[]
+      >`select c.full_name, c.email, c.phone, c.contact_sealed is not null as sealed,
+               c.email_index is not null as indexed
+          from public.import_customers c where c.tenant_id = ${E.id} order by c.email_index nulls last`;
+      expect(customers).toEqual([
+        { full_name: null, email: null, phone: null, sealed: true, indexed: true },
+        { full_name: null, email: null, phone: null, sealed: true, indexed: false },
+      ]);
+      const bookers = await admin<{ plain: boolean; sealed: boolean }[]>`
+        select booker_name is not null or booker_email is not null as plain,
+               booker_sealed is not null as sealed
+          from public.checkout_sessions where tenant_id = ${E.id}`;
+      expect(bookers).toHaveLength(3);
+      expect(bookers.every((b) => !b.plain && b.sealed)).toBe(true);
+      const [account] = await admin<
+        { customer_email: string | null; balance: number; matches: boolean }[]
+      >`
+        select a.customer_email, a.balance,
+               a.customer_email_index = (select c.email_index from public.import_customers c
+                                          where c.tenant_id = a.tenant_id and c.email_index is not null)
+                 as matches
+          from public.credit_accounts a where a.tenant_id = ${E.id}`;
+      expect(account).toEqual({ customer_email: null, balance: 4200, matches: true });
+      // The booker the import wrote reads back opened, and finds the same account.
+      const ctxE = staffCtx(E.id, ownerE);
+      const [booking] = await admin<{ id: string }[]>`
+        select b.id from public.bookings b
+          join public.checkout_sessions s on s.id = b.checkout_session_id
+         where b.tenant_id = ${E.id} and s.booker_email_index is not null`;
+      const detail = await inTenantTransaction(sealed.db, ctxE, (trx) =>
+        getBookingDetail(trx, E.id, booking?.id ?? "", { withBooker: true }),
+      );
+      expect(detail?.booker).toEqual({ name: "Ima Sample", email: "ima.sample@example.test" });
+      const found = await inTenantTransaction(sealed.db, ctxE, (trx) =>
+        creditAccountForBooking(trx, E.id, booking?.id ?? ""),
+      );
+      expect(found?.balance).toBe(4200);
+    } finally {
+      await sealed.end();
+    }
   });
 
   it("credits exactly what the opening balance said, on its customer's account (0051)", async () => {

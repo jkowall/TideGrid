@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createDb } from "@tidegrid/database";
+import { createDb, newFieldKeyringSecret } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import {
   type CheckoutFixture,
@@ -59,7 +59,10 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
   let tripsA: ReturnType<typeof tripAllocator>;
   const kid = `kid-${randomUUID().slice(0, 8)}`;
 
+  /** Extra bindings for one test (the field keyring, W3-OPS-4). */
+  let extraBindings: Record<string, string> = {};
   const bindings = () => ({
+    ...extraBindings,
     ENVIRONMENT: "local" as const,
     BUILD_ID: "integration",
     DATABASE_URL: env?.runtimeUrl ?? "",
@@ -201,6 +204,37 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
   afterAll(async () => {
     await runtime?.end();
     await admin?.end({ timeout: 5 });
+  });
+
+  it("seals the booker with the field keyring, and refuses with 503 when the keyring is malformed (0055)", async () => {
+    try {
+      extraBindings = { FIELD_ENCRYPTION_KEYS: newFieldKeyringSecret() };
+      const opened = await open(A, tripsA.shared());
+      expect(opened.status).toBe(201);
+      const id = opened.json.checkoutSession?.id ?? "";
+      const [row] = await admin<
+        { booker_name: string | null; booker_email: string | null; booker_sealed: string | null }[]
+      >`
+        select booker_name, booker_email, booker_sealed from public.checkout_sessions where id = ${id}`;
+      expect(row?.booker_name).toBeNull();
+      expect(row?.booker_email).toBeNull();
+      expect(row?.booker_sealed).toMatch(/^tgf1:/);
+
+      // A keyring that does not parse refuses the checkout and keeps nothing.
+      extraBindings = { FIELD_ENCRYPTION_KEYS: "not a keyring" };
+      const tripId = tripsA.shared();
+      const [before] = await admin<{ checkouts: number; holds: number }[]>`
+        select (select count(*)::int from public.checkout_sessions where trip_id = ${tripId}) as checkouts,
+               (select count(*)::int from public.capacity_holds where trip_id = ${tripId}) as holds`;
+      const refused = await open(A, tripId);
+      expect([refused.status, refused.json.error?.code]).toEqual([503, "field_keys_unavailable"]);
+      const [after] = await admin<{ checkouts: number; holds: number }[]>`
+        select (select count(*)::int from public.checkout_sessions where trip_id = ${tripId}) as checkouts,
+               (select count(*)::int from public.capacity_holds where trip_id = ${tripId}) as holds`;
+      expect(after).toEqual(before);
+    } finally {
+      extraBindings = {};
+    }
   });
 
   it("opens a checkout, pays through the fake, and confirms only from the webhook", async () => {

@@ -29,6 +29,7 @@ import type {
   WaiverSignerRole,
 } from "@tidegrid/database";
 import { recordAudit } from "@tidegrid/database";
+import { openBooker } from "@tidegrid/domain-booking";
 import { sql } from "kysely";
 import { crewAccessLive, issueCodeLink } from "./assisted.ts";
 import { loadBookingContext, tripFacts } from "./booking.ts";
@@ -234,8 +235,12 @@ export async function lookUpAtDock(
 
   let bookingId: string | null = null;
   if (BOOKING_CODE.test(referenceKey)) {
-    const { rows } = await sql<{ id: string; booker_name: string }>`
-      select b.id, cs.booker_name
+    const { rows } = await sql<{
+      id: string;
+      booker_name: string | null;
+      booker_sealed: string | null;
+    }>`
+      select b.id, cs.booker_name, cs.booker_sealed
         from bookings b
         join checkout_sessions cs on cs.tenant_id = b.tenant_id and cs.id = b.checkout_session_id
         join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -244,7 +249,11 @@ export async function lookUpAtDock(
          and (t.starts_at at time zone t.time_zone)::date = (now() at time zone t.time_zone)::date
        `.execute(trx);
     const found = rows[0];
-    if (found && lastNameMatches(found.booker_name, input.lastName)) bookingId = found.id;
+    if (found) {
+      // A sealed booker is opened to compare (0055); the name never leaves here.
+      const booker = await openBooker(trx, ctx.tenantId, found);
+      if (lastNameMatches(booker.name, input.lastName)) bookingId = found.id;
+    }
   }
   // The limits are read after the lookup, so a right code and name still
   // gets in while the operator-wide cap holds misses. A refused try is not

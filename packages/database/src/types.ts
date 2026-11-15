@@ -647,10 +647,16 @@ export interface CheckoutSessionsTable {
   expires_at: ColumnType<Date, Date | string, never>;
   secret_hash: Fixed<string>;
   client_key: FixedDefault<string | null>;
-  /** Corrected only on a confirmed booking, in the shape 0037 checks. */
-  booker_name: ColumnType<string, string, string>;
-  /** Null only on an imported checkout whose customer had no email (0044). */
-  booker_email: ColumnType<string | null, string | null, string>;
+  /** Corrected only on a confirmed booking, in the shape 0037 checks. Null when sealed (0055). */
+  booker_name: ColumnType<string | null, string | null, string | null>;
+  /** Null on an imported checkout whose customer had no email (0044), and when sealed (0055). */
+  booker_email: ColumnType<string | null, string | null, string | null>;
+  /** The booker's name and email sealed by the application (0055, contact-crypto.ts). */
+  booker_sealed: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The booker email's blind index token, on a sealed row with an email (0055). */
+  booker_email_index: ColumnType<string | null, string | null | undefined, string | null>;
+  /** One blind index token per word of the booker's name, on a sealed row (0055). */
+  booker_name_index: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
   /** Stamped from the transaction's actor (0012); never chosen by a writer. */
   source: ColumnType<CheckoutSource, never, never>;
   /** Required on a staff-assisted checkout and null otherwise (0012). */
@@ -1561,7 +1567,10 @@ export interface OutboxDeadLettersTable {
 export interface CreditAccountsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
-  customer_email: Fixed<string>;
+  /** The customer's address, or null where the account is keyed by its token (0055). */
+  customer_email: FixedDefault<string | null>;
+  /** The address's blind index token, where contact details are sealed (0055). */
+  customer_email_index: FixedDefault<string | null>;
   currency: FixedDefault<"USD">;
   balance: ColumnType<number, never, never>;
   /** Entries so far; the trigger numbers each new entry with it. */
@@ -1942,9 +1951,14 @@ export interface ImportRecordsTable {
 export interface ImportCustomersTable {
   record_id: Fixed<string>;
   tenant_id: TenantColumn;
-  full_name: Fixed<string>;
+  /** Null when the contact is sealed (0055). */
+  full_name: FixedDefault<string | null>;
   email: FixedDefault<string | null>;
   phone: FixedDefault<string | null>;
+  /** Name, email, and phone sealed by the application (0055). */
+  contact_sealed: FixedDefault<string | null>;
+  /** The email's blind index token, on a sealed row with an email (0055). */
+  email_index: FixedDefault<string | null>;
   created_at: Stamped;
 }
 

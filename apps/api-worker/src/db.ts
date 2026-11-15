@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./context.ts";
 import { databaseUrl } from "./env.ts";
 import { ApiError } from "./errors.ts";
+import { contactFieldPolicy } from "./field-keys.ts";
 
 /**
  * One connection per request, created on first use. With Hyperdrive the
@@ -14,7 +15,7 @@ export function getDb(c: Context<AppEnv>) {
   if (!handle) {
     const url = databaseUrl(c.env);
     if (!url) throw new ApiError(503, "database_unconfigured", "The database is not configured");
-    handle = createDb(url, { max: 1 });
+    handle = createDb(url, { max: 1, fields: contactFieldPolicy(c.env) });
     c.set("dbHandle", handle);
   }
   return handle.db;

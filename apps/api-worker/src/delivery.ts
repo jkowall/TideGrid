@@ -11,6 +11,7 @@
  * retried, and the queue's own dead letter queue hands it to the DLQ consumer
  * here, which records the dead letter with source "queue".
  */
+
 import {
   type ConsumeOutcome,
   consumeDelivery,
@@ -25,6 +26,7 @@ import {
 } from "@tidegrid/database";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { type Bindings, databaseUrl } from "./env.ts";
+import { contactFieldPolicy } from "./field-keys.ts";
 
 /** Attempts the consumer makes before it records a dead letter itself. */
 export const MAX_CONSUMER_ATTEMPTS = 5;
@@ -243,7 +245,7 @@ export async function runQueue(
     for (const m of batch.messages) m.retry({ delaySeconds: retryDelaySeconds(m.attempts) });
     return;
   }
-  const handle = createDb(url, { max: 1 });
+  const handle = createDb(url, { max: 1, fields: contactFieldPolicy(env) });
   try {
     const handlers = deliveryHandlers(log);
     await handleDeliveryBatch(

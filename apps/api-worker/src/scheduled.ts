@@ -23,6 +23,7 @@ import { bookingHooks } from "./booking-hooks.ts";
 import { queueSender } from "./delivery.ts";
 import { deliverySettings, emailProvider, emailSettings, sendErrorAttributes } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
+import { contactFieldPolicy } from "./field-keys.ts";
 import { hostnameProvider, hostnameSettings } from "./hostnames.ts";
 import { paymentProvider } from "./payments.ts";
 
@@ -99,7 +100,7 @@ export async function runScheduled(
     log.warn("hold_sweep_skipped", { "error.type": "database_unconfigured" });
     return;
   }
-  const handle = createDb(url, { max: 1 });
+  const handle = createDb(url, { max: 1, fields: contactFieldPolicy(env) });
   try {
     let started = Date.now();
     try {

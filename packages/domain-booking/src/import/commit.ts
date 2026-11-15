@@ -13,8 +13,17 @@
  * Personal data stays in the ledger and on the booking's own rows, never in
  * the run record, the audit row, or the response.
  */
-import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
+import {
+  contactKeys,
+  emailToken,
+  recordAudit,
+  sealContact,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
 import { sql } from "kysely";
+import { bookerColumns, customerKey } from "../booker.ts";
+import { ensureCreditAccount } from "../credits.ts";
 import { CORE_FEE_BP, feeReversalFor } from "../fee-ledger.ts";
 import { newBookingReference } from "../secrets.ts";
 import { importContentHash, importLookup } from "./dry-run.ts";
@@ -480,15 +489,33 @@ async function writePlan(
       recordId = earlierId("customers.csv", c.key).id;
     } else {
       recordId = await record("customers.csv", c);
+      // Sealed with its email token where the transaction has a keyring (0055).
+      const keyring = await contactKeys(trx);
       await trx
         .insertInto("import_customers")
-        .values({
-          tenant_id: tenantId,
-          record_id: recordId,
-          full_name: c.fullName,
-          email: c.email,
-          phone: c.phone,
-        })
+        .values(
+          keyring
+            ? {
+                tenant_id: tenantId,
+                record_id: recordId,
+                full_name: null,
+                email: null,
+                phone: null,
+                contact_sealed: await sealContact(
+                  keyring,
+                  { tenantId, field: "import_customers.contact_sealed" },
+                  { name: c.fullName, email: c.email, phone: c.phone },
+                ),
+                email_index: c.email === null ? null : await emailToken(keyring, tenantId, c.email),
+              }
+            : {
+                tenant_id: tenantId,
+                record_id: recordId,
+                full_name: c.fullName,
+                email: c.email,
+                phone: c.phone,
+              },
+        )
         .execute();
       counts.customers += 1;
     }
@@ -561,12 +588,15 @@ async function writePlan(
     const secretHash = [...crypto.getRandomValues(new Uint8Array(32))]
       .map((byte) => byte.toString(16).padStart(2, "0"))
       .join("");
+    const stored = await bookerColumns(trx, tenantId, customer.fullName, customer.email);
     await sql`
       insert into checkout_sessions (id, tenant_id, quote_id, trip_id, party_size, hold_id,
-        policy_version, expires_at, secret_hash, client_key, booker_name, booker_email, channel)
+        policy_version, expires_at, secret_hash, client_key, booker_name, booker_email,
+        booker_sealed, booker_email_index, booker_name_index, channel)
       select ${checkoutId}, ${tenantId}, null, h.trip_id, h.party_size, h.id,
-             ${policyVersion}, h.expires_at, ${secretHash}, null, ${customer.fullName},
-             ${customer.email}, null
+             ${policyVersion}, h.expires_at, ${secretHash}, null, ${stored.booker_name},
+             ${stored.booker_email}, ${stored.booker_sealed}, ${stored.booker_email_index},
+             ${stored.booker_name_index}::text[], null
         from capacity_holds h
        where h.tenant_id = ${tenantId} and h.id = ${holdId}`.execute(trx);
     const { rows: orders } = await sql<{ id: string }>`
@@ -725,14 +755,12 @@ async function writePlan(
     await sql`
       insert into import_credits (tenant_id, record_id, customer_record_id, amount)
       values (${tenantId}, ${recordId}, ${customer.recordId}, ${credit.amount})`.execute(trx);
-    await sql`
-      insert into credit_accounts (tenant_id, customer_email) values (${tenantId}, ${email})
-      on conflict (tenant_id, customer_email) do nothing`.execute(trx);
-    const { rows: accounts } = await sql<{ id: string }>`
-      select id from credit_accounts
-       where tenant_id = ${tenantId} and customer_email = ${email}`.execute(trx);
-    const accountId = accounts[0]?.id;
-    if (!accountId) throw new Error("a credit account was not found after its insert");
+    // Keyed by the address, or by its token where the customer is sealed (0055).
+    const accountId = await ensureCreditAccount(
+      trx,
+      { tenantId },
+      await customerKey(trx, tenantId, email),
+    );
     await sql`
       insert into credit_entries (tenant_id, account_id, kind, amount, import_record_id,
         idempotency_key)

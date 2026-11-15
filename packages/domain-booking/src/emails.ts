@@ -98,7 +98,7 @@ async function bookerMailHeld(
 ): Promise<boolean> {
   const { rows } = await sql<{ held: boolean }>`
     select b.source = 'imported'
-           and (s.booker_email is null
+           and ((s.booker_email is null and s.booker_email_index is null)
                 or not exists (select 1 from import_booking_email_opened o
                                 where o.tenant_id = b.tenant_id and o.booking_id = b.id)) as held
       from bookings b
