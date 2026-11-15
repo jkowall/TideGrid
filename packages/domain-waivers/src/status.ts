@@ -11,7 +11,9 @@
 
 import type { FieldKeyring } from "@tidegrid/database";
 import {
+  addressKey,
   type GuardianRelationship,
+  isAddressKey,
   isUuid,
   type TenantTransaction,
   type WaiverAccessMethod,
@@ -185,8 +187,13 @@ interface Row {
   /** The latest email's access was closed for a recipient change. */
   latest_closed: boolean | null;
   latest_email_at: Date | null;
-  /** The address the booking has now for the request's signer; null when it has none. */
+  /**
+   * The booking's address now for the request's signer, as waiver deliveries
+   * store it: the address, or its key where sealed (0057); null when none.
+   */
   current_recipient: string | null;
+  /** That address itself, masked, for staff; null when none. */
+  current_masked: string | null;
   /** When the sending limits next allow a send to that address; null when they allow it now. */
   refusal_retry_after: Date | null;
   /** When the booking's trip leaves. */
@@ -230,7 +237,8 @@ async function rows(
            m.last_error_code as message_error,
            ${closedSinceInvitation(tenantId, sql<string>`r.id`)} as latest_closed,
            ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
-           null::text as current_recipient, null::timestamptz as refusal_retry_after,
+           null::text as current_recipient, null::text as current_masked,
+           null::timestamptz as refusal_retry_after,
            st.starts_at,
            (select max(x.after_generation) from waiver_send_resets x
              where x.tenant_id = b.tenant_id and x.request_id = r.id) as reset_at,
@@ -306,22 +314,23 @@ async function addresses(trx: TenantTransaction, tenantId: string, found: Row[])
     row.email = o.email;
     row.guardian_email = o.guardian_email;
     row.contact_sealed = null;
-    row.current_recipient = addressOf(
-      row.required_signer === "guardian" ? row.guardian_email : row.email,
-    );
   });
   for (const row of found) {
+    const address = addressOf(row.required_signer === "guardian" ? row.guardian_email : row.email);
+    row.current_masked = address === null ? null : maskEmail(address);
     row.shared_address =
       row.required_signer === "guardian" &&
-      row.current_recipient !== null &&
+      address !== null &&
       found.some(
         (q) =>
           q.booking_id === row.booking_id &&
           q.participant_id !== null &&
           q.participant_id !== row.participant_id &&
           q.is_minor === false &&
-          addressOf(q.email) === row.current_recipient,
+          addressOf(q.email) === address,
       );
+    // Waiver deliveries and the sending limits hold the key where sealed.
+    row.current_recipient = address === null ? null : await addressKey(trx, tenantId, address);
   }
   const asking = found.filter(
     (r) => r.state === "pending" && r.current_recipient !== null && r.participant_id !== null,
@@ -341,6 +350,18 @@ async function addresses(trx: TenantTransaction, tenantId: string, found: Row[])
     const row = asking[Number(r.i) - 1];
     if (row) row.refusal_retry_after = r.retry_after;
   }
+}
+
+/**
+ * The address a delivery went to, masked for staff. A sealed delivery (0057)
+ * holds only the address's key: shown as the current address when it is that
+ * one, and otherwise only as an earlier address.
+ */
+function recipientShown(row: Row, stored: string): string {
+  if (!isAddressKey(stored)) return maskEmail(stored);
+  return stored === row.current_recipient && row.current_masked !== null
+    ? row.current_masked
+    : "an earlier address";
 }
 
 function statusOf(row: Row, required: boolean): WaiverStatusCode {
@@ -485,7 +506,7 @@ async function assemble(
                   ? {
                       generation: row.generation,
                       kind: row.kind,
-                      recipient: maskEmail(row.recipient_email),
+                      recipient: recipientShown(row, row.recipient_email),
                       queuedAt: row.queued_at,
                       sendAfter: row.send_after ?? row.queued_at,
                       message: {

@@ -428,13 +428,25 @@ W3-G2.12-rest. `complimentary_grants` records an owner's decision to waive a sta
 - **Bookings.** `payment_id` may be null, only for source `complimentary` (`bookings_complimentary_payment`); `app.stamp_booking_source` sets that source when a grant exists, and `app.check_booking` requires the grant, an open checkout, a pending order, and the confirmed hold in place of a succeeded payment. `app.check_checkout_session` (replaced) lets such a checkout move to confirmed with no payment.
 - **Cancellations and fees.** `booking_cancellations.payment_id` may be null, exactly when `paid_amount` is 0 (`booking_cancellations_complimentary`); a complimentary booking cancels with remedy none, no refund share, and no override. `app.check_fee_assessment` requires an order total and eligible amount of 0 for one.
 
+## Sealed guest contact details, part 4 (0058)
+
+W3-OPS-4, the last part: 0058 validates the outbox checks 0057 added NOT VALID (the migration safety check's two-step), so every message, old or new, is held to one shape. Audit rows and events were checked and already hold no guest contact details; staff sign-in addresses are staff data and stay plain.
+
+## Sealed guest contact details, part 3 (0057)
+
+W3-OPS-4, phase 3: the email outbox and every place that matches a guest's address. A message written where the transaction has a keyring keeps `{toEmail, toName, subject, html, text}` in `content_sealed` and leaves `to_name`, `subject`, `html_body`, and `text_body` null (`email_messages_content_place`); the delivery job opens it to send.
+
+- **Address keys.** Where the database compares one address with another (the outbox's `to_email`, `waiver_deliveries.recipient_email`, `waiver_reminders.recipient_email`, `email_suppressions.address`), a sealing environment stores the address key `<email token>@sealed.invalid` (`addressKey` in [contact-crypto.ts](src/contact-crypto.ts)) in place of the address. One address has one key in a tenant, so the waiver sending limits, a delivery naming its message, reminders and renewals going to the latest address, and a bounce suppressing its message's address all keep working unchanged, comparing keys. `.invalid` never resolves, so a key can never be mailed.
+- **Reading an address back.** Staff see the masked address from the opened participant; a delivery to an address the participant no longer has shows as "an earlier address". Sealed waiver evidence records the address itself, opened from the email the link came in.
+- **What is given up.** The admin's `app.email_suppression_lift` takes an address: lifting a suppression in a sealing environment needs the address key, which the application computes. A plain participant (written before the keyring) cannot be sent an invitation from a sealing environment, since the invitation check compares the stored address with a key.
+
 ## Sealed guest contact details, part 2 (0056)
 
 W3-OPS-4, phase 2: the people in a party. A participant written where the transaction has a keyring keeps `{name, email, guardianName, guardianEmail}` in `contact_sealed`, sealed for the tenant and the column, with `email_index` and `guardian_email_index` (purpose `email`, the same tokens as a booker's) beside it; the plain columns stay null. There are no name tokens: nothing searches participants by name.
 
 - **One shape a row.** `booking_participants_guardian` now holds a row plain (no tokens, a name, the 0009 guardian rule) or sealed (no plain detail, and a minor exactly when there is a guardian token). `app.check_booking_participant` refuses an update that moves a row between the two (`booking_participants_contact_place`), and a removed participant's sealed value and tokens cannot change either.
 - **Invitations.** `email_messages.to_email_index` holds the recipient's token where the message was written with a keyring (written once, no UPDATE grant). `app.check_profile_invitation` matches an invitation to a sealed participant by that token (the guardian's for a minor), to a plain one by address, as before, and the delivery job re-checks the recipient the same way before it sends.
-- **Still plain until phase 3.** The email outbox (`to_email`, `to_name`), waiver deliveries' `recipient_email`, and the do-not-email list.
+- **Phase 3 (0057)** seals the email outbox and keys the addresses waivers and the do-not-email list compare (above).
 
 ## Sealed guest contact details, part 1 (0055)
 

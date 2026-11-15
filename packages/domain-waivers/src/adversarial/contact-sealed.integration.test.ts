@@ -20,6 +20,7 @@ import { listBookingWaivers, listTripWaivers } from "../index.ts";
 import {
   adult,
   createWaiverFixture,
+  deliverMail,
   fixtureHooks,
   minor,
   type WaiverFixture,
@@ -127,5 +128,8 @@ describe.skipIf(!env)("W3-OPS-4: waiver status with sealed participants", () => 
     expect(ours?.participants.map((p) => [p.participantId, p.status])).toEqual(
       after?.participants.map((p) => [p.participantId, p.status]),
     );
+    // Send what is due with the keyring, so nothing sealed waits for another
+    // suite's sweep, which runs without it.
+    await deliverMail(world.db, A.id);
   }, 120_000);
 });

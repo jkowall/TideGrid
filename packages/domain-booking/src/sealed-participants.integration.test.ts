@@ -228,7 +228,8 @@ describe.skipIf(!env)("sealed participants (W3-OPS-4, 0056)", () => {
     const [msg] = await admin<{ id: string; to_email: string; to_email_index: string | null }[]>`
       select id, to_email, to_email_index from public.email_messages
        where booking_id = ${bookingId} and link_purpose = 'participant_profile'`;
-    expect(msg?.to_email).toBe(email);
+    // The outbox holds the address key and the sealed message (0057), not the address.
+    expect(msg?.to_email).toBe(`${msg?.to_email_index}@sealed.invalid`);
     expect(msg?.to_email_index).toBe((await stored(bookingId, 1)).email_index);
 
     await deliverTenantMessages(sealed.db, A.id, {
@@ -278,11 +279,12 @@ describe.skipIf(!env)("sealed participants (W3-OPS-4, 0056)", () => {
       as(guestContext(A.id), (trx) =>
         sql`insert into email_messages (tenant_id, dedupe_key, template, template_version,
               booking_id, participant_id, to_email, to_email_index, to_name, from_name, reply_to,
-              subject, html_body, text_body, link_purpose, link_path, link_ttl_seconds, link_slot)
+              subject, html_body, text_body, content_sealed, link_purpose, link_path,
+              link_ttl_seconds, link_slot)
             select tenant_id, 'participant.invitation:' || participant_id || ':' || gen_random_uuid(),
                    template, template_version, booking_id, participant_id, to_email, ${index},
-                   to_name, from_name, reply_to, subject, html_body, text_body, link_purpose,
-                   link_path, link_ttl_seconds, link_slot
+                   to_name, from_name, reply_to, subject, html_body, text_body, content_sealed,
+                   link_purpose, link_path, link_ttl_seconds, link_slot
               from email_messages where tenant_id = ${A.id} and id = ${msg.id}`.execute(trx),
       ).then(
         () => "accepted",
@@ -296,5 +298,21 @@ describe.skipIf(!env)("sealed participants (W3-OPS-4, 0056)", () => {
     expect(await copy("0".repeat(64))).toBe("email_messages_profile_recipient");
     // The guardian's token, the one the minor's invitation goes to.
     expect(await copy(await emailToken(keyring, A.id, guardian))).toBe("accepted");
+
+    // Send both with the keyring, so no sealed invitation is left due for
+    // another suite's sweep, which runs without it.
+    await deliverTenantMessages(sealed.db, A.id, {
+      provider: mail,
+      fromAddress: "bookings@tidegrid.test",
+      guestLinkOrigin: "http://{slug}.book.localhost:5301",
+      environment: "local",
+      runId: `run-${randomUUID()}`,
+    });
+    // (The booking's trip reminder stays queued for its own later time.)
+    const left = await admin<{ state: string }[]>`
+      select state from public.email_messages
+       where booking_id = ${bookingId} and link_purpose = 'participant_profile'
+         and state in ('queued', 'sending')`;
+    expect(left).toEqual([]);
   });
 });
