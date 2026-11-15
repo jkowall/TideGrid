@@ -356,9 +356,10 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
       },
       async (trx, ctx) => {
         if (!isUuid(bookingId)) throw notFound();
-        const key = await bookerCreditKey(trx, tenantId, bookingId);
-        if (!key) throw notFound();
-        const accountId = await ensureCreditAccount(trx, ctx, key);
+        // Not `key`: that is the client's Idempotency-Key, digested below.
+        const customer = await bookerCreditKey(trx, tenantId, bookingId);
+        if (!customer) throw notFound();
+        const accountId = await ensureCreditAccount(trx, ctx, customer);
         try {
           const adjusted = await adjustCredit(trx, ctx, {
             accountId,

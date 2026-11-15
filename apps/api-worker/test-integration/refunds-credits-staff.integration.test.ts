@@ -264,6 +264,11 @@ describe.skipIf(!env)("staff cancellation, credit, and refund exceptions (W3-G2.
     const again = await adjust(A.owner, 250, key);
     expect(again.headers.get("idempotent-replayed")).toBe("true");
     expect(again.json.account.balance).toBe(shown.credit.amount + 250);
+    // A second adjustment by the same owner, with its own key, applies too.
+    const more = await adjust(A.owner, 100);
+    expect(more.status).toBe(200);
+    expect(more.headers.get("idempotent-replayed")).not.toBe("true");
+    expect(more.json.account.balance).toBe(shown.credit.amount + 350);
 
     // The owner's data export carries the credit account and its ledger.
     const exported = await request("GET", `/v1/staff/tenants/${A.id}/export`, { as: A.owner });
@@ -271,10 +276,10 @@ describe.skipIf(!env)("staff cancellation, credit, and refund exceptions (W3-G2.
     const sections = exported.json.sections;
     const accountId = up.json.account.id;
     expect(sections.credit_accounts.rows.find((r: Json) => r.id === accountId)).toMatchObject({
-      balance: shown.credit.amount + 250,
+      balance: shown.credit.amount + 350,
     });
     const ledger = sections.credit_entries.rows.filter((r: Json) => r.account_id === accountId);
-    expect(ledger.map((r: Json) => r.kind).sort()).toEqual(["adjust", "issue"]);
+    expect(ledger.map((r: Json) => r.kind).sort()).toEqual(["adjust", "adjust", "issue"]);
     for (const row of ledger) expect(Object.keys(row)).not.toContain("idempotency_key");
   });
 
