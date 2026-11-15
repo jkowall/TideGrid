@@ -146,7 +146,9 @@ export async function runSynthetic(
     });
 
     const trip = await step("trips", async () => {
-      const from = localDate(o.now());
+      // The API reads from and to as tenant-local dates; a UTC date runs ahead
+      // of US evenings, so start a day early. Sales times filter what is left.
+      const from = localDate(o.now() - 86_400_000);
       const to = localDate(o.now() + o.days * 86_400_000);
       const res = await o.fetch(
         `${base}/v1/public/trips?from=${from}&to=${to}&party=${guests}`,
@@ -375,8 +377,8 @@ export function optionsFromEnv(
     }
   }
   const days = Number(env.SYNTHETIC_DAYS ?? "30");
-  if (!Number.isInteger(days) || days < 1 || days > 92)
-    throw new Error("SYNTHETIC_DAYS is 1 to 92");
+  if (!Number.isInteger(days) || days < 1 || days > 91)
+    throw new Error("SYNTHETIC_DAYS is 1 to 91");
   const party = Number(env.SYNTHETIC_PARTY ?? "1");
   if (!Number.isInteger(party) || party < 1 || party > 20)
     throw new Error("SYNTHETIC_PARTY is 1 to 20");

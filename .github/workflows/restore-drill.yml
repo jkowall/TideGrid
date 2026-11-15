@@ -119,7 +119,14 @@ jobs:
             "create role drill_plain nologin; do \$\$ declare f regprocedure; begin select p.oid::regprocedure into f from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'app') and p.prosecdef limit 1; execute format('alter function %s owner to drill_plain', f); end \$\$"
           )
           for i in "${!tampers[@]}"; do
-            psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database tamper_$i template restored"
+            # A template copy fails while anything (autovacuum too) is connected
+            # to the source, so end those sessions and retry a few times.
+            for try in 1 2 3 4 5; do
+              psql -X -q "$DATABASE_URL" -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'restored' and pid <> pg_backend_pid()" > /dev/null
+              psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "create database tamper_$i template restored" && break
+              [ "$try" = 5 ] && exit 1
+              sleep 2
+            done
             psql -X -q -v ON_ERROR_STOP=1 "$base/tamper_$i" -c "${tampers[$i]}"
             if TARGET_DATABASE_URL="$base/tamper_$i" python3 -I tools/backup/verify.py --manifest "$manifest" --expect-exact > "$RUNNER_TEMP/tamper.txt"; then
               cat "$RUNNER_TEMP/tamper.txt"; echo "::error::verify passed a tampered copy: ${tampers[$i]}"; exit 1
