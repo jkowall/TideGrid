@@ -203,19 +203,29 @@ jobs:
           pw=$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$url")
           [ -n "$pw" ] && echo "::add-mask::$pw"
           echo "throwaway branch $branch from staging" | tee -a "$GITHUB_STEP_SUMMARY"
+          # The suites expect an empty database, as in CI (a fresh PostgreSQL
+          # container): some list every tenant, and the migration tests step
+          # the schema back. Empty the copy so the suites migrate it from 0001
+          # on the same Neon project, region, and compute size as staging.
+          # tidegrid_app is a cluster role and survives; 0001 reuses it.
+          psql "$url" -XAtq -v ON_ERROR_STOP=1 \
+            -c 'DROP SCHEMA IF EXISTS app CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public' >/dev/null
           set +e
           # The suites get only the throwaway branch, not staging's own URL or the Neon key.
           env -u STAGING_ADMIN_URL -u NEON_API_KEY \
             DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 TIDEGRID_SEARCH_BENCH=1 CI=true \
-            pnpm test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
+            pnpm -r --no-bail --workspace-concurrency=1 --if-present test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
           status=$?
           set -e
           # Only the totals, benchmark, and fairness lines are kept: the raw log
           # stays on the runner, because masking covers the live log only.
-          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness' "$RUNNER_TEMP/integration.raw" \
-            | grep -v -F "${pw:-no-password-to-filter}" | cut -c1-400 > "$RUNNER_TEMP/integration.log" || true
+          # Error lines say why a test failed; any line naming a connection
+          # string or the password is dropped.
+          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness|Error|error:' "$RUNNER_TEMP/integration.raw" \
+            | grep -v -F "${pw:-no-password-to-filter}" | grep -v -E 'postgres(ql)?://' \
+            | cut -c1-400 > "$RUNNER_TEMP/integration.log" || true
           rm -f "$RUNNER_TEMP/integration.raw"
-          { echo '```'; head -n 120 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; head -n 200 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
       - name: Keep the evidence

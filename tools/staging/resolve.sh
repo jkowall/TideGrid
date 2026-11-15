@@ -32,9 +32,9 @@ main=$(jq -r '[.branches[] | select((.default // false) or (.primary // false))]
 [ -n "$main" ] || die "no default branch found, so Neon main cannot be told apart"
 [ "$main" != "$staging" ] || die "staging is main; refusing"
 
-rw() { neon "/branches/$1/endpoints" | jq -r '[.endpoints[] | select(.type == "read_write")][0] | "\(.id) \(.host)"'; }
-read -r endpoint host <<<"$(rw "$staging")"
-read -r _ main_host <<<"$(rw "$main")"
+rw() { neon "/branches/$1/endpoints" | jq -r '[.endpoints[] | select(.type == "read_write")][0] | "\(.id) \(.host) \(.region_id)"'; }
+read -r endpoint host region <<<"$(rw "$staging")"
+read -r _ main_host _ <<<"$(rw "$main")"
 [ -n "$host" ] && [ "$host" != null ] || die "staging has no read-write compute"
 [ -n "$main_host" ] && [ "$main_host" != null ] || die "main has no read-write compute to record"
 [ "$host" != "$main_host" ] || die "staging and main share a host; refusing"
@@ -52,5 +52,7 @@ mask "$url"
 mask "$(node -e 'process.stdout.write(decodeURIComponent(new URL(process.argv[1]).password))' "$url")"
 mask "$host"
 mask "$main_host"
-printf 'STAGING_BRANCH_ID=%s\nSTAGING_ENDPOINT_ID=%s\nSTAGING_HOST=%s\nSTAGING_DB=%s\nNEON_MAIN_HOST=%s\nSTAGING_ADMIN_URL=%s\n' \
-  "$staging" "$endpoint" "$host" "$db" "$main_host" "$url"
+# The region is not secret; the latency probes are read against it.
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "staging compute region: $region" >>"$GITHUB_STEP_SUMMARY"; fi
+printf 'STAGING_BRANCH_ID=%s\nSTAGING_ENDPOINT_ID=%s\nSTAGING_HOST=%s\nSTAGING_DB=%s\nNEON_MAIN_HOST=%s\nSTAGING_REGION=%s\nSTAGING_ADMIN_URL=%s\n' \
+  "$staging" "$endpoint" "$host" "$db" "$main_host" "$region" "$url"
