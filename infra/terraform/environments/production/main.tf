@@ -35,12 +35,16 @@ module "environment" {
     manage_zone_rules = true
     api_host          = var.api_host
     rate_limits = {
-      # One rule fits every plan, including Free (10 second period, 10
-      # second block). On Pro or above, add a sign-in rule and lengthen the
-      # block (see the module's description).
-      public_writes = {
-        expression          = "http.host eq \"${var.api_host}\" and starts_with(http.request.uri.path, \"/v1/public/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"}"
-        requests_per_period = 20
+      # Free rate limiting rules match on the URI path only (Pro adds the
+      # host, Business the method), with a 10 second period and block. So
+      # this one rule counts every request to the public API paths, reads
+      # included, with room for a page that loads several at once. With the
+      # API on its own host in production's own zone, the path is enough. On
+      # Business or above, narrow it to writes and lengthen the block (see
+      # the module's description).
+      public_api = {
+        expression          = "starts_with(http.request.uri.path, \"/v1/public/\")"
+        requests_per_period = 60
         period              = 10
         mitigation_timeout  = 10
       }

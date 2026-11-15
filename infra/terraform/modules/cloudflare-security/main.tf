@@ -49,7 +49,7 @@ resource "cloudflare_ruleset" "firewall" {
     {
       ref         = "public_writes_no_agent"
       description = "Public writes need a user agent (browsers and the app send one); verified bots aside. The Stripe webhook is under /v1/webhooks/ and unaffected"
-      expression  = "${local.api} and starts_with(http.request.uri.path, \"/v1/public/\") and http.request.method eq \"POST\" and http.user_agent eq \"\" and not cf.client.bot"
+      expression  = "${local.api} and starts_with(http.request.uri.path, \"/v1/public/\") and http.request.method in {\"POST\" \"PUT\" \"PATCH\" \"DELETE\"} and http.user_agent eq \"\" and not cf.client.bot"
       action      = "block"
       enabled     = true
     },

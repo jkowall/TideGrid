@@ -1,5 +1,5 @@
 output "turnstile_site_key" {
-  description = "The widget's public site key, for the guest site's TURNSTILE_SITE_KEY. Null when the widget is made in the dashboard. The secret key is never an output."
+  description = "The widget's public site key, for the API Worker's TURNSTILE_SITE_KEY var (the API hands it to the guest site in the tenant bootstrap). Null when the widget is made in the dashboard. The secret key is never an output."
   value       = one(cloudflare_turnstile_widget.guest[*].sitekey)
 }
 
