@@ -193,7 +193,7 @@ jobs:
           NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
         run: |
           out="$RUNNER_TEMP/branch.json"
-          pnpm --silent --filter @tidegrid/database exec tsx src/neon-branch.ts create "it-${GITHUB_RUN_ID}" \
+          pnpm --silent --filter @tidegrid/database exec tsx src/neon-branch.ts create "it-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --ttl 4 --parent "$STAGING_BRANCH_ID" --out "$out"
           branch=$(jq -r .branchId "$out")
           trap 'pnpm --silent --filter @tidegrid/database exec tsx src/neon-branch.ts delete "$branch" || true; rm -f "$out"' EXIT

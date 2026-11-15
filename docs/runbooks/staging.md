@@ -35,7 +35,7 @@ The Hyperdrive config's id is printed in the run summary. The API's `env.staging
 
 **integration**
 
-Creates a throwaway branch of staging (4-hour expiry, deleted at the end), runs every integration suite on it with the search benchmark on (`TIDEGRID_SEARCH_BENCH=1`, about 50,000 bookings in one tenant), and puts the test totals, the benchmark lines, and the sweep fairness lines in the run summary. The full log is kept as a run artifact for 90 days.
+Creates a throwaway branch of staging (4-hour expiry, deleted at the end), runs every integration suite on it with the search benchmark on (`TIDEGRID_SEARCH_BENCH=1`, about 50,000 bookings in one tenant), and puts the test totals, the benchmark lines, and the sweep fairness lines in the run summary. Only those filtered lines (totals, failures, benchmark, fairness) are kept, as a run artifact for 90 days. The full log is never stored, because GitHub masks secrets only in the live log; to see a failing test in full, run that suite on a local throwaway database.
 
 ## What staging does not have yet
 
