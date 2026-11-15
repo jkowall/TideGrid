@@ -50,6 +50,26 @@ On 2026-11-15 the owner wrote "lets finish it up" about the rest of the Wave 3 o
 Not done: no bucket, token, or environment created, no backup of a live database, and the independent observer, the operator sign-off on the RPO, and the 30-day history window on a paid Neon plan wait for production. The free plan's history window is shorter than 30 days.
 
 
+### 2026-11-15: W3-OPS-4, every guest contact detail sealed (owner decision; coordinator defaults pending owner confirmation)
+
+On 2026-11-15 the owner chose "All contact details (phased)" over sealing waiver evidence alone. Built in four parts, code only, on synthetic data: bookers, credit accounts, and imported customers (PR 183, migration 0055); the people in a party (PR 185, 0056); the email outbox and every place that matches a guest's address (PR 186, 0057); and the deferred checks (this entry's PR, 0058). Where the Worker has `FIELD_ENCRYPTION_KEYS`, a guest's name, email, and phone are written sealed (AES-256-GCM, bound to tenant, table, and column), with keyed tokens beside them so the database can still match an address or a name word without reading it. Without the keys (local, preview), nothing changes. Coordinator defaults, pending owner confirmation:
+
+- **D1: staff search on a sealed booker matches whole words and the whole address.** "Neil" finds "Ana O'Neil", and the full address finds the booking; part of a word or part of an address does not.
+- **D2: nothing already stored is rewritten, and a row keeps the way it was written.** A correction of a sealed booker or participant stays sealed, a plain one stays plain, and the database refuses a move between the two. An environment writes one way, which is safe because no real guest data exists yet.
+- **D3: a credit account is keyed by the booker's email token, not the address**, so the account itself holds no address. The export ties it to its customer through the same token.
+- **D4: party members are not searchable by name.** Nothing searched them before; no name tokens are kept for them.
+- **D5: in the email outbox the address is replaced by its key, and the subject and both bodies are sealed with the recipient.** Waiver deliveries, waiver reminders, and the do-not-email list store the same key, `<token>@sealed.invalid`, which can never be mailed. Every rule that compares two addresses (sending limits, reminders and renewals going to the latest address, a bounce stopping later mail) works unchanged.
+- **D6: staff see a masked address** ("a•••@example.com"), opened from the guest's current details. A waiver email that went to an address the guest no longer has shows as "an earlier address".
+- **D7: staging and production refuse to take a booking or write a guest email without the keys** (503 `field_keys_unavailable`), so no guest contact detail is ever written there in plain form.
+
+Review hardening (PR 186): before sending a sealed message the delivery job checks that its stored key is the opened address's own key, and fails it (`sealed_address_mismatch`) otherwise, so a sealed value copied onto another message can never send; a do-not-email entry recorded plain, before the keys were set, still stops sealed mail to that address.
+
+Checked and left as they are: audit rows and events already record which fields changed, never their values; staff sign-in addresses are staff data, not guest data; the fake email provider's tables exist only in local and preview.
+
+Known limits: waiver sending limits, reminders, and renewals do not count a plain earlier email and a sealed later one to the same person together (an environment writes one way); lifting a do-not-email entry by hand needs the address's key, which the application computes; a guest written plain before the keys were set cannot be sent a participant invitation from a sealing environment; tokens are per operator, so the same guest at two operators cannot be matched (by design).
+
+Still needs the owner: create `FIELD_ENCRYPTION_KEYS` for staging and production before the first booking there.
+
 ### 2026-11-15: W3-OPS-4, security before real data (coordinator defaults pending owner confirmation)
 
 On 2026-11-15 the owner asked to finish the remaining pilot work ("lets finish it up"), which took in W3-OPS-4. It is code and plans only, on synthetic data: no bucket, key, widget, or rule was created, and nothing was applied. The owner creates the buckets and keys and runs the applies.
@@ -63,7 +83,8 @@ What was built: signed waiver PDFs move to a private bucket with object lock, re
 - **D5: Terraform owns edge rules only on production's own zone.** Staging shares the preview's zone, so its firewall stays as it is. The Turnstile widget is created by Terraform only where secrets may be kept in state; otherwise the owner makes it in the dashboard.
 - **D6: orphan PDFs are kept.** A signing that fails after its PDF was written leaves a locked object no row points to. It holds no more than the signer sent, and the lock prevents deleting it early. A periodic inventory that lists such objects is a follow-up.
 
-Still open, needing the owner: whether to seal every guest contact detail now or only waiver evidence (asked 2026-11-15); creating the buckets, the field keyring secret, and the Turnstile widget; and the first production plan, which needs `zone_name` and `api_host`.
+Still open, needing the owner: creating the buckets, the field keyring secret, and the Turnstile widget; and the first production plan, which needs `zone_name` and `api_host`. Update, 2026-11-15: the owner chose to seal every guest contact detail ([entry above](#2026-11-15-w3-ops-4-every-guest-contact-detail-sealed-owner-decision-coordinator-defaults-pending-owner-confirmation)).
+
 ### 2026-11-15: W2-COREPILOT-DOCS, the adopted Core pilot gate applied across the documents (coordinator readings pending owner confirmation)
 
 The [Core pilot gate](#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted) that the owner adopted earlier on 2026-11-15 ("yes, the app is optional") is now written into the documents its proposal listed: the [roadmap gates](05-roadmap-validation.md#core-pilot-gate) (its new canonical home), the product strategy, the commercial model (a Core pilot offer row and [Core pilot offer controls](03-commercial-model.md#core-pilot-offer-controls)), the paid-pilot readiness gate, Step 6 of the pre-customer plan, the goal map, the root README, the customer brief and deck, the pricing worksheet, the operator validation guide, the evidence register template, the product scope, the hosting plan, and the index. Stage 0 now links the two drafts the owner approved the same day and the CSV import draft approved on 2026-11-13. This decision table's Pilot scope, Pilot cohort evidence, and Pilot-customer subsidy rows gain the Core route, and a Core pilot offer row is added.
