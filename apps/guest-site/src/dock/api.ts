@@ -5,6 +5,7 @@ import {
   DockPartyResponse,
   DockSigningResponse,
 } from "@tidegrid/contracts";
+import { humanCheckFailed, humanToken } from "../humanCheck.ts";
 import { call, type Result } from "../waiver/api.ts";
 
 /**
@@ -28,9 +29,16 @@ export interface Found {
 const lookupLifetimeMs = 15 * 60_000;
 
 export async function lookUp(body: DockLookupRequest): Promise<Result<Found>> {
+  let human: string | null;
+  try {
+    human = await humanToken("dock_lookup");
+  } catch {
+    return humanCheckFailed;
+  }
   const result = await call("/v1/public/waiver-dock/lookups", DockLookupResponse, {
     method: "POST",
     body,
+    humanToken: human,
   });
   return result.kind === "ok"
     ? {

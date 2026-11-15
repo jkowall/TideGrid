@@ -104,7 +104,14 @@ export function createApp(deps: AppDeps = {}) {
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       // Authorization carries a guest's checkout secret (G2.7); staff routes
       // authenticate with Access or the session cookie, never with it.
-      allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id", "Authorization"],
+      allowHeaders: [
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Request-Id",
+        "Authorization",
+        // The guest site's Turnstile token (W3-OPS-4, src/turnstile.ts).
+        "Turnstile-Token",
+      ],
       exposeHeaders: ["X-Request-Id", "Idempotent-Replayed"],
       maxAge: 600,
     }),

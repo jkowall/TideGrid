@@ -132,6 +132,18 @@ export interface Bindings {
    * to sign a waiver without it; local and preview write plain fields.
    */
   FIELD_ENCRYPTION_KEYS?: string;
+  /**
+   * Secret, never a var (W3-OPS-4, src/turnstile.ts). The guest Turnstile
+   * widget's secret key. With it, opening a checkout, asking for a new waiver
+   * link, and the dock lookup need a confirmed Turnstile token. Staging and
+   * production refuse those requests without it; local and preview skip it.
+   */
+  TURNSTILE_SECRET_KEY?: string;
+  /**
+   * The widget's public site key, returned to the guest site in the tenant
+   * bootstrap so it can draw the check. Not a secret.
+   */
+  TURNSTILE_SITE_KEY?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {
