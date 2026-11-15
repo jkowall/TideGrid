@@ -104,6 +104,35 @@ describe("migration safety check", () => {
     expect(
       rules("ALTER TABLE public.t ALTER x TYPE bigint; CREATE TABLE public.t (x int);"),
     ).toEqual(["column_type_change"]);
+    // Second round: quoted case, qualified or wrapped defaults, index-building
+    // constraints, DO LANGUAGE, and allow text inside a string.
+    expect(
+      rules(
+        'CREATE TABLE public."Bookings" (a int); ALTER TABLE public.bookings ALTER a TYPE bigint;',
+      ),
+    ).toEqual(["column_type_change"]);
+    expect(
+      rules(
+        "ALTER TABLE public.bookings ADD COLUMN s timestamptz DEFAULT pg_catalog.clock_timestamp();",
+      ),
+    ).toEqual(["volatile_default"]);
+    expect(rules("ALTER TABLE public.bookings ADD COLUMN s timestamptz DEFAULT (now());")).toEqual([
+      "volatile_default",
+    ]);
+    expect(rules("ALTER TABLE public.bookings ADD CONSTRAINT u UNIQUE (tenant_id, ref);")).toEqual([
+      "index_not_concurrent",
+    ]);
+    expect(rules("ALTER TABLE public.bookings ADD CONSTRAINT u UNIQUE USING INDEX b_ref;")).toEqual(
+      [],
+    );
+    expect(rules("DO LANGUAGE plpgsql $$ BEGIN TRUNCATE TABLE public.bookings; END $$;")).toEqual([
+      "data_change",
+    ]);
+    expect(
+      rules(
+        "COMMENT ON TABLE public.bookings IS '-- migration-check: allow data_change example allowance text';\nUPDATE public.bookings SET x = 1;",
+      ),
+    ).toEqual(["data_change"]);
     // Still fine: a new table's own steps, and DROP DEFAULT / DROP NOT NULL.
     expect(
       rules(
@@ -128,7 +157,8 @@ describe("migration safety check", () => {
 
   it("strips comments, strings, and dollar bodies", () => {
     expect(stripSql("a -- x\nb /* y */ 'it''s' $t$ z $t$ c")).toBe("a \nb   ''  $body$  c");
-    expect(targetTable('ALTER TABLE ONLY public."Bookings" ADD x')).toBe("public.bookings");
+    expect(targetTable('ALTER TABLE ONLY public."Bookings" ADD x')).toBe("public.Bookings");
+    expect(targetTable('ALTER TABLE ONLY Public."bookings" ADD x')).toBe("public.bookings");
     expect(targetTable("CREATE INDEX i ON bookings (x)")).toBe("public.bookings");
     expect(fileNumber("0053_x.sql")).toBe(53);
     expect(fileNumber("README.md")).toBeNull();

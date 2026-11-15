@@ -52,7 +52,10 @@ interface Rule {
 
 /** Strip quotes and lower-case a (possibly schema-qualified) name; unqualified means public. */
 export function qualifiedName(name: string): string {
-  const parts = name.split(".").map((p) => p.replace(/"/g, "").toLowerCase());
+  // Unquoted names fold to lower case; quoted ones keep their case, as in PostgreSQL.
+  const parts = (name.match(/"[^"]+"|[^."]+/g) ?? []).map((p) =>
+    p.startsWith('"') ? p.slice(1, -1) : p.toLowerCase(),
+  );
   return parts.length > 1 ? parts.slice(-2).join(".") : `public.${parts[0]}`;
 }
 
@@ -119,7 +122,7 @@ const rules: Rule[] = [
         (p) =>
           /\badd\b/i.test(p) &&
           !/\badd\s+constraint\b/i.test(p) &&
-          /\bdefault\s+(?:now|clock_timestamp|random|gen_random_uuid|uuid_generate_v4|timeofday|statement_timestamp)\s*\(/i.test(
+          /\bdefault\s*[(\s]*(?:pg_catalog\.|public\.)?(?:now|clock_timestamp|random|gen_random_uuid|uuid_generate_v4|timeofday|statement_timestamp)\s*\(/i.test(
             p,
           ),
       ),
@@ -155,13 +158,22 @@ const rules: Rule[] = [
     rule: "index_not_concurrent",
     skipNewTables: true,
     test: (s) => {
-      if (!/^\s*create\s+(?:unique\s+)?index\b/i.test(s) || /\bconcurrently\b/i.test(s))
-        return false;
       const t = targetTable(s);
-      return t !== null && largeSet.has(t);
+      if (t === null || !largeSet.has(t)) return false;
+      if (/^\s*create\s+(?:unique\s+)?index\b/i.test(s)) return !/\bconcurrently\b/i.test(s);
+      // A UNIQUE or PRIMARY KEY constraint builds its index under the table lock,
+      // unless it adopts one built concurrently first (USING INDEX).
+      return (
+        /\balter\s+table\b/i.test(s) &&
+        topLevelParts(s).some(
+          (p) =>
+            /\badd\s+(?:constraint\s+[\w"]+\s+)?(?:unique|primary\s+key|exclude)\b/i.test(p) &&
+            !/\busing\s+index\s+[\w"]/i.test(p),
+        )
+      );
     },
     message:
-      "an index on a pilot-volume table blocks writes while it builds; use CREATE INDEX CONCURRENTLY in a file of its own",
+      "an index on a pilot-volume table blocks writes while it builds; use CREATE INDEX CONCURRENTLY in a file of its own (then ADD CONSTRAINT ... USING INDEX for a unique or primary key)",
   },
   {
     rule: "drop_or_rename",
@@ -192,14 +204,16 @@ const rules: Rule[] = [
  * block runs now, so it is kept, stripped the same way, with its PL/pgSQL
  * block words turned into statement breaks so each statement is judged.
  */
-export function stripSql(sql: string): string {
+export function stripSql(sql: string, keepLineComments = false): string {
   let out = "";
   let i = 0;
   while (i < sql.length) {
     const rest = sql.slice(i);
     if (rest.startsWith("--")) {
       const end = sql.indexOf("\n", i);
-      i = end < 0 ? sql.length : end;
+      const stop = end < 0 ? sql.length : end;
+      if (keepLineComments) out += sql.slice(i, stop);
+      i = stop;
       continue;
     }
     if (rest.startsWith("/*")) {
@@ -214,7 +228,7 @@ export function stripSql(sql: string): string {
       const end = sql.indexOf(tag, i + tag.length);
       const body = sql.slice(i + tag.length, end < 0 ? sql.length : end);
       i = end < 0 ? sql.length : end + tag.length;
-      if (/\bdo\s*$/i.test(out)) {
+      if (/\bdo(?:\s+language\s+[\w"]+)?\s*$/i.test(out)) {
         const inner = stripSql(body).replace(
           /\b(?:declare|begin|end\s+if|end\s+loop|end|then|else|elsif|loop)\b/gi,
           ";",
@@ -244,7 +258,9 @@ export function stripSql(sql: string): string {
 export function allowedRules(sql: string): { allowed: Set<string>; bad: string[] } {
   const allowed = new Set<string>();
   const bad: string[] = [];
-  for (const m of sql.matchAll(/--\s*migration-check:\s*allow\s+(\S+)(.*)$/gm)) {
+  // Only real line comments count, not text inside a string or a function body.
+  const commentsOnly = stripSql(sql, true);
+  for (const m of commentsOnly.matchAll(/--\s*migration-check:\s*allow\s+(\S+)(.*)$/gm)) {
     const rule = m[1] as string;
     if (!rules.some((r) => r.rule === rule)) bad.push(`unknown rule ${rule}`);
     else if ((m[2] ?? "").trim().length < 10) bad.push(`allow ${rule} needs a reason`);

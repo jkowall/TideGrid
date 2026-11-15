@@ -79,8 +79,11 @@ describe.skipIf(!env)("expand, backfill, verify, contract rehearsal", () => {
   });
 
   afterAll(async () => {
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await sql.end();
+    try {
+      await sql?.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    } finally {
+      await sql?.end({ timeout: 5 });
+    }
   });
 
   it("rehearses every step and keeps old and new code working throughout", async () => {
