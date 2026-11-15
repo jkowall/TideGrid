@@ -8,6 +8,7 @@ import {
   IdempotencyKey,
   StripeElementConfig,
   TripOfferResponse,
+  TurnstileToken,
 } from "@tidegrid/contracts";
 import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import {
@@ -29,6 +30,7 @@ import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { cancelPaymentAfterCommit, providerFor } from "../payments.ts";
 import { withPublicTenant } from "../public-tenant.ts";
+import { requireHuman } from "../turnstile.ts";
 import { ProblemError, problemAnswer, withProblems } from "./problems.ts";
 import { errorBody } from "./responses.ts";
 
@@ -156,7 +158,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       `Rate limited per client address and operator like quotes, and at most ${MAX_OPEN_CHECKOUTS_PER_CLIENT} open checkouts per client address at a time. A limited request answers 429 and writes nothing.`,
     ].join("\n\n"),
     request: {
-      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      headers: z.object({ "idempotency-key": IdempotencyKey, "turnstile-token": TurnstileToken }),
       body: {
         required: true,
         content: { "application/json": { schema: CheckoutSessionCreateRequest } },
@@ -175,11 +177,14 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       422: problemAnswer(
         "The accepted policy is not the quote's (policy_not_accepted), the total is below what the provider charges (payment_amount_too_small), or idempotency_key_reused. Problem details",
       ),
+      403: errorBody(
+        "The page's Turnstile check is missing (human_check_required) or did not pass (human_check_failed); nothing was written",
+      ),
       429: errorBody(
         "Too many requests from this address for this operator (rate_limited), or too many open checkouts (too_many_checkouts); nothing was written",
       ),
       503: errorBody(
-        "Payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); for the latter, retry the same request with the same Idempotency-Key",
+        "Payments are not configured (payments_unavailable), the provider did not answer (payment_provider_unavailable), or the Turnstile check could not be made (human_check_unavailable); retry the same request with the same Idempotency-Key and a new Turnstile token",
       ),
     },
   });
@@ -192,6 +197,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       if (!provider) {
         throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
       }
+      await requireHuman(c, deps, "checkout");
       const result = await withPublicTenant(
         c,
         {

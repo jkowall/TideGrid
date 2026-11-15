@@ -119,13 +119,13 @@ Evaluate the gate only after all 12 are complete. Do not change the denominator 
 
 #### Qualified-prospect feasibility and commercial follow-up
 
-Authorize the bounded feasibility and cost spikes in the roadmap only when at least five of the 12 operators meet the direct-first profile and at least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up. Then hold that separate meeting with each qualified Native prospect. Use the verified aggregate economics, disclose the full standard price before the pilot credit, and ask the authorized buyer for a written conditional commitment only after confirming the standard scope, fee base, pass-throughs, and store-account responsibilities.
+Authorize the bounded feasibility and cost spikes in the roadmap only when at least five of the 12 operators meet the direct-first profile and at least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up. Under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) the Native-qualified count is not required and the native spike is skipped. Then hold that separate meeting with each qualified prospect. Use the verified aggregate economics, disclose the full standard price before the pilot credit, and ask the authorized buyer for a written conditional commitment only after confirming the standard scope, fee base, pass-throughs, and store-account responsibilities.
 
 Across all 12 interviews, preserve the thresholds defined once in the roadmap [validation gate](05-roadmap-validation.md#validation-gate); do not move them in response to any single interview.
 
 Compliments, future-tense interest, feature requests, and willingness to join a mailing list do not count as demand evidence.
 
-**Exit:** Twelve structured records exist, including disconfirming evidence. When both the five-of-12 gate and the three-provisional-Native-prospect gate pass, the feasibility evidence and qualified commercial follow-up outcomes also exist. The owner records a go, change, or stop decision.
+**Exit:** Twelve structured records exist, including disconfirming evidence. When the five-of-12 gate passes, together with the three-provisional-Native-prospect gate or, for the Core pilot gate, without it, the feasibility evidence and qualified commercial follow-up outcomes also exist. The owner records a go, change, or stop decision.
 
 ### Step 6: Fund and complete paid-pilot readiness
 
@@ -137,6 +137,12 @@ Only after the interview thresholds of the [Validation gate](05-roadmap-validati
 - complete accounting, tax, local-registration, security, continuity, domain, public legal-page, and provider-account readiness;
 - verify each pilot operator's entity, D-U-N-S record, organization developer accounts, domain, approved content, and Stripe configuration; and
 - sign all three recurring agreements and collect all three settled $2,250 Pilot Native setup payments before starting the full production build.
+
+The phone app is optional. Under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate), adopted by the owner on 2026-11-15, this step changes for operators that do not want it:
+
+- the native-store responsibilities, app-store responsibility, and Native insurance items drop out of the readiness scope;
+- operator verification covers the entity, public website, domain email, authorized representative, and Stripe configuration, with no D-U-N-S record or Apple and Google organization accounts; and
+- TideGrid signs three 12-month Booking Core agreements at the full recurring price and collects three settled $1,000 Managed Launch payments before starting the full production build. A prepaid first quarter is not required.
 
 The itemized live-customer-readiness estimate remains $6,405 to $17,100, with $8,000 to $18,000 retained as a conservative authorization ceiling until quotes replace assumptions. That amount is not the price of filing the LLC.
 

@@ -74,6 +74,10 @@ With `VITE_DEMO_MAILBOX=1` the confirmation and the management page link to the 
 
 For the Stripe card form (W1-STRIPE-ELEMENT, D3, a coordinator default pending owner approval) the policy also names Stripe's origins for Stripe.js: `https://js.stripe.com` and `https://*.js.stripe.com` in `script-src` and `frame-src`, `https://hooks.stripe.com` in `frame-src` for the bank's 3D Secure check, and `https://api.stripe.com` in `connect-src`. That is the only wildcard. Nothing for Stripe's address autocomplete, no style hash, and `Permissions-Policy` keeps `payment=()`. The guest site is the only place: the console's policy and the Worker's own answers (`worker/headers.ts`, none of them a page) are unchanged. The list was written from the coordinator's knowledge of Stripe's security guide, which the build container could not read on 2026-11-08; the owner's check list compares it before a Stripe window.
 
+## The Turnstile check (W3-OPS-4)
+
+Where the API checks Turnstile, the tenant bootstrap carries `humanCheck.siteKey`. `src/humanCheck.ts` then loads Cloudflare's script on first use (never at startup) and asks for a fresh token right before opening a checkout, asking for a new waiver link, and the dock lookup, sent in the `Turnstile-Token` header. The widget runs in managed mode with interaction-only appearance, so most guests never see it; when Cloudflare wants a tap, a small box shows at the bottom of the screen. If the check cannot run or fails, the page shows the same refusal the API would give (403 `human_check_failed`). Without a site key (local, preview, tests) nothing loads. The policy allows `https://challenges.cloudflare.com` in `script-src` and `frame-src` only.
+
 ## The installable site (G2.14b)
 
 The site is still one assets-only SPA for every operator. An edge Worker (`worker/index.ts`) runs first only for `/manifest.webmanifest`, `/icons/*`, and `/sw.js` (`run_worker_first` in `wrangler.jsonc`). It reads the tenant from the request URL's hostname only, never from a header, and asks the API's `GuestGateway` entrypoint over a service binding; the gateway checks the host with the strict origin rules itself.

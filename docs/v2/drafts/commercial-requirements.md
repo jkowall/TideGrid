@@ -1,6 +1,6 @@
 # TideGrid Stage 0 commercial requirements (draft)
 
-**Status:** Proposed, not adopted; no authority until the owner records approval in the register.
+**Status:** Approved by the owner on 2026-11-15 as written ([decision register](../06-decision-register.md#2026-11-15-owner-answers-on-waiver-evidence-retention-the-two-stage-0-drafts-the-core-pilot-gate-and-the-parked-live-tests-owner-decisions-coordinator-defaults-where-noted)). [Stage 0](../05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company) links to it. Approval answers none of the questions for counsel. PA-3a was added the same day for the adopted Core pilot offer.
 **Drafted:** 2026-11-08, goal W1-COMM-REQ, for the Stage 0 item "Record the required pilot agreement, data, service, payment, and app-store terms" in the [roadmap](../05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company).
 **Placement:** a draft, not a numbered V2 document. It is not part of the [authority order](../00-index.md#authority-and-historical-artifacts). Where it differs from the [decision register](../06-decision-register.md) or a numbered document, they win and this draft gets corrected.
 **Not legal advice.** This is a list of requirements for a later agreement set. It contains no contract language and is not a contract, an offer, or a counsel engagement. It names no counsel. Counsel review waits for the [Validation gate](../05-roadmap-validation.md#validation-gate) to support the paid-pilot readiness spend.
@@ -32,7 +32,7 @@ The Stage 0 exit asks that "the brief, interview guide, price calculator, standa
 - the [pricing worksheet draft](../../customer/pricing-worksheet-draft.md), the price calculator. Payment terms PT-1 to PT-3 rest on the same prices and fee base it applies.
 - the [standard CSV import draft](standard-csv-import.md), the standard import and the Managed Launch boundary. Requirements PA-9, DH-10, and ST-4 rest on the same boundary.
 
-Neither draft is adopted. If either changes before approval, the matching requirement here follows it.
+The owner approved the pricing worksheet on 2026-11-15; the CSV import draft was approved earlier. If either changes, the matching requirement here follows it.
 
 Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draft, and the [validation brief](../../customer/tidegrid-validation-brief.md) state the fee base of the [commercial model](../03-commercial-model.md#net-managed-booking-value) where they state it. In all three, imported OTA reservations stay out and TideGrid-managed direct bookings paid outside Stripe stay in. The worksheet and the brief also keep taxes, tips, complimentary value, and refunded value out. This draft adds no fee base rule.
 
@@ -59,6 +59,13 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 - **Source.** [Pilot Native offer controls](../03-commercial-model.md#pilot-native-offer-controls); the register row Pilot Native offer.
 - **Open question for counsel.** What follows when the operator misses a schedule obligation: a delay, a change order, loss of the credit, or termination? V2 states the obligations but no consequence.
 - **Gate.** Paid-pilot readiness.
+
+### PA-3a. Core pilot offer conditions
+
+- **Requirement.** For an operator that does not want the phone app: the operator fits the pilot segment and standard scope. It signs a 12-month Booking Core agreement at the full recurring price, pays $1,000 for Managed Launch before the Core pilot gate passes, and pays full extra-boat, pass-through, and custom-work charges. The Managed Launch payment is settled and non-refundable once the operator passes verification, with refund and long-stop treatment as for the Native payment. No prepaid first quarter is required. It uses one legal operator, one brand, and one location. No D-U-N-S record or Apple and Google organization accounts are required, and the agreement set leaves out the native-store terms. If the operator buys Native later, the Native terms and the Native pilot gate apply from then on.
+- **Source.** [Core pilot gate](../05-roadmap-validation.md#core-pilot-gate); [Core pilot offer controls](../03-commercial-model.md#core-pilot-offer-controls); the 2026-11-15 owner answers in the register.
+- **Open question for counsel.** Can one master agreement serve both offers, with the Native addendum left out for a Core pilot, and what happens to Managed Launch hours not used before cutover?
+- **Gate.** Paid-pilot readiness, with the native-store items out of scope for a Core-only pilot.
 
 ### PA-4. Full price first, pilot credit separate
 

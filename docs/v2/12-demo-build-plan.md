@@ -276,7 +276,7 @@ The build is demo-complete when, on a preview deployment with two synthetic tena
 
 The evidence is in the verification log's [November 4 entry](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026), its [November 7 step 9 entry](../verification-log.md#step-9-for-the-live-api-dd30fc8-november-7-2026), and its November 8 dispatch entries for [`91a4faa`](../verification-log.md#step-9-for-91a4faa-by-dispatch-november-8-2026), [`1f39feb`](../verification-log.md#step-9-for-1f39feb-by-dispatch-november-8-2026), and [`9086a18`](../verification-log.md#step-9-for-9086a18-by-dispatch-november-8-2026), and the [O-REL entry](../verification-log.md#o-rel-b1461f3-released-to-the-api-and-console-november-8-2026).
 
-None of this is a gate. It is the point at which the code can be shown to an operator and taken toward the Core live gate when the [Validation gate](05-roadmap-validation.md#validation-gate) or the proposed Core pilot gate passes.
+None of this is a gate. It is the point at which the code can be shown to an operator and taken toward the Core live gate when the [Validation gate](05-roadmap-validation.md#validation-gate) or the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) passes.
 
 ## Owner-provided inputs
 

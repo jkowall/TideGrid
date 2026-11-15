@@ -271,6 +271,16 @@ const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.sli
 const releasedText = (charter: boolean) =>
   `${heldThing(charter)} ${charter ? "was" : "were"} released`;
 
+/** Refusals the API gives before it reads the idempotency key. */
+function refusedBeforeKey(code: string): boolean {
+  return (
+    code === "rate_limited" ||
+    code === "human_check_required" ||
+    code === "human_check_failed" ||
+    code === "human_check_unavailable"
+  );
+}
+
 export function BookingPage({
   brand,
   tripId,
@@ -1141,14 +1151,21 @@ export function BookingPage({
       go({ kind: "details" });
       return null;
     }
-    // The rate limit refuses before the API reads the key, so after a lost
-    // answer the checkout may still exist: the doubt and the attempt stand.
-    if (doubted && result.kind === "refused" && result.code === "rate_limited") {
+    // The rate limit and the human check refuse before the API reads the
+    // key, so after a lost answer the checkout may still exist: the doubt and
+    // the attempt stand.
+    if (doubted && result.kind === "refused" && refusedBeforeKey(result.code)) {
       setTrouble({
-        notice: {
-          title: "Too many tries in a short time",
-          body: "Wait a minute, then press Try again.",
-        },
+        notice:
+          result.code === "rate_limited"
+            ? {
+                title: "Too many tries in a short time",
+                body: "Wait a minute, then press Try again.",
+              }
+            : {
+                title: "We couldn't confirm you're not a robot",
+                body: "Press Try again to check once more.",
+              },
       });
       go({ kind: "details" });
       return null;

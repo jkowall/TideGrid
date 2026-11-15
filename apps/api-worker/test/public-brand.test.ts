@@ -60,7 +60,7 @@ describe("published contract", () => {
         content: { "application/json": { schema: { properties: Record<string, unknown> } } };
       }
     ).content["application/json"].schema;
-    expect(Object.keys(schema.properties).sort()).toEqual(["brand", "tenant"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["brand", "humanCheck", "tenant"]);
     const brandSchema = schema.properties.brand as {
       additionalProperties: boolean;
       required: string[];

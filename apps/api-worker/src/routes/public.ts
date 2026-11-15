@@ -46,6 +46,12 @@ export function registerPublicRoutes(app: OpenAPIHono<AppEnv>) {
     }
     c.header("Cache-Control", "private, max-age=60");
     c.header("Vary", "Origin");
-    return c.json(found.experience, 200);
+    const siteKey = c.env.TURNSTILE_SITE_KEY;
+    return c.json(
+      siteKey && c.env.TURNSTILE_SECRET_KEY
+        ? { ...found.experience, humanCheck: { provider: "turnstile" as const, siteKey } }
+        : found.experience,
+      200,
+    );
   });
 }

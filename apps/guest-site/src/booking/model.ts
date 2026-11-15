@@ -744,6 +744,14 @@ export function checkoutTrouble(failure: Failure, operator: string, charter = fa
           body: `Online payments start at $0.50. Call or email ${operator} to book.`,
         },
       };
+    case "human_check_required":
+    case "human_check_failed":
+      return {
+        notice: {
+          title: "We couldn't confirm you're not a robot",
+          body: "Try again. If it keeps happening, reload the page.",
+        },
+      };
     case "too_many_checkouts":
       return {
         notice: {

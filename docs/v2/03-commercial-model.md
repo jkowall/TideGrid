@@ -14,10 +14,13 @@ None of the prices, conversion assumptions, cost assumptions, or margin targets 
 | Managed Launch | $1,000 | None | Optional, standard scope only |
 | Native add-on | $4,500 | $399/month + 0.25% of net managed booking value | 12 months; Booking Core required |
 | Pilot Native offer | $2,250 | Full Booking Core and Native recurring price | First three qualified pilot operators only; Managed Launch free |
+| Core pilot offer | $1,000 Managed Launch, paid | Full Booking Core recurring price | First three qualified pilot operators under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate); no phone app required; no credit |
 
 Booking Core includes two active boats. Each additional active boat costs $75 per month. The Native add-on covers one operator-branded iOS and Android app pair. Boats are inventory inside that app, not separate apps. Each additional operator brand or store-app pair carries another applicable Native setup and recurring fee and requires a custom quote.
 
-The Pilot Native offer is a customer discount and research program that grants no equity, governance, profit share, intellectual-property, exclusivity, or agency right, as recorded in the [decision register](06-decision-register.md) row "Ownership and control".
+The phone app is optional. The owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15, so a pilot can start on Booking Core alone through the Core pilot offer. If a Core pilot operator later adds Native, it passes the Native pilot gate before its apps go live; which Native setup price applies then is an open owner question.
+
+The Pilot Native offer and the Core pilot offer are customer programs that grant no equity, governance, profit share, intellectual-property, exclusivity, or agency right, as recorded in the [decision register](06-decision-register.md) row "Ownership and control".
 
 There is no monthly, seasonal, or usage pause during the initial 12-month term. A seasonal operator continues to pay the fixed subscription when no trips run.
 
@@ -164,8 +167,9 @@ Customer-level contribution is not startup cash flow. The current planning allow
 | Contract, privacy, CPA, insurance, security, and continuity readiness | $8,000 to $18,000 all-in authorization ceiling, including formation costs already incurred | Staged live-customer readiness; not setup delivery or recurring cost of service |
 | Shared hosting and operating services for three pilot operators | $150 to $310 per month | Shared product cost to allocate across active customers |
 | Three Pilot Native setup payments | $6,750 collected | Validation revenue; restricted by the pilot-customer subsidy and delivery obligations |
+| Or three Core pilot Managed Launch payments | $3,000 collected | Validation revenue under the Core pilot gate; restricted by the $5,000 Core-only subsidy stop and the Managed Launch hour limits |
 
-The detailed readiness plan itemizes an all-in, unquoted estimate of $6,405 to $17,100 and retains $8,000 to $18,000 as the conservative authorization ceiling. After paying the $125 state filing, the remaining itemized range is about $6,280 to $16,975 before any other formation or readiness costs already paid. Against the all-in ceiling, the three pilot-customer payments leave a pre-build cash gap of about $1,250 to $11,250 before shared product engineering or a full launch. This is a planning reserve comparison, not an invoice or proof that setup revenue funds readiness. TideGrid must identify the funding source and a total engineering budget before it completes paid-pilot readiness or accepts the pilot contracts.
+The detailed readiness plan itemizes an all-in, unquoted estimate of $6,405 to $17,100 and retains $8,000 to $18,000 as the conservative authorization ceiling. After paying the $125 state filing, the remaining itemized range is about $6,280 to $16,975 before any other formation or readiness costs already paid. Against the all-in ceiling, the three Pilot Native payments leave a pre-build cash gap of about $1,250 to $11,250 (about $5,000 to $15,000 with three Core pilot payments instead) before shared product engineering or a full launch. This is a planning reserve comparison, not an invoice or proof that setup revenue funds readiness. TideGrid must identify the funding source and a total engineering budget before it completes paid-pilot readiness or accepts the pilot contracts.
 
 The current unit-economics model assigns $80 per Core-plus-Native customer per month to infrastructure and native tooling. Across three pilot operators that is $240 per month, which falls inside the shared-pilot operating allowance but does not validate it. Track fixed platform cost, variable customer cost, operator pass-throughs, setup delivery, support labor, owner operating time, and shared engineering in separate ledgers. Pass-through reimbursement is not product revenue.
 
@@ -181,7 +185,7 @@ The $0 setup path provides the configuration workflow, import template, document
 
 Managed Launch covers up to eight TideGrid labor hours for one operator, one brand, and one location. It includes catalog and policy configuration, waiver setup, one standard CSV import, one staff training session, and cutover assistance. Data repair, repeated imports, custom reports, on-site work, and provider remediation are separate work.
 
-Work expected to exceed eight hours requires a written custom quote before it starts. Reprice or narrow Managed Launch before customer four if the median pilot launch exceeds four hours. The eight-hour figure is a pilot ceiling, not the sustainable owner-operated target.
+Under the Core pilot offer, Managed Launch is required and paid at $1,000; it is the operator's settled commitment. Work expected to exceed eight hours requires a written custom quote before it starts. Reprice or narrow Managed Launch before customer four if the median pilot launch exceeds four hours. The eight-hour figure is a pilot ceiling, not the sustainable owner-operated target.
 
 ### Native setup
 
@@ -231,6 +235,28 @@ To receive it, each pilot operator must:
 - accept shared product configuration with no source fork or exclusive feature commitment.
 
 The offer ends after three paid, qualified pilot operators. It cannot be stacked, transferred, converted to cash, extended to another brand, or used to fund custom work. Public reference or case-study rights require separate consent.
+
+## Core pilot offer controls
+
+The owner adopted the Core pilot offer on 2026-11-15 with the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate). It lets a pilot start without the phone app. It has no list-price credit:
+
+```text
+Core pilot setup payment per operator = $1,000 Managed Launch, settled and non-refundable
+Core pilot list-price credit           = $0
+Maximum Core-only customer-specific subsidy stop = $5,000 across all Core-only pilots
+```
+
+To count toward the Core pilot gate, each operator must:
+
+- fit the pilot segment and standard product scope;
+- sign a 12-month Booking Core agreement at the full recurring price ($149/month plus 1.5% of net managed booking value, $3,000 annual minimum);
+- pay $1,000 for Managed Launch before the Core pilot gate passes;
+- pay the full extra-boat, pass-through, and custom-work charges;
+- use one legal operator, one brand, and one operating location;
+- supply approved branding, waiver language, legal URLs, business records, clean data, provider accounts, and approvals on the agreed schedule; and
+- accept shared product configuration with no source fork or exclusive feature commitment.
+
+A prepaid first quarter of the subscription ($447, credited against invoices) may be offered but is not required (coordinator default D1 in the decision register). The $5,000 stop (default D2) is separate from the $25,000 Native stop and, like it, is a stop, not a budget. Each operator is still held to the Managed Launch four-hour target and eight-hour ceiling. The $500 Native direct-cost ceiling does not apply. A Core pilot operator that later buys Native passes the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate) before its apps go live, and the Native price-evidence rules apply from then on. The Core pilot gate counts the first three paid, qualified operators.
 
 ## Pass-through costs and custom work
 
@@ -285,8 +311,8 @@ These vendor claims are pricing anchors, not TideGrid demand evidence. TideGrid'
 The interview, qualification, and paid-pilot readiness sequence is defined once in the roadmap [gates](05-roadmap-validation.md#gates). The full production build starts only after that sequence passes and the commercial conditions below are met.
 
 - Obtain Stripe confirmation of Stripe-set processing fees and Stripe negative-balance loss responsibility for the exact pilot connected-account configuration.
-- Obtain three signed 12-month Booking Core and Native agreements at the Pilot Native terms.
-- Collect all three $2,250 setup payments. Interest, letters of intent, refundable placeholders, and negotiated recurring discounts do not pass the gate.
+- Obtain three signed 12-month Booking Core and Native agreements at the Pilot Native terms, or, under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate), three signed 12-month Booking Core agreements at the Core pilot terms.
+- Collect all three $2,250 setup payments, or all three $1,000 Managed Launch payments under the Core pilot gate. Interest, letters of intent, refundable placeholders, and negotiated recurring discounts do not pass the gate.
 - Accept no feature promise that breaks the shared configuration model or the V2 scope.
 
 ### During the pilot cohort
@@ -298,12 +324,13 @@ The interview, qualification, and paid-pilot readiness sequence is defined once 
 - Achieve at least 75% recurring gross margin using loaded labor and direct provider costs. The illustrative $25,000 case reaches only 69% and fails this gate.
 - Keep fully loaded acquisition cost at or below $1,500 and pilot-cohort payback below nine months.
 - Deliver at least 90% of customer requirements through shared configuration with no customer source forks.
-- Keep total customer-specific pilot subsidy across all three operators below the $25,000 stop and within the per-operator delivery limits.
+- Keep total customer-specific pilot subsidy across all three operators below the $25,000 stop (the $5,000 stop for Core-only pilots) and within the per-operator delivery limits.
 - Launch pilot operators sequentially and accept no fourth customer until the sole owner approves a monthly capacity budget covering support, releases, reconciliation, finance, incidents, and platform operations.
 
 ### Before standard sales
 
-- Have at least two of the next five qualified Native prospects accept the applicable full setup price, full recurring price, and provider pass-throughs without an extra discount. The setup price is $4,500 only in the up-to-22-hour band, $7,500 in the 23-to-40-hour band, and at least $10,000 above 40 hours if TideGrid does not discontinue the offer.
+- Before standard Native sales, have at least two of the next five qualified Native prospects accept the applicable full setup price, full recurring price, and provider pass-throughs without an extra discount. The setup price is $4,500 only in the up-to-22-hour band, $7,500 in the 23-to-40-hour band, and at least $10,000 above 40 hours if TideGrid does not discontinue the offer.
+- Before standard Booking Core sales after a Core-only cohort, have at least two of the next five qualified prospects accept the full Booking Core price and provider pass-throughs without an extra discount (coordinator reading pending owner confirmation).
 - Confirm that at least two of the three pilot operators would renew at the full recurring price after the initial term.
 - Stop, narrow, or reprice the offer if setup, support, owner capacity, reconciliation, margin, or renewal gates fail. Do not cover a failed model with additional pilot discounts.
 
