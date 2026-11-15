@@ -116,6 +116,8 @@ jobs:
             "revoke update (state) on public.checkout_sessions from tidegrid_app"
             "grant select on public.staff_users to public"
             "revoke execute on function app.resolve_hostname(text) from tidegrid_app"
+            "revoke usage on schema app from tidegrid_app"
+            "create role drill_bypass nologin bypassrls; grant drill_bypass to tidegrid_app"
             "create policy drill_leak_cols on public.staff_users for select using (true)"
             "create role drill_plain nologin; do \$\$ declare f regprocedure; begin select p.oid::regprocedure into f from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'app') and p.prosecdef limit 1; execute format('alter function %s owner to drill_plain', f); end \$\$"
           )

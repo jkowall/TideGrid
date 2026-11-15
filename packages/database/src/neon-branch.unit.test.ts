@@ -72,6 +72,7 @@ describe("neon-branch create options", () => {
     expect(() => parseCreateArgs(["b", "--at", "2026-11-01 11:00"], now)).toThrow(/ISO 8601/);
     expect(() => parseCreateArgs(["b", "--at", "2026-11-01T11:00:00+01:00"], now)).toThrow(/ISO/);
     expect(() => parseCreateArgs(["b", "--at"], now)).toThrow(/ISO/);
+    expect(() => parseCreateArgs(["b", "--at", "2026-04-31T11:50:00Z"], now)).toThrow(/ISO/);
   });
 
   it("refuses contradictions and bad input", () => {

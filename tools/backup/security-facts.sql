@@ -5,7 +5,7 @@
 --                               permissive, USING and WITH CHECK
 --   grants|<count>|<digest>     every table and column privilege the runtime
 --                               role or PUBLIC holds, with its grant option,
---                               and EXECUTE on the schemas' own functions
+--                               EXECUTE on the schemas' own functions, and schema privileges
 -- A restore that drops, loosens, or adds a policy or a grant changes a digest.
 select format('policies|%s|%s', count(*),
          coalesce(md5(string_agg(concat_ws('|', schemaname, tablename, policyname, cmd, permissive,
@@ -42,5 +42,14 @@ select format('grants|%s|%s', count(*),
      where n.nspname in ('public', 'app')
        and not exists (select 1 from pg_depend d
                         where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')
+       and (x.grantee = 'tidegrid_app'::regrole or x.grantee = 0)
+    union all
+    -- Schema privileges (USAGE on app is what lets the runtime role reach
+    -- the hostname and sign-in lookups at all).
+    select concat_ws('|', case when x.grantee = 0 then 'PUBLIC' else 'tidegrid_app' end,
+             n.nspname, '(schema)', x.privilege_type, x.is_grantable)
+      from pg_namespace n
+      cross join lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) x
+     where n.nspname in ('public', 'app')
        and (x.grantee = 'tidegrid_app'::regrole or x.grantee = 0)
   ) grants;
