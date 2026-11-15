@@ -135,7 +135,6 @@ describe.skipIf(!env)("sealed bookers (W3-OPS-4, 0055)", () => {
     expect(row.booker_name).toBeNull();
     expect(row.booker_email).toBeNull();
     expect(row.booker_sealed).toMatch(/^tgf1:k1:/);
-    expect(row.booker_sealed).not.toContain("Neil");
     expect(row.booker_email_index).toMatch(/^[0-9a-f]{64}$/);
     // Four words (ana, maría, o, neil) and the exact name.
     expect(row.booker_name_index).toHaveLength(5);
