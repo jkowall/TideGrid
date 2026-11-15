@@ -62,8 +62,11 @@ Feasibility-spike gate (needs the direct-first gate first)
   Operator types among them:                                        ____  (needs 2 or more)
   Passes: yes / no
 
+Feasibility-spike gate under the Core pilot gate: not applicable (mark n/a).
+
 Conditional-demand gate (fill only after the commercial follow-ups conclude)
-  Qualified Native operators with a written commitment:             ____  (needs 3 or more)
+  Route: Native (Validation gate) / Core (Core pilot gate)
+  Qualified operators on that route with a written commitment:      ____  (needs 3 or more)
   Operator types among them:                                        ____  (needs 2 or more)
   All from one operator type: yes / no  (yes means the gate fails)
   Passes: yes / no

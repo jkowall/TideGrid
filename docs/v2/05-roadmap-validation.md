@@ -110,7 +110,7 @@ The gate controls when the Native add-on goes live for that operator. It does no
 
 Either three paid Native pilot operators across two operator types (the [Validation gate](#validation-gate)) or three paid Core pilot operators across two operator types (the [Core pilot gate](#core-pilot-gate)) are required before the full build. For a Native cohort, all three pilot operators must pass the Core live gate, every staged Core module's acceptance, and the Native pilot gate before the pilot cohort review in Stage 5 counts as complete. For a Core-only cohort, the review counts as complete when all three operators pass the Core live gate and every staged Core module's acceptance; the Native pilot gate is not required.
 
-TideGrid may sell beyond the pilot cohort when:
+TideGrid may sell beyond the pilot cohort when the conditions below hold. The three Native conditions (Native support, native variant builds, and native release handling) apply only when Native has been sold; a Core-only cohort is measured on the rest.
 
 - Core support averages less than one hour per operator each month.
 - Native support averages less than two hours per operator each month after the first 90 days.

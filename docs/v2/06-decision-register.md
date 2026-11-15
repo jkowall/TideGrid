@@ -19,6 +19,7 @@ The proposal did not settle some details. These are coordinator readings until t
 - **R3.** A prospect uses one pilot offer, not both.
 - **R4.** For a Core-only cohort, Stage 4 is only the launch rehearsal, with no native work.
 - **R5.** The $1,000 Managed Launch payment becomes non-refundable once the operator passes verification, as the Native payment does.
+- **R6.** After a Core-only cohort, the Native-only conditions for selling beyond the pilot (Native support hours, native builds, native release handling, and the Native prospect-price test) do not apply. Standard Booking Core sales instead need two of the next five qualified prospects to accept the full Booking Core price without an extra discount.
 
 Open for the owner: which Native setup price applies if a Core pilot operator adds Native later (the full price or the $2,250 pilot price), and whether a mixed cohort (for example two Native and one Core operator) can pass either gate. The documents stay silent on both.
 

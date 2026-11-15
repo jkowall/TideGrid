@@ -329,7 +329,8 @@ The interview, qualification, and paid-pilot readiness sequence is defined once 
 
 ### Before standard sales
 
-- Have at least two of the next five qualified Native prospects accept the applicable full setup price, full recurring price, and provider pass-throughs without an extra discount. The setup price is $4,500 only in the up-to-22-hour band, $7,500 in the 23-to-40-hour band, and at least $10,000 above 40 hours if TideGrid does not discontinue the offer.
+- Before standard Native sales, have at least two of the next five qualified Native prospects accept the applicable full setup price, full recurring price, and provider pass-throughs without an extra discount. The setup price is $4,500 only in the up-to-22-hour band, $7,500 in the 23-to-40-hour band, and at least $10,000 above 40 hours if TideGrid does not discontinue the offer.
+- Before standard Booking Core sales after a Core-only cohort, have at least two of the next five qualified prospects accept the full Booking Core price and provider pass-throughs without an extra discount (coordinator reading pending owner confirmation).
 - Confirm that at least two of the three pilot operators would renew at the full recurring price after the initial term.
 - Stop, narrow, or reprice the offer if setup, support, owner capacity, reconciliation, margin, or renewal gates fail. Do not cover a failed model with additional pilot discounts.
 
