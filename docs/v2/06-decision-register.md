@@ -8,6 +8,19 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-15: W3-OPS-3, releases from GitHub and pilot-standard CI/CD (coordinator defaults pending owner confirmation)
+
+The owner asked on 2026-11-11 to stop typing confirmations back and to move releases into GitHub, and said on 2026-11-15 to finish the remaining work. The new `release` workflow releases the API, console, and guest site from `main` after one owner approval on the GitHub `production` environment ([runbook](../runbooks/release-from-github.md)). It has never run: it waits on a Cloudflare token and the environment, which only the owner can create. No migration. `nov1` on the Mac stays as the fallback. Coordinator defaults, pending owner confirmation:
+
+- **R1: one approval per run.** One job on `production` releases every Worker chosen, in the order API, console, guest site, and stops at the first failure. The owner approves once, not once per Worker.
+- **R2: new versions only, never domains or schedules.** The workflow uses `wrangler versions upload` and `wrangler versions deploy`, which never touch custom domains, DNS records, or cron schedules. It reads those from the Cloudflare API and refuses a commit whose `wrangler.jsonc` differs from what is live. Such a change still goes out through `nov1` on the owner's terminal.
+- **R3: all traffic at once by default.** Pilot traffic is too low for a percentage step to show much, as the [hosting plan](08-build-hosting-and-operations.md#production-promotion) expects. A run can ask for 10% first: the new version is checked directly with Cloudflare's version override header, watched for a set time (10 minutes by default), then moved to 100%.
+- **R4: automatic rollback on a failed check.** If any check fails after traffic moved, the run puts the earlier version back at 100% and fails. A separate rollback action puts back the deployment before the current one, or a named version, under the same approval.
+- **R5: the release ledger lives in GitHub and Cloudflare.** One JSON line per Worker (SHA, build, versions before and after, outcome, run link, time) in the run summary and in a 90-day artifact, beside GitHub's run, approval, and deployment history and Cloudflare's tagged versions. No ledger file in the repository.
+- **R6: the release never migrates.** An API release refuses until the live database, read from the API's public health, holds the commit's last migration. Migrations stay in `neon-migrate`, with their own approval.
+- **R7: no Neon branch per pull request.** Pull requests keep the disposable PostgreSQL 17 container in CI, which tests the same migrations and suites at no Neon cost (owner, 2026-11-08: keep Neon cheap). A Neon branch per pull request can come back when a pilot needs production-shaped data.
+- **R8: no Worker preview versions per pull request yet.** A preview version would share the live API's bindings (the database through Hyperdrive, and email), so code under review could touch live data. Browser tests keep running against local builds in CI. Revisit once staging has its own Workers; staging promotion is then a `staging` job before `production` in the same workflow.
+
 ### 2026-11-14: W3-G2.5-TAX, staff screens for tax rates (coordinator defaults pending owner confirmation)
 
 Staff endpoints and the console's Tax rates page for the per-location rates of 2026-11-08 ([pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax), [console](../../apps/operator-site/README.md#tax-rates-w3-g25-tax)). No migration. Coordinator defaults, pending owner confirmation:

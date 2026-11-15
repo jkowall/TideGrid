@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "nov1": "tsx src/cli.ts"
+    "nov1": "tsx src/cli.ts",
+    "gh-release": "tsx src/gh-release/cli.ts"
   },
   "dependencies": {
     "postgres": "^3.4.0"
