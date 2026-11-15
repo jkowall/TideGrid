@@ -18,7 +18,7 @@ None of the prices, conversion assumptions, cost assumptions, or margin targets 
 
 Booking Core includes two active boats. Each additional active boat costs $75 per month. The Native add-on covers one operator-branded iOS and Android app pair. Boats are inventory inside that app, not separate apps. Each additional operator brand or store-app pair carries another applicable Native setup and recurring fee and requires a custom quote.
 
-The phone app is optional. The owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15, so a pilot can start on Booking Core alone through the Core pilot offer. An operator that later adds Native pays the Native setup and recurring prices in force at that time.
+The phone app is optional. The owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15, so a pilot can start on Booking Core alone through the Core pilot offer. If a Core pilot operator later adds Native, it passes the Native pilot gate before its apps go live; which Native setup price applies then is an open owner question.
 
 The Pilot Native offer and the Core pilot offer are customer programs that grant no equity, governance, profit share, intellectual-property, exclusivity, or agency right, as recorded in the [decision register](06-decision-register.md) row "Ownership and control".
 

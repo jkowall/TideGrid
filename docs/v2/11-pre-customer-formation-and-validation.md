@@ -119,13 +119,13 @@ Evaluate the gate only after all 12 are complete. Do not change the denominator 
 
 #### Qualified-prospect feasibility and commercial follow-up
 
-Authorize the bounded feasibility and cost spikes in the roadmap only when at least five of the 12 operators meet the direct-first profile and at least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up. Then hold that separate meeting with each qualified Native prospect. Use the verified aggregate economics, disclose the full standard price before the pilot credit, and ask the authorized buyer for a written conditional commitment only after confirming the standard scope, fee base, pass-throughs, and store-account responsibilities.
+Authorize the bounded feasibility and cost spikes in the roadmap only when at least five of the 12 operators meet the direct-first profile and at least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up. Under the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) the Native-qualified count is not required and the native spike is skipped. Then hold that separate meeting with each qualified prospect. Use the verified aggregate economics, disclose the full standard price before the pilot credit, and ask the authorized buyer for a written conditional commitment only after confirming the standard scope, fee base, pass-throughs, and store-account responsibilities.
 
 Across all 12 interviews, preserve the thresholds defined once in the roadmap [validation gate](05-roadmap-validation.md#validation-gate); do not move them in response to any single interview.
 
 Compliments, future-tense interest, feature requests, and willingness to join a mailing list do not count as demand evidence.
 
-**Exit:** Twelve structured records exist, including disconfirming evidence. When both the five-of-12 gate and the three-provisional-Native-prospect gate pass, the feasibility evidence and qualified commercial follow-up outcomes also exist. The owner records a go, change, or stop decision.
+**Exit:** Twelve structured records exist, including disconfirming evidence. When the five-of-12 gate passes, together with the three-provisional-Native-prospect gate or, for the Core pilot gate, without it, the feasibility evidence and qualified commercial follow-up outcomes also exist. The owner records a go, change, or stop decision.
 
 ### Step 6: Fund and complete paid-pilot readiness
 

@@ -6,7 +6,7 @@
 
 TideGrid remains an exploratory product until one of two commercial gates passes: the [Validation gate](#validation-gate), where three pilot operators across at least two operator types pay the native setup fee and sign the recurring agreement, or the [Core pilot gate](#core-pilot-gate), where three operators across at least two operator types sign 12-month Booking Core agreements and pay for Managed Launch, with no phone app required. The TideGrid owner may build prototypes and conduct research before either gate. TideGrid should not start the full production system, provider onboarding, or schema replacement before one of them passes. The Native add-on keeps its own rule: no native app factory, operator store accounts, or Native pilot gate work for any operator until three paid Native operators exist, or until the owner records a separate decision to fund Native from Core revenue.
 
-Production readiness is not one gate. Each pilot operator passes three named gates, defined in [Gates](#gates): the Core live gate before its first real booking, each Staged Core module's own acceptance before that module is enabled for it, and the Native pilot gate before its branded apps go live. An operator may take its first live booking at the Core live gate with staged modules disabled and before its native apps are approved. An operator that has not bought the Native add-on never passes the Native pilot gate and does not need to. Pilot operators receive staging access during development. Staging use, TestFlight use, internal Android distribution, or an operator-run shadow workflow does not pass any gate.
+Production readiness is not one gate. Each pilot operator passes up to three named gates, defined in [Gates](#gates): the Core live gate before its first real booking, each Staged Core module's own acceptance before that module is enabled for it, and the Native pilot gate before its branded apps go live. An operator may take its first live booking at the Core live gate with staged modules disabled and before its native apps are approved. An operator that has not bought the Native add-on never passes the Native pilot gate and does not need to. Pilot operators receive staging access during development. Staging use, TestFlight use, internal Android distribution, or an operator-run shadow workflow does not pass any gate.
 
 The pilot scope in [Pilot product scope](02-product-scope.md) is still required in full for pilot completion. The split changes the order in which the scope must be proven, not its size.
 
@@ -48,7 +48,7 @@ Adopted by the owner on 2026-11-15 ([decision register](06-decision-register.md#
 
 **Native later.** If Native is sold later to a Core pilot operator, that operator passes the [Native pilot gate](#native-pilot-gate) before its apps go live, and the Native price-evidence rules apply from that point.
 
-The Core pilot gate passes when three qualified operators across at least two operator types have signed and paid as in item 3, and the readiness, verification, and Stripe items pass. Formation, interest, letters of intent, refundable placeholders, and negotiated recurring discounts do not pass it.
+The Core pilot gate passes when all six items above hold. Formation, interest, letters of intent, refundable placeholders, and negotiated recurring discounts do not pass it.
 
 ### Core live gate
 
@@ -126,7 +126,7 @@ TideGrid may sell beyond the pilot cohort when:
 
 Keep the $4,500 native setup price when median delivery stays at or below 22 hours and direct cost stays below $500. Raise it to $7,500 for 23 to 40 hours. Quote at least $10,000 or discontinue native for that segment above 40 hours.
 
-The Native pricing rules in this section and the next two paragraphs apply only when Native is sold. A Core-only cohort produces no evidence for them.
+The Native pricing rules in this section apply only when Native is sold. A Core-only cohort produces no evidence for them.
 
 The $4,500 price and 22-hour ceiling remain provisional until TideGrid completes one end-to-end public-store submission and reproduces the same process for a second operator without source changes. A successful local build, TestFlight upload, or internal Play release does not prove the setup economics.
 

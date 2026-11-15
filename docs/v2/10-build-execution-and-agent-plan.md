@@ -28,11 +28,11 @@ Before the first live use of each area (money, tenancy, recovery, security-sensi
 
 ## Goal map
 
-No production goal may cross the [Validation gate](05-roadmap-validation.md#validation-gate) or, for Core work, the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate). Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
+No production goal starts before the [Validation gate](05-roadmap-validation.md#validation-gate) or the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) passes; Native goals also wait for the Native rule below. Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
 
 The Gate column names the gate in [Gates](05-roadmap-validation.md#gates) that the goal feeds. The G2 series is Core live gate work and must be complete before an operator's first real booking. The G3 series is Staged Core module work; an operator may already be live while it is built, and each module is enabled per operator only after its own acceptance. The G4 series is Native pilot gate work and does not block the PWA or the Core live gate. The G0 series is pre-build evidence inside the Validation gate.
 
-Native goals are conditional. The phone app is optional, and the owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15. G0.2, G4.1 through G4.6, the Native parts of G4.7, and the O4 and O6 operational goals start only after three paid Native operators exist or the owner records a decision to fund Native from Core revenue. A Core-only cohort runs G0.1, G0.3, the G2 and G3 series, the Core parts of G4.7, G4.8, and O5. For a Core-only cohort, G4.8 compares Core packets only.
+Native goals are conditional. The phone app is optional, and the owner adopted the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) on 2026-11-15. G4.1 through G4.6, the Native parts of G4.7, the store parts of O4 (organization accounts, submission, and review response), and O6 start only after three paid Native operators exist or the owner records a decision to fund Native from Core revenue. G0.2 is the Validation gate's native spike and is skipped on the Core pilot route. A Core-only cohort runs G0.1, G0.3, the G2 and G3 series, the Core parts of G4.7, G4.8, the public-page and content-approval part of O4.`operator`.1, and O5. For a Core-only cohort, G4.8 compares Core packets only.
 
 | Goal | Gate | Outcome | Principal proof |
 |---|---|---|---|

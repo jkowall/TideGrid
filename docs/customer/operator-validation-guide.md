@@ -256,7 +256,7 @@ Thank the participant and state only the agreed follow-up. Do not imply selectio
 
 ## Qualified-prospect commercial follow-up
 
-Conduct the separate 30-minute discussions only after all 12 initial interviews are complete, at least five operators meet the direct-first profile, and at least three provisionally Native-qualified prospects across two operator types accept the follow-up. The [validation gate](../v2/05-roadmap-validation.md#validation-gate) is the canonical statement of this sequence. Each participant's record must support the Native qualification criteria. The initial interview may secure agreement to this follow-up, but it does not include the commitment ask. Include the other financial or operational decision-maker when approval is shared.
+Conduct the separate 30-minute discussions only after all 12 initial interviews are complete, at least five operators meet the direct-first profile, and at least three provisionally Native-qualified prospects across two operator types accept the follow-up. Under the [Core pilot gate](../v2/05-roadmap-validation.md#core-pilot-gate) the Native-qualified count is not required. The [validation gate](../v2/05-roadmap-validation.md#validation-gate) is the canonical statement of this sequence. Each Native participant's record must support the Native qualification criteria. The initial interview may secure agreement to this follow-up, but it does not include the commitment ask. Include the other financial or operational decision-maker when approval is shared.
 
 Before the meeting:
 
@@ -316,6 +316,8 @@ Count a conditional commitment only when TideGrid has a dated private written re
 - acknowledges the $2,250 Pilot Native setup fee, full recurring price, managed-booking fee definition, pass-through costs, store-account responsibilities, and standard product boundary;
 - identifies any explicit condition and a real decision or switching window; and
 - is not contingent on a source fork, unpriced custom feature, live OTA synchronization, guaranteed store approval, or an undisclosed price concession.
+
+For a Core pilot commitment under the [Core pilot gate](../v2/05-roadmap-validation.md#core-pilot-gate), the record confirms the direct-first qualification only, states readiness to enter a 12-month Booking Core agreement, and acknowledges the $1,000 Managed Launch fee, full recurring price, managed-booking fee definition, pass-through costs, and standard product boundary. It needs no Native qualification or store-account items. The other bullets apply unchanged.
 
 Verbal enthusiasm, a survey checkbox, permission to follow up, a referral, a letter drafted only by TideGrid, or a conditional statement from someone without buying authority does not satisfy this gate.
 

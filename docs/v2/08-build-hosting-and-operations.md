@@ -2,7 +2,7 @@
 
 **Status:** Proposed pilot baseline; provisional until the [Validation gate](05-roadmap-validation.md#validation-gate) passes
 
-This document turns the V2 architecture direction into a build and operating plan. It does not authorize production work or provider spending. TideGrid should provision production infrastructure only after three pilot operators pay the native setup fee and sign the recurring agreement in [`05-roadmap-validation.md`](05-roadmap-validation.md).
+This document turns the V2 architecture direction into a build and operating plan. It does not authorize production work or provider spending. TideGrid should provision production infrastructure only after three pilot operators pay the native setup fee and sign the recurring agreement in [`05-roadmap-validation.md`](05-roadmap-validation.md), or after the [Core pilot gate](05-roadmap-validation.md#core-pilot-gate) passes with three paid Core pilot operators.
 
 The current V2 design defines the tenant boundary, transactional authority, and shared native model. It does not yet provide an implementation contract. TideGrid must test the choices in this document during Stage 0 and record accepted changes in [`06-decision-register.md`](06-decision-register.md) or a new ADR. [`10-build-execution-and-agent-plan.md`](10-build-execution-and-agent-plan.md) defines how to divide that work into bounded goals and subagent assignments.
 

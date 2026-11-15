@@ -87,7 +87,7 @@ These prices are proposed and unvalidated by paid use, and this table is neither
 
 Booking Core includes two active boats; each additional active boat costs $75 per month. With two boats, Booking Core plus Native is $548 per month plus 1.75% of net managed booking value, subject to the Core annual minimum.
 
-A pilot does not require the app. The proposed Core pilot is for a direct-first operator that wants Booking Core without a native app. It pays the full Booking Core price with the $3,000 annual minimum and $1,000 for Managed Launch, and receives no pilot credit. The first pilot covers one legal operator, one brand, and one location, and the operator can add the Native add-on later at the price then in force.
+A pilot does not require the app. The proposed Core pilot is for a direct-first operator that wants Booking Core without a native app. It pays the full Booking Core price with the $3,000 annual minimum and $1,000 for Managed Launch, and receives no pilot credit. The first pilot covers one legal operator, one brand, and one location, and the operator can add the Native add-on later.
 
 The proposed Native pilot is aimed at a direct-first operator averaging at least $25,000 per month in trailing net managed booking value with a demonstrated repeat-customer or customer-service use case for an app. The first pilot covers one legal operator, one brand, one location, and one iOS and Android pair. Until TideGrid measures delivery and support costs, standard Native sales target operators closer to $50,000 or more per month. Operators with five or more active boats, above $100,000 per month, or with several locations or brands need a custom quote.
 
