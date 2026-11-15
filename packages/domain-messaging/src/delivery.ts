@@ -70,6 +70,7 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
+import { openMessageContent } from "./message-content.ts";
 import {
   BALANCE_LINK_TEMPLATE,
   BALANCE_REMINDER_TEMPLATE,
@@ -414,10 +415,18 @@ async function claimOne(
     // A staff resend that must wait for its limits is left in the queue, and
     // the claim takes the next message instead.
     const { rows } = await sql<
-      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean; template: string }
+      Omit<ClaimedRow, "from_address" | "subject" | "html_body" | "text_body"> & {
+        subject: string | null;
+        html_body: string | null;
+        text_body: string | null;
+        content_sealed: string | null;
+        state: string;
+        resend: boolean;
+        template: string;
+      }
     >`
       select id, attempts, state, template, booking_id, participant_id, subject_ref, to_email, to_name,
-             from_name, reply_to, subject, html_body, text_body, link_purpose, link_path,
+             from_name, reply_to, subject, html_body, text_body, content_sealed, link_purpose, link_path,
              link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
         from email_messages m
        where tenant_id = ${ctx.tenantId}
@@ -598,6 +607,7 @@ async function claimOne(
     }
     // This operator's suppression (0027): a complaint or hard bounce the
     // provider reported for the address stops its later mail, with no call.
+    // Both sides hold the address key where sealed (0057).
     if (await isSuppressed(trx, ctx.tenantId, found.to_email)) {
       await fail(trx, ctx, found.id, attempt, ADDRESS_SUPPRESSED);
       return { kind: "failed", messageId: found.id, attempt, code: ADDRESS_SUPPRESSED } as const;
@@ -608,8 +618,14 @@ async function claimOne(
       { fromName: found.from_name, replyTo: found.reply_to },
       await loadEmailBrand(trx, ctx.tenantId),
     );
+    // A sealed message (0057) is opened here, for the send only.
+    const { content_sealed: _sealed, ...content } = await openMessageContent(
+      trx,
+      ctx.tenantId,
+      found,
+    );
     const row: ClaimedRow = {
-      ...found,
+      ...content,
       attempts: attempt,
       from_address: fromAddress,
       from_name: sender.fromName,

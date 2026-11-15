@@ -11,6 +11,7 @@ import {
   enqueueOutbox,
   type FieldKeyring,
   type GuardianRelationship,
+  isAddressKey,
   isUuid,
   openField,
   recordAudit,
@@ -21,6 +22,7 @@ import {
   type WaiverRequestState,
   type WaiverSignerRole,
 } from "@tidegrid/database";
+import { openMessageContent } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import type { WaiverSession } from "./access.ts";
 import { type BookingContext, loadBookingContext, tripFacts, tripIsOver } from "./booking.ts";
@@ -464,6 +466,9 @@ export async function signWaiver(
   if (facts.mode !== null && !dock && !assisted) {
     throw new Error("a staff-assisted link has no staff member");
   }
+  // Where the email was sealed (0057), its delivery holds only the address's
+  // key: the address itself is read from the message the link came in.
+  const sentTo = await addressSentTo(trx, ctx.tenantId, facts.recipient_email, facts.message_id);
   const signedAt = facts.now;
   const evidenceId = crypto.randomUUID();
   const signerName = expectedSigner(participant, request.required_signer) ?? signature;
@@ -493,7 +498,7 @@ export async function signWaiver(
               ? `${assisted.staffName} (${assisted.staffId})`
               : assisted.staffId,
           }
-        : { kind: "email_link", recipientMasked: maskEmail(facts.recipient_email ?? "") },
+        : { kind: "email_link", recipientMasked: maskEmail(sentTo ?? "") },
     sourceIp: meta.sourceIp,
     userAgent: meta.userAgent,
   });
@@ -514,7 +519,9 @@ export async function signWaiver(
   // With a field keyring (W3-OPS-4, 0054), the personal fields go into one
   // sealed value and the plain columns stay null; an email link's row names
   // the link's email instead of the address, which the database checks.
-  const recipientEmail = dock || assisted ? null : facts.recipient_email;
+  // Sealed evidence records the address itself; a plain row records it as
+  // the delivery stored it, which the database holds it to.
+  const recipientEmail = dock || assisted ? null : deps.fields ? sentTo : facts.recipient_email;
   const sealed = deps.fields
     ? await sealField(
         deps.fields,
@@ -708,4 +715,28 @@ export async function loadEvidenceDocument(
     document,
     sha256: row.document_sha256,
   };
+}
+
+/** The address an emailed link went to: as stored, or opened from its sealed message (0057). */
+async function addressSentTo(
+  trx: TenantTransaction,
+  tenantId: string,
+  stored: string | null,
+  messageId: string | null,
+): Promise<string | null> {
+  if (stored === null || !isAddressKey(stored)) return stored;
+  if (messageId === null) throw new Error("a sealed delivery's link names no message");
+  const { rows } = await sql<{
+    to_email: string;
+    to_name: string | null;
+    subject: string | null;
+    html_body: string | null;
+    text_body: string | null;
+    content_sealed: string | null;
+  }>`
+    select to_email, to_name, subject, html_body, text_body, content_sealed
+      from email_messages where tenant_id = ${tenantId} and id = ${messageId}`.execute(trx);
+  const row = rows[0];
+  if (!row) throw new Error("a link's message was not found");
+  return (await openMessageContent(trx, tenantId, row)).to_email;
 }

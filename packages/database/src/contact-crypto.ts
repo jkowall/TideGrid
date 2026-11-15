@@ -83,6 +83,31 @@ export function emailToken(
   return blindIndex(keyring, tenantId, "email", email.trim().toLowerCase());
 }
 
+/** The domain an address key uses: `.invalid` never resolves (RFC 2606), so a key can never be mailed. */
+export const ADDRESS_KEY_DOMAIN = "sealed.invalid";
+const addressKeyPattern = /^[0-9a-f]{64}@sealed\.invalid$/;
+
+/**
+ * How an address is stored where the database matches addresses to each
+ * other (0057: the email outbox's `to_email`, waiver deliveries and
+ * reminders, the do-not-email list): the address itself where the
+ * transaction writes plain, or its email token as `<token>@sealed.invalid`
+ * where it seals. Every rule that compares two addresses keeps working, since
+ * one address always has one key in a tenant, and the address is not stored.
+ */
+export async function addressKey(trx: object, tenantId: string, email: string): Promise<string> {
+  const address = email.trim().toLowerCase();
+  const keyring = await contactKeys(trx);
+  return keyring
+    ? `${await emailToken(keyring, tenantId, address)}@${ADDRESS_KEY_DOMAIN}`
+    : address;
+}
+
+/** Whether a stored address is a key (see `addressKey`), not an address. */
+export function isAddressKey(value: string): boolean {
+  return addressKeyPattern.test(value);
+}
+
 /** A name's words: normalized, lowercased, split on anything not a letter or digit, unique. */
 export function nameWords(name: string): string[] {
   const words = name

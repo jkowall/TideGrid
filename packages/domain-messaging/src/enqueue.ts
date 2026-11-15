@@ -7,6 +7,7 @@
 import {
   type AccessPurpose,
   type AccessRevocationReason,
+  ADDRESS_KEY_DOMAIN,
   contactKeys,
   type EmailMessageState,
   type EmailProviderName,
@@ -17,6 +18,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { loadEmailBrand } from "./brand.ts";
+import { sealMessageContent } from "./message-content.ts";
 import { TRIP_REMINDER_TEMPLATE } from "./reminders.ts";
 import { checkContent, type EmailContent, renderEmail, usesAccessLink } from "./render.ts";
 
@@ -155,18 +157,44 @@ export async function enqueueMessage(
   const slot = link ? randomSlot() : null;
   const rendered = renderEmail(brand, input.content, { slot });
   const replyTo = brand.contactEmail ? brand.contactEmail.toLowerCase() : null;
-  // The address's blind index token, where the transaction has a field
-  // keyring (0056): how a message is matched to a sealed participant.
+  // Where the transaction has a field keyring, the message is sealed (0057):
+  // the address, name, subject, and bodies in content_sealed, the address key
+  // in to_email, and the address's token beside it (0056), which matches an
+  // invitation to a sealed participant.
   const keyring = await contactKeys(trx);
   const toEmailIndex = keyring ? await emailToken(keyring, ctx.tenantId, toEmail) : null;
+  const stored = keyring
+    ? {
+        to_email: `${toEmailIndex}@${ADDRESS_KEY_DOMAIN}`,
+        to_name: null,
+        subject: null,
+        html: null,
+        text: null,
+        sealed: await sealMessageContent(trx, ctx.tenantId, {
+          toEmail,
+          toName,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+        }),
+      }
+    : {
+        to_email: toEmail,
+        to_name: toName,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        sealed: null,
+      };
   const { rows } = await sql<{ id: string }>`
     insert into email_messages (tenant_id, dedupe_key, template, template_version, booking_id,
       participant_id, subject_ref, to_email, to_email_index, to_name, from_name, reply_to, subject,
-      html_body, text_body, link_purpose, link_path, link_ttl_seconds, link_slot, next_attempt_at)
+      html_body, text_body, content_sealed, link_purpose, link_path, link_ttl_seconds, link_slot,
+      next_attempt_at)
     values (${ctx.tenantId}, ${input.dedupeKey}, ${input.template}, ${input.templateVersion},
-            ${bookingId}, ${participantId}, ${subjectRef}, ${toEmail}, ${toEmailIndex}, ${toName},
-            ${brand.name},
-            ${replyTo}, ${rendered.subject}, ${rendered.html}, ${rendered.text},
+            ${bookingId}, ${participantId}, ${subjectRef}, ${stored.to_email}, ${toEmailIndex},
+            ${stored.to_name}, ${brand.name},
+            ${replyTo}, ${stored.subject}, ${stored.html}, ${stored.text}, ${stored.sealed},
             ${link?.purpose ?? null}, ${link?.path ?? null}, ${ttl}, ${slot},
             ${input.notBefore ?? null})
     on conflict (tenant_id, dedupe_key) do nothing

@@ -26,6 +26,7 @@
  * one whose access was withdrawn before it went out.
  */
 import {
+  addressKey,
   type Database,
   inTenantTransaction,
   recordAudit,
@@ -195,12 +196,14 @@ export async function remindWaiverRequest(
   );
   const recipient = participant?.email?.trim().toLowerCase() || null;
   if (!participant || !recipient) return skip("address_changed");
-  if (recipient !== f.latest_recipient || f.latest_closed === true) {
+  // Stored as itself, or as its key where contact details are sealed (0057).
+  const recipientKey = await addressKey(trx, ctx.tenantId, recipient);
+  if (recipientKey !== f.latest_recipient || f.latest_closed === true) {
     return skip("address_changed");
   }
   // Not counted by the limits, but never right on the heels of another
   // waiver email to this address.
-  const refusal = await sendingRefusal(trx, ctx.tenantId, request, recipient, f.now);
+  const refusal = await sendingRefusal(trx, ctx.tenantId, request, recipientKey, f.now);
   if (refusal?.code === "interval") return skip("too_soon");
 
   const ttlSeconds = Math.floor(
@@ -250,7 +253,7 @@ export async function remindWaiverRequest(
         participant_id: request.participant_id,
         slot,
         message_id: messageId,
-        recipient_email: recipient,
+        recipient_email: recipientKey,
       })
       .execute();
     await sql`release savepoint waiver_reminder`.execute(trx);
