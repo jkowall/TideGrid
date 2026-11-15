@@ -29,6 +29,26 @@ export interface ParticipantDirectory {
   list(trx: TenantTransaction, tenantId: string, bookingId: string): Promise<WaiverParticipant[]>;
 }
 
+/**
+ * Where signed PDFs live once real evidence exists (W3-OPS-4): a private
+ * bucket with object lock. Keys are content-addressed
+ * (`waivers/<tenant>/<sha256>.pdf`), so writing the same bytes twice is
+ * harmless and a key never names other bytes. The API wires it to the R2
+ * binding (apps/api-worker/src/evidence-store.ts); without one the PDF stays
+ * in the evidence row, as the demo always kept it.
+ */
+export interface EvidenceDocumentStore {
+  /**
+   * Stores the bytes under the key, or confirms the same bytes are already
+   * there. Throws when it cannot, so the signature does not commit.
+   */
+  put(key: string, bytes: Uint8Array, sha256: string): Promise<void>;
+  /** The bytes under the key, or null when no object has it. */
+  get(key: string): Promise<Uint8Array | null>;
+}
+
 export interface WaiverDeps {
   participants: ParticipantDirectory;
+  /** Absent: the PDF is kept in the evidence row (demo, local, preview). */
+  documents?: EvidenceDocumentStore;
 }

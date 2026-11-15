@@ -25,7 +25,7 @@ import { sha256Hex } from "./content.ts";
 import { lockRequest } from "./delivery.ts";
 import { cleanLine, comparableName, formatInstant } from "./format.ts";
 import { closeRequestAccess } from "./links.ts";
-import type { WaiverDeps, WaiverParticipant } from "./ports.ts";
+import type { EvidenceDocumentStore, WaiverDeps, WaiverParticipant } from "./ports.ts";
 import { maskEmail, RENDERING_VERSION, renderWaiverPdf } from "./render.ts";
 import { loadTemplateVersion, type TemplateVersionText } from "./templates.ts";
 
@@ -450,6 +450,19 @@ export async function signWaiver(
     userAgent: meta.userAgent,
   });
   const documentSha256 = await sha256Hex(document);
+  // With a bucket, the PDF is written before the evidence row, under its
+  // content address, so a committed row always has its object. A signature
+  // that then rolls back leaves an object no row names, which the bucket's
+  // lock keeps until its retention ends. Each attempt's PDF carries its own
+  // evidence id and time, so a retry writes a new object and each failed
+  // attempt leaves one orphan; the object inventory finds them by comparing
+  // keys with evidence rows.
+  const stored = deps.documents
+    ? { key: evidenceDocumentKey(ctx.tenantId, documentSha256), size: document.byteLength }
+    : null;
+  if (deps.documents && stored) {
+    await deps.documents.put(stored.key, document, documentSha256);
+  }
   await trx
     .insertInto("waiver_evidence")
     .values({
@@ -479,8 +492,10 @@ export async function signWaiver(
       assisted_by: assisted ? assisted.staffId : null,
       source_ip: meta.sourceIp,
       user_agent: meta.userAgent,
-      document,
+      document: stored ? null : document,
       document_sha256: documentSha256,
+      document_key: stored?.key ?? null,
+      document_size: stored?.size ?? null,
     })
     .execute();
   await sql`
@@ -557,14 +572,34 @@ export class WaiverDocumentMismatchError extends Error {
 }
 
 /**
+ * A PDF the evidence row places in the bucket that the bucket does not have,
+ * or no bucket configured to read it from. It is never papered over; the API
+ * answers 500 and logs this error's name.
+ */
+export class WaiverDocumentMissingError extends Error {
+  constructor(readonly evidenceId: string) {
+    super(`waiver evidence ${evidenceId}: the stored PDF is missing from the evidence bucket`);
+    this.name = "WaiverDocumentMissingError";
+  }
+}
+
+/** The bucket key of a signed PDF: fixed by the tenant and the bytes' SHA-256 (0053). */
+export function evidenceDocumentKey(tenantId: string, sha256: string): string {
+  return `waivers/${tenantId}/${sha256}.pdf`;
+}
+
+/**
  * The signed PDF, for the session that signed it or for staff; null otherwise.
- * The bytes are hashed again on every read and must match the recorded
- * SHA-256, or it throws WaiverDocumentMismatchError.
+ * It comes from the evidence row or, when the row names a key, from the
+ * evidence bucket. The bytes are hashed again on every read and must match
+ * the recorded SHA-256, or it throws WaiverDocumentMismatchError; a key with
+ * no object (or no bucket to read) throws WaiverDocumentMissingError.
  */
 export async function loadEvidenceDocument(
   trx: TenantTransaction,
   tenantId: string,
   filter: { requestId: string } | { evidenceId: string },
+  documents?: EvidenceDocumentStore,
 ): Promise<{
   evidenceId: string;
   bookingReference: string;
@@ -576,10 +611,11 @@ export async function loadEvidenceDocument(
   const { rows } = await sql<{
     id: string;
     reference: string;
-    document: Uint8Array;
+    document: Uint8Array | null;
+    document_key: string | null;
     document_sha256: string;
   }>`
-    select e.id, b.reference, e.document, e.document_sha256
+    select e.id, b.reference, e.document, e.document_key, e.document_sha256
       from waiver_evidence e
       join bookings b on b.tenant_id = e.tenant_id and b.id = e.booking_id
      where e.tenant_id = ${tenantId}
@@ -588,7 +624,13 @@ export async function loadEvidenceDocument(
   );
   const row = rows[0];
   if (!row) return null;
-  const document = new Uint8Array(row.document);
+  let bytes: Uint8Array | null = row.document;
+  if (row.document_key !== null) {
+    bytes = documents ? await documents.get(row.document_key) : null;
+    if (!bytes) throw new WaiverDocumentMissingError(row.id);
+  }
+  if (!bytes) throw new WaiverDocumentMissingError(row.id);
+  const document = new Uint8Array(bytes);
   if ((await sha256Hex(document)) !== row.document_sha256) {
     throw new WaiverDocumentMismatchError(row.id);
   }

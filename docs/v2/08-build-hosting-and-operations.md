@@ -331,6 +331,8 @@ TideGrid must approve and rehearse these runbooks before the first live booking:
 
 Each runbook names an owner, approval threshold, safe first action, customer-impact check, evidence location, rollback or recovery limit, communication owner, and closure test.
 
+Drafts of all ten, not yet approved or rehearsed, are in [docs/runbooks/operations](../runbooks/operations/README.md) (2026-11-15, W3-OPS-7).
+
 ## Required build and release artifacts
 
 Retain these artifacts for each production web or backend release:

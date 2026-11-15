@@ -48,6 +48,8 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
   const kid = `kid-${randomUUID().slice(0, 8)}`;
   let hooks: BookingHooks;
   let tripIndex = 0;
+  /** Bindings one test adds or replaces (W3-OPS-4's evidence bucket); reset after it. */
+  let overrides: Record<string, unknown> = {};
 
   const bindings = () => ({
     ENVIRONMENT: "local" as const,
@@ -59,6 +61,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     FAKE_PAYMENT_WEBHOOK_SECRET: TEST_FAKE_SECRET,
     // Where a staff-started signing link opens: each fixture tenant's own guest host.
     GUEST_LINK_ORIGIN: "https://{slug}.book.example.test",
+    ...overrides,
   });
   const executionCtx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
@@ -975,4 +978,101 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     ).participants[0];
     expect(ann?.request).toMatchObject({ sendsLeft: 3, canResetSends: false });
   });
+
+  it("keeps signed PDFs in the evidence bucket when one is bound, and refuses to sign in staging without one (W3-OPS-4)", async () => {
+    const bucket = new MemoryR2();
+    // A tenant of its own: the shared fixtures' trips are spent by now.
+    const C = await tenant("ops4");
+    tripIndex = 0;
+    try {
+      overrides = { WAIVER_EVIDENCE: bucket };
+      const p = await party(C);
+      const session = await openSession(C, p.annToken);
+      const signed = await request("POST", "/v1/public/waiver-sessions/current/signature", {
+        origin: guestOf(C),
+        bearer: session.sessionSecret,
+        body: signature(session),
+      });
+      expect(signed.status).toBe(201);
+      const [row] = await admin<
+        { id: string; document: Buffer | null; document_key: string; document_sha256: string }[]
+      >`select id, document, document_key, document_sha256 from public.waiver_evidence
+          where request_id = ${p.annRequest}`;
+      expect(row?.document).toBeNull();
+      expect(row?.document_key).toBe(`waivers/${C.id}/${row?.document_sha256}.pdf`);
+      expect([...bucket.objects.keys()]).toEqual([row?.document_key]);
+      expect(bucket.contentTypes.get(row?.document_key ?? "")).toBe("application/pdf");
+      const guestPdf = await request("GET", "/v1/public/waiver-sessions/current/document", {
+        origin: guestOf(C),
+        bearer: session.sessionSecret,
+      });
+      expect(guestPdf.status).toBe(200);
+      expect(createHash("sha256").update(guestPdf.bytes).digest("hex")).toBe(row?.document_sha256);
+      const staffPdf = await request(
+        "GET",
+        `${staffBase(C.id)}/waiver-evidence/${row?.id}/document`,
+        { as: C.owner },
+      );
+      expect(staffPdf.status).toBe(200);
+      expect(createHash("sha256").update(staffPdf.bytes).digest("hex")).toBe(row?.document_sha256);
+
+      // A bucket that lost the object: the PDF is never served.
+      bucket.objects.clear();
+      expect(
+        (
+          await request("GET", `${staffBase(C.id)}/waiver-evidence/${row?.id}/document`, {
+            as: C.owner,
+          })
+        ).status,
+      ).toBe(500);
+
+      // Staging with no bucket bound: nothing is signed.
+      overrides = { ENVIRONMENT: "staging" };
+      const q = await party(C);
+      const second = await openSession(C, q.annToken);
+      const refused = await request("POST", "/v1/public/waiver-sessions/current/signature", {
+        origin: guestOf(C),
+        bearer: second.sessionSecret,
+        body: signature(second),
+      });
+      expect([refused.status, refused.json.error?.code]).toEqual([
+        503,
+        "waiver_storage_unavailable",
+      ]);
+      const state = await admin<{ state: string; evidence: number }[]>`
+        select r.state, (select count(*)::int from public.waiver_evidence e
+                          where e.request_id = r.id) as evidence
+          from public.waiver_requests r where r.id = ${q.annRequest}`;
+      expect(state).toEqual([{ state: "pending", evidence: 0 }]);
+    } finally {
+      overrides = {};
+    }
+  });
 });
+
+/** Enough of an R2 bucket for the evidence store: head, get, put with its SHA-256 check. */
+class MemoryR2 {
+  readonly objects = new Map<string, Uint8Array>();
+  readonly contentTypes = new Map<string, string>();
+  async head(key: string) {
+    const held = this.objects.get(key);
+    return held ? { key, size: held.byteLength } : null;
+  }
+  async get(key: string) {
+    const held = this.objects.get(key);
+    if (!held) return null;
+    return { key, size: held.byteLength, arrayBuffer: async () => new Uint8Array(held).buffer };
+  }
+  async put(
+    key: string,
+    value: Uint8Array,
+    options: { sha256?: string; httpMetadata?: { contentType?: string } },
+  ) {
+    if (createHash("sha256").update(value).digest("hex") !== options.sha256) {
+      throw new Error("checksum mismatch");
+    }
+    this.objects.set(key, new Uint8Array(value));
+    this.contentTypes.set(key, options.httpMetadata?.contentType ?? "");
+    return { key, size: value.byteLength };
+  }
+}
