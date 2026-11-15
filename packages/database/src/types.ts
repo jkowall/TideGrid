@@ -1262,8 +1262,13 @@ export interface WaiverEvidenceTable {
   signed_at: Stamped;
   source_ip: FixedDefault<string | null>;
   user_agent: FixedDefault<string | null>;
-  document: Fixed<Uint8Array>;
+  /** The PDF in the row; null when it lives in the evidence bucket (0053). */
+  document: FixedDefault<Uint8Array | null>;
   document_sha256: Fixed<string>;
+  /** The evidence bucket's key, waivers/<tenant>/<sha256>.pdf, or null for a PDF in the row (0053). */
+  document_key: FixedDefault<string | null>;
+  /** The PDF's size in bytes when it lives in the bucket (0053). */
+  document_size: FixedDefault<number | null>;
 }
 
 /**

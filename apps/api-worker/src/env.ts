@@ -117,6 +117,14 @@ export interface Bindings {
    * Unset means the cron does not publish and events wait in PostgreSQL.
    */
   OUTBOX_QUEUE?: Queue;
+  /**
+   * The private evidence bucket for signed waiver PDFs, with object lock
+   * (W3-OPS-4, src/evidence-store.ts). Only env.test declares it today; the
+   * owner creates the staging and production buckets and adds the binding.
+   * Staging and production refuse to sign without it; local and preview keep
+   * the PDF in the evidence row.
+   */
+  WAIVER_EVIDENCE?: R2Bucket;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {
