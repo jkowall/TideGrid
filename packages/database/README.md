@@ -443,6 +443,12 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 - **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
 - **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
 
+## Migration safety check and the expand and contract rehearsal (W3-OPS-3)
+
+From `0055` on, every migration file passes `src/migration-check.ts`, run by the unit suite (`pnpm test`) and on its own with `pnpm --filter @tidegrid/database migration:check [file ...]`. It refuses a change to a column's type, a new column with a volatile default, `SET NOT NULL`, a foreign key or check added to an existing table without `NOT VALID`, a plain `CREATE INDEX` on a pilot-volume table, a drop or rename, and an `UPDATE`, `DELETE`, or `TRUNCATE`. Each message says the safe shape. A table created earlier in the same file is exempt from the lock rules, since it is empty. When a rule does not apply, the file says why on its own line: `-- migration-check: allow <rule> <reason>`. Function bodies, DO blocks, comments, and strings are not judged. Earlier files are merged and forward-only, so they are not checked again.
+
+`src/expand-contract.integration.test.ts` rehearses the hosting plan's [migration policy](../../docs/v2/08-build-hosting-and-operations.md#database-migration-and-rollback-policy) on 5,000 rows in a scratch schema: expand with a nullable column and a sync trigger while old code writes, a bounded backfill stopped and restarted, control totals that catch a wrong conversion, a forward fix, `CHECK ... NOT VALID` then `VALIDATE` then `SET NOT NULL`, and the contract step once old code is gone.
+
 ## Import booking email (0049)
 
 W3-G2.13 follow-up. `import_booking_email_opened` lists the imported bookings whose own email (welcome, reminders, management links, cancellation, move notices) is open, one row a booking, naming the batch that imported it. The trigger allows a row only for an imported booking that this batch, a clean commit, imported and whose email is due: saved with `send_at_cutover`, or released by an owner (`import_booking_email_opened_due`, 23514). Append-only, forced row-level security, SELECT and INSERT only. `app.import_waiver_email_tenants(limit)` now also lists a tenant with such a booking not yet open, so the same import sweep sends the welcome.

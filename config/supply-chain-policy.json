@@ -1,0 +1,31 @@
+{
+  "licenses": {
+    "allow": [
+      "MIT",
+      "MIT-0",
+      "ISC",
+      "0BSD",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "Apache-2.0",
+      "Unlicense",
+      "CC0-1.0",
+      "CC-BY-4.0",
+      "BlueOak-1.0.0",
+      "Python-2.0",
+      "OFL-1.1",
+      "MPL-2.0"
+    ],
+    "exceptions": [
+      {
+        "id": "@img/sharp-libvips-linux-x64",
+        "reason": "LGPL-3.0 libvips, loaded as a separate shared library by the sharp image tool at build time on the CI machine only. It is not in any Worker or web bundle.",
+        "review_by": "2027-05-15"
+      }
+    ]
+  },
+  "vulnerabilities": {
+    "fail_on": ["high", "critical"],
+    "exceptions": []
+  }
+}
