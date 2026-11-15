@@ -41,7 +41,7 @@ variable "policies" {
   }))
   default = {
     certificates = {
-      alert_type  = "universal_ssl_event_type"
+      alert_type = "universal_ssl_event_type"
       # The Universal SSL alert takes no filters; Cloudflare refuses a zones
       # filter on it (error 17007), so it covers every zone in the account.
       description = "Edge certificate issuance, renewal, or validation problems."
