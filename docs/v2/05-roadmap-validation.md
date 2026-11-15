@@ -44,7 +44,7 @@ Adopted by the owner on 2026-11-15 ([decision register](06-decision-register.md#
 
 **What it authorizes.** The [Core live gate](#core-live-gate) scope and the [Staged Core modules](#staged-core-modules) for the three Core pilot operators, under the one-operator-at-a-time cadence in [Stage 5](#stage-5-pilot-launches-and-review). It authorizes no native factory work, no operator store accounts, and no evidence claim about the $4,500 Native setup price or the 22-hour band.
 
-**Subsidy limit.** The $25,000 absolute stop and the $500 Native direct-cost ceiling do not apply to a Core-only pilot. Each operator is held to the Managed Launch four-hour target and eight-hour ceiling in the [commercial model](03-commercial-model.md#managed-launch), and customer-specific work across all Core-only pilots has a $5,000 absolute stop. Like the Native stop, it is a stop, not a budget.
+**Subsidy limit.** The $25,000 absolute stop and the $500 Native direct-cost ceiling do not apply to a Core-only pilot. Each operator is held to the Managed Launch four-hour target and eight-hour ceiling in the [commercial model](03-commercial-model.md#managed-launch), and customer-specific work across all Core-only pilots has a $5,000 absolute stop. Like the Native stop, it is a stop, not a budget. The no-prepaid-quarter rule in item 3 and this $5,000 stop are coordinator defaults (D1 and D2 in the register entry) until the owner says otherwise.
 
 **Native later.** If Native is sold later to a Core pilot operator, that operator passes the [Native pilot gate](#native-pilot-gate) before its apps go live, and the Native price-evidence rules apply from that point.
 
