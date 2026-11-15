@@ -46,10 +46,10 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   let day = "";
   let laterDays: [string, string] = ["", ""];
   /**
-   * Six days out, on a day of its own: a 10:00 UTC trip there is always more
-   * than two days off, so its reminder (24 hours before, at least 24 hours
-   * from now) is always worth queuing. Two days out stopped being worth it
-   * after 10:00 UTC each day.
+   * A day of its own, far enough out that a trip reminder is always written:
+   * the reminder is due 24 hours before the 10:00 UTC trip and needs 24 hours'
+   * notice, so the trip must be at least 48 hours away at any time of day.
+   * Two days out failed every day after 10:00 UTC.
    */
   let soon = "";
   let exportedAt = "";
@@ -224,16 +224,16 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
     const [clock] = await admin<
-      { day: string; day2: string; day4: string; day5: string; exported: string }[]
+      { day: string; day4: string; day5: string; day6: string; exported: string }[]
     >`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
-             ((now() at time zone 'UTC')::date + 6)::text as day2,
              ((now() at time zone 'UTC')::date + 4)::text as day4,
              ((now() at time zone 'UTC')::date + 5)::text as day5,
+             ((now() at time zone 'UTC')::date + 6)::text as day6,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
     laterDays = [clock?.day4 ?? "", clock?.day5 ?? ""];
-    soon = clock?.day2 ?? "";
+    soon = clock?.day6 ?? "";
     exportedAt = clock?.exported ?? "";
   }, 180_000);
 
