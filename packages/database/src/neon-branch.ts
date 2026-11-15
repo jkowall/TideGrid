@@ -12,6 +12,10 @@
  *                    one is added, so no connection string exists to fetch
  *   --out <file>     write {"branchId","connectionString"} to this file with
  *                    mode 0600; the file must not exist yet
+ *   --at <time>      branch from the parent as it was at this past instant,
+ *                    an ISO 8601 UTC time such as 2026-11-15T01:00:00Z (a
+ *                    point-in-time restore drill); Neon refuses an instant
+ *                    outside the project's history window
  *
  * `create` prints only `{"branchId": ...}` on stdout. The admin connection
  * string goes to --out when given and is otherwise never fetched, so it cannot
@@ -74,6 +78,8 @@ export interface CreateOptions {
   endpoint: boolean;
   /** Fetch the admin connection string. Only when it has somewhere private to go. */
   withConnectionString: boolean;
+  /** Branch from the parent as of this past instant (ISO 8601 UTC), or from now when absent. */
+  parentTimestamp?: string;
 }
 
 export const defaultTtlHours = 6;
@@ -83,6 +89,7 @@ export function createBody(name: string, options: CreateOptions, now = Date.now(
   return {
     branch: {
       name,
+      ...(options.parentTimestamp ? { parent_timestamp: options.parentTimestamp } : {}),
       ...(options.ttlSeconds === null
         ? {}
         : { expires_at: new Date(now + options.ttlSeconds * 1000).toISOString() }),
@@ -110,11 +117,18 @@ export async function createBranch(
   });
   const branchId = created.branch.id;
   if (!options.withConnectionString) return { branchId, connectionString: null };
-  const uri = await neon<{ uri: string }>(
-    deps,
-    `/projects/${project}/connection_uri?branch_id=${branchId}&role_name=neondb_owner&database_name=neondb&pooled=false`,
-  );
-  return { branchId, connectionString: uri.uri };
+  try {
+    const uri = await neon<{ uri: string }>(
+      deps,
+      `/projects/${project}/connection_uri?branch_id=${branchId}&role_name=neondb_owner&database_name=neondb&pooled=false`,
+    );
+    return { branchId, connectionString: uri.uri };
+  } catch (err) {
+    // The caller never learns this branch's id, so nothing else could delete
+    // it: delete it here rather than leave it to its expiry.
+    await deleteBranch(branchId, deps).catch(() => undefined);
+    throw err;
+  }
 }
 
 /** Idempotent: a branch that is already gone (deleted or expired) counts as deleted. */
@@ -142,6 +156,7 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
   let noExpiry = false;
   let endpoint = true;
   let out: string | null = null;
+  let at: string | null = null;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
     if (arg === "--ttl") {
@@ -155,6 +170,14 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
     else if (arg === "--out") {
       out = args[++i] ?? null;
       if (!out || out.startsWith("--")) throw new Error("--out needs a file path");
+    } else if (arg === "--at") {
+      const raw = args[++i] ?? "";
+      const when = Date.parse(raw);
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(raw) || Number.isNaN(when)) {
+        throw new Error("--at takes an ISO 8601 UTC time such as 2026-11-15T01:00:00Z");
+      }
+      if (when > now) throw new Error("--at must be in the past");
+      at = new Date(when).toISOString();
     } else if (arg.startsWith("--")) throw new Error(`unknown option ${arg}`);
     else if (name === null) name = arg;
     else throw new Error(`unexpected argument ${arg}`);
@@ -171,6 +194,7 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
       ttlSeconds: noExpiry ? null : (ttlHours ?? defaultTtlHours) * 3600,
       endpoint,
       withConnectionString: out !== null,
+      ...(at ? { parentTimestamp: at } : {}),
     },
     out,
   };
@@ -201,7 +225,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const { name, options, out } = parseCreateArgs(rest);
     const result = await createBranch(name, options);
     if (out) {
-      await writePrivate(out, `${JSON.stringify(result)}\n`);
+      try {
+        await writePrivate(out, `${JSON.stringify(result)}\n`);
+      } catch (err) {
+        // Nobody else knows the id: delete the branch rather than orphan it.
+        await deleteBranch(result.branchId).catch(() => undefined);
+        throw err;
+      }
     }
     console.log(JSON.stringify({ branchId: result.branchId }));
     if (options.endpoint) console.error(throwawayBranchHint);
@@ -212,7 +242,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(JSON.stringify({ deleted: arg }));
   } else if (command) {
     console.error(
-      "usage: neon-branch.ts create <name> [--ttl <hours> | --no-expiry] [--no-endpoint] [--out <file>] | delete <branch-id>",
+      "usage: neon-branch.ts create <name> [--ttl <hours> | --no-expiry] [--no-endpoint] [--out <file>] [--at <utc time>] | delete <branch-id>",
     );
     process.exit(2);
   }

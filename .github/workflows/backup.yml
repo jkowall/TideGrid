@@ -1,0 +1,99 @@
+name: backup
+# The daily encrypted logical backup (hosting plan, backup and disaster
+# recovery; goal W3-OPS-6). See docs/runbooks/backup-and-restore.md.
+#
+# Off until the owner turns it on: the schedule runs only when the repository
+# variable BACKUP_ENABLED is "true". A manual run works any time once the
+# backup environment is set up.
+run-name: backup
+
+on:
+  schedule:
+    # Once a day at 07:17 UTC, a quiet hour for US operators. Off the hour,
+    # because GitHub delays runs queued on the hour.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  backup:
+    if: github.event_name == 'workflow_dispatch' || vars.BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # The backup environment: deployment branch main only, no required
+    # reviewer (a scheduled run cannot wait for one). It holds:
+    #   secrets   BACKUP_DATABASE_URL  the direct (unpooled) owner URL of the
+    #                                  database to back up
+    #             R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY  an R2 API token with
+    #                                  Object Read and Write on the backup
+    #                                  bucket only
+    #             R2_ENDPOINT          https://<account id>.r2.cloudflarestorage.com
+    #             R2_BUCKET            the backup bucket's name
+    #   variables BACKUP_AGE_RECIPIENT the age public key; the private key
+    #                                  stays offline with the owner
+    #             BACKUP_LABEL         the environment name in file names
+    environment: backup
+    steps:
+      - name: Runs from main only
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run this from main"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the PostgreSQL 17 client and age
+        run: tools/backup/install-tools.sh
+      - name: Back up
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+          LABEL: ${{ vars.BACKUP_LABEL || 'production' }}
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "::error::BACKUP_DATABASE_URL is not set on the backup environment"; exit 1; }
+          . tools/backup/lib.sh
+          tg_mask_url "$DATABASE_URL"
+          tools/backup/backup.sh --label "$LABEL" --out "$RUNNER_TEMP/backup"
+      - name: Upload to the backup bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          prefix="daily/$(date -u +%Y/%m)"
+          dump=$(ls "$RUNNER_TEMP"/backup/*.dump.age)
+          manifest="${dump%.dump.age}.json"
+          # The dump first, then its manifest: a manifest in the bucket means
+          # its dump is there too (backup-age.sh reads manifests only).
+          aws s3 cp --only-show-errors --endpoint-url "$R2_ENDPOINT" "$dump" "s3://$R2_BUCKET/$prefix/$(basename "$dump")"
+          want=$(wc -c < "$dump" | tr -d ' ')
+          got=$(aws s3api head-object --endpoint-url "$R2_ENDPOINT" --bucket "$R2_BUCKET" --key "$prefix/$(basename "$dump")" --query ContentLength --output text)
+          [ "$want" = "$got" ] || { echo "::error::uploaded size $got, expected $want"; exit 1; }
+          aws s3 cp --only-show-errors --endpoint-url "$R2_ENDPOINT" "$manifest" "s3://$R2_BUCKET/$prefix/$(basename "$manifest")"
+          {
+            echo "## Backup $(basename "$dump" .dump.age)"
+            echo "- Encrypted size $want bytes, uploaded to \`$prefix/\`"
+            python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print("- %d tables, %d rows, last migration `%s`, dump took %s s" % (len(m["tables"]), sum(t["rows"] for t in m["tables"]), m["lastMigration"], m["dumpSeconds"]))' "$manifest"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: The newest backup is fresh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: tools/backup/backup-age.sh --max-hours 1
+      - name: Remove the local copy
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/backup"

@@ -2,7 +2,7 @@
 
 What to do when Neon itself is lost or unusable: restoring the daily logical backup to another PostgreSQL, recovering the key that decrypts it, and reconciling with Stripe and email afterwards.
 
-**Status today.** The daily encrypted logical backup, its bucket, the restore tooling, and the restore drills are being built in separate work ("backups, restore drills, and alerts"). Its runbook will hold the exact commands. This guide covers when to use a full restore, who decides, and how to check the result and bring the business back. When the backup runbook lands, link it here and keep the commands there only.
+**Status today.** The daily encrypted logical backup, the restore tooling, and the restore drills are built but not switched on: the [backup and restore runbook](../backup-and-restore.md) holds the setup and the exact commands. This guide covers when to use a full restore, who decides, and how to check the result and bring the business back. Commands live in the backup runbook only.
 
 **Which restore?**
 
@@ -33,7 +33,7 @@ These are internal targets from the [hosting plan](../../v2/08-build-hosting-and
 1. **Tell operators first.** Manual fallback for all sales and check-ins ([README](README.md#the-operators-manual-fallback)).
 2. **Wait or restore?** If Neon says it will be back within the 4-hour target and data is intact, wait. Otherwise restore.
 3. **Get the key.** The decryption key and recovery steps are kept outside Neon and outside the Worker's Cloudflare account. The owner fetches them from the private recovery location. If the owner cannot, the emergency custodian hands over the recovery material under the break-glass process.
-4. **Restore** the newest verified backup to a new standard PostgreSQL target, following the backup runbook. Check the dump's checksum and schema version before loading it.
+4. **Restore** the newest verified backup to a new standard PostgreSQL target, following the [backup runbook](../backup-and-restore.md). `restore.sh` checks the dump's checksums and then runs `verify.py`, which covers the migrations, every table's rows, row-level security, policies, grants, and the tenant checks below.
 5. **Check** before anything connects:
    - the migration list matches the last applied file in the backup's record;
    - the runtime role `tidegrid_app` exists as a plain role with no extra rights;
@@ -69,4 +69,4 @@ Run this after a point-in-time restore or a full restore, before sales reopen. T
 
 ## Restore drills
 
-Run both a Neon point-in-time drill and a logical backup drill before the first live booking and once a quarter, on throwaway targets only. An independent qualified person watches one full logical restore before launch and once a year. Record times against the targets above. The drill steps live in the backup runbook.
+Run both a Neon point-in-time drill and a logical backup drill before the first live booking and once a quarter, on throwaway targets only. An independent qualified person watches one full logical restore before launch and once a year. Record times against the targets above. The drill steps live in the [backup runbook](../backup-and-restore.md#drills).

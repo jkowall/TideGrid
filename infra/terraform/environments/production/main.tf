@@ -21,6 +21,9 @@ module "environment" {
 
   waiver_evidence_lock_days = var.waiver_evidence_lock_days
   backup_expire_days        = 35
+  # Recent backups cannot be deleted, even by the token that writes them
+  # (W3-OPS-6, coordinator default pending the owner).
+  backup_lock_days = 7
 
   hyperdrive          = var.hyperdrive
   hyperdrive_password = var.hyperdrive_password
