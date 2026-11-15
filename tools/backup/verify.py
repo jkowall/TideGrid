@@ -13,6 +13,8 @@ Checks:
                for a point-in-time branch whose instant differs from the
                manifest's)
   rls          every table that had row-level security on and forced still does
+  runtime-role tidegrid_app is plain: no special attributes, no role
+               memberships, owns nothing
   definers     every SECURITY DEFINER function belongs to a role that bypasses
                row-level security (they read tables the runtime role cannot)
   policies     every row-level security policy is the same, word for word
@@ -66,6 +68,30 @@ select format('no-tenant|%s', coalesce(sum((xpath('/row/n/text()', query_to_xml(
    and has_any_column_privilege('tidegrid_app', c.oid, 'SELECT');
 reset role;
 rollback;
+"""
+
+# The runtime role must stay the plain role from migration 0001: no special
+# attributes, no membership in any role (SET ROLE could reach one that
+# bypasses row-level security), and nothing owned. The same rules as
+# packages/database/src/role.ts.
+RUNTIME_ROLE_SQL = """
+select format('runtime-role|%s|%s|%s',
+  (select count(*) from pg_roles r where r.rolname = 'tidegrid_app'),
+  concat_ws(',',
+    (select string_agg(a, ',') from pg_roles r, unnest(array_remove(array[
+       case when r.rolsuper then 'superuser' end, case when r.rolcreaterole then 'createrole' end,
+       case when r.rolcreatedb then 'createdb' end, case when r.rolreplication then 'replication' end,
+       case when r.rolbypassrls then 'bypassrls' end], null)) a
+      where r.rolname = 'tidegrid_app'),
+    (select string_agg('member of ' || g.rolname, ',' order by g.rolname)
+       from pg_auth_members m join pg_roles g on g.oid = m.roleid
+       join pg_roles r on r.oid = m.member where r.rolname = 'tidegrid_app')),
+  (select count(*) from pg_roles r where r.rolname = 'tidegrid_app' and (
+     exists (select 1 from pg_database where datdba = r.oid)
+     or exists (select 1 from pg_namespace where nspowner = r.oid)
+     or exists (select 1 from pg_class where relowner = r.oid)
+     or exists (select 1 from pg_proc where proowner = r.oid)
+     or exists (select 1 from pg_type where typowner = r.oid))));
 """
 
 # SECURITY DEFINER functions whose owner cannot bypass row-level security.
@@ -189,6 +215,18 @@ def main():
     lost = sorted(n for n, t in expected.items() if t["forceRls"] and not facts.get(n, {}).get("forceRls"))
     forced = sum(1 for t in facts.values() if t["forceRls"])
     check("rls", not lost, f"{forced} tables force row-level security; lost on {lost or 'none'}")
+
+    role = psql(url, RUNTIME_ROLE_SQL)[0].split("|")
+    problems = [r for r in role[2].split(",") if r]
+    if role[1] != "1":
+        problems.insert(0, "missing")
+    if role[3] != "0":
+        problems.append("owns objects")
+    check(
+        "runtime-role",
+        not problems,
+        "tidegrid_app is plain" if not problems else "tidegrid_app: " + ", ".join(problems),
+    )
 
     definers = psql(url, DEFINERS_SQL)[0].split("|")
     check(

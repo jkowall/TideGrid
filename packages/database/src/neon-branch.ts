@@ -173,7 +173,13 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
     } else if (arg === "--at") {
       const raw = args[++i] ?? "";
       const when = Date.parse(raw);
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(raw) || Number.isNaN(when)) {
+      // Date.parse rolls a day that does not exist (April 31) into the next
+      // month; the parsed time must read back as the one given.
+      if (
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(raw) ||
+        Number.isNaN(when) ||
+        new Date(when).toISOString().slice(0, 19) !== raw.slice(0, 19)
+      ) {
         throw new Error("--at takes an ISO 8601 UTC time such as 2026-11-15T01:00:00Z");
       }
       if (when > now) throw new Error("--at must be in the past");

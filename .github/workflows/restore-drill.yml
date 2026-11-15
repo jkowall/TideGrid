@@ -116,8 +116,12 @@ jobs:
             "revoke update (state) on public.checkout_sessions from tidegrid_app"
             "grant select on public.staff_users to public"
             "revoke execute on function app.resolve_hostname(text) from tidegrid_app"
+            "revoke usage on schema app from tidegrid_app"
             "create policy drill_leak_cols on public.staff_users for select using (true)"
             "create role drill_plain nologin; do \$\$ declare f regprocedure; begin select p.oid::regprocedure into f from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'app') and p.prosecdef limit 1; execute format('alter function %s owner to drill_plain', f); end \$\$"
+            # Role memberships are cluster-wide, so this one runs last and is
+            # removed after its check (below) to keep every case independent.
+            "create role drill_bypass nologin bypassrls; grant drill_bypass to tidegrid_app"
           )
           for i in "${!tampers[@]}"; do
             # A template copy fails while anything (autovacuum too) is connected
@@ -133,6 +137,7 @@ jobs:
               cat "$RUNNER_TEMP/tamper.txt"; echo "::error::verify passed a tampered copy: ${tampers[$i]}"; exit 1
             fi
             echo "caught: ${tampers[$i]} ($(grep -o '"failed": \[[^]]*\]' "$RUNNER_TEMP/tamper.txt"))"
+            psql -X -q -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "drop role if exists drill_bypass" > /dev/null
           done
       - name: Server log
         if: failure()
