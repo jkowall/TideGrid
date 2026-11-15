@@ -41,9 +41,10 @@ module "environment" {
     staging = {
       protected = false
       compute = {
-        min_cu                  = 0.25
-        max_cu                  = 1
-        suspend_timeout_seconds = 300
+        min_cu = 0.25
+        max_cu = 1
+        # Scale to zero after Neon's default 5 minutes. The Free plan refuses
+        # an explicit suspend_timeout_seconds (HTTP 412).
       }
     }
   }

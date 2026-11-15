@@ -29270,7 +29270,7 @@
             }
           },
           "503": {
-            "description": "The evidence bucket could not store the signed PDF, or none is configured where one is required; nothing was signed (waiver_storage_unavailable)",
+            "description": "The evidence bucket could not store the signed PDF, or the bucket or the field keys are not configured where they are required; nothing was signed (waiver_storage_unavailable)",
             "content": {
               "application/json": {
                 "schema": {

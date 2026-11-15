@@ -35,6 +35,7 @@ import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
+import { sealingRequired } from "../field-keys.ts";
 import { withPublicTenant } from "../public-tenant.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
 import { errorBody } from "./responses.ts";
@@ -243,7 +244,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(openRoute, async (c) => {
     const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const opened = await redeemWaiverToken(trx, ctx, { token });
       if (opened.kind !== "opened") throw linkRefusal(opened);
@@ -281,7 +282,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(renewalRoute, async (c) => {
     const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
     let renewedFor: string | null = null;
     await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const renewed = await renewWaiverLink(trx, ctx, wdeps, { token });
@@ -335,7 +336,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(readRoute, async (c) => {
     const secret = sessionSecret(c);
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
     const { body } = await withPublicTenant(c, {}, async (trx, ctx) => {
       const session = await openSession(trx, ctx.tenantId, secret);
       return { waiver: signingJson(await getSigningView(trx, ctx.tenantId, wdeps, session)) };
@@ -377,7 +378,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
       503: errorBody(
-        "The evidence bucket could not store the signed PDF, or none is configured where one is required; nothing was signed (waiver_storage_unavailable)",
+        "The evidence bucket could not store the signed PDF, or the bucket or the field keys are not configured where they are required; nothing was signed (waiver_storage_unavailable)",
       ),
     },
   });
@@ -385,7 +386,16 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   app.openapi(signRoute, async (c) => {
     const secret = sessionSecret(c);
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
+    if (sealingRequired(c.env) && !wdeps.fields) {
+      // Staging and production never record a signature's personal fields
+      // in plain columns (W3-OPS-4).
+      throw new ApiError(
+        503,
+        "waiver_storage_unavailable",
+        "Signed waivers cannot be stored right now; nothing was signed. Try again shortly.",
+      );
+    }
     const meta = signingMeta(c);
     let outcome:
       | { kind: "signed" | "already_signed"; waiver: WaiverSigning }
@@ -501,7 +511,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         trx,
         ctx.tenantId,
         { requestId: session.requestId },
-        waiverDeps(deps, c.env).documents,
+        (await waiverDeps(deps, c.env)).documents,
       );
       if (!found) {
         throw new ApiError(404, "waiver_document_not_found", "This waiver is not signed yet");
@@ -544,7 +554,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           "This booking session has ended; open your link again",
         );
       }
-      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      const found = await listGuestBookingWaivers(
+        trx,
+        ctx.tenantId,
+        session.bookingId,
+        (await waiverDeps(deps, c.env)).fields,
+      );
       if (!found) {
         throw new ApiError(404, "booking_not_found", "No such booking at this address");
       }
@@ -590,7 +605,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   app.openapi(resendRoute, async (c) => {
     const token = bookingSessionToken(c);
     const { position, name } = c.req.valid("json");
-    const wdeps = waiverDeps(deps, c.env);
+    const wdeps = await waiverDeps(deps, c.env);
     // A refusal writes nothing, so the transaction commits empty and the
     // answer is built outside it.
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
@@ -627,7 +642,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           "This booking session has ended; open your link again",
         );
       }
-      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      const found = await listGuestBookingWaivers(
+        trx,
+        ctx.tenantId,
+        session.bookingId,
+        (await waiverDeps(deps, c.env)).fields,
+      );
       if (!found) throw new Error("a booking that just sent a waiver was not found");
       return { tenantId: ctx.tenantId, waivers: guestWaiversJson(found) } as JsonObject;
     });

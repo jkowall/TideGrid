@@ -18,8 +18,9 @@ variable "zone_name" {
 }
 
 variable "waiver_evidence_lock_days" {
-  description = "Waiver evidence lock period. A legal decision; no default."
+  description = "Waiver evidence lock period in days. 8 years: Florida's longest claim window (7 years, section 95.051) plus a year. Counsel confirms before production holds a real waiver; see the decision register, 2026-11-15."
   type        = number
+  default     = 2922
 }
 
 variable "neon_project_id" {
