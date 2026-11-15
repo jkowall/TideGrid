@@ -10,6 +10,8 @@ import type { DeliveryMessage } from "@tidegrid/database";
 import { DeliveryHandlerError } from "@tidegrid/database";
 import { describe, expect, it } from "vitest";
 import {
+  isDeadLetterQueue,
+  isOutboxQueue,
   MAX_CONSUMER_ATTEMPTS,
   type QueueDeps,
   queueSender,
@@ -75,6 +77,23 @@ async function run(
   await runQueue(batch, env, { deps, log: (l) => lines.push(l) });
   return getQueueResult(batch, ctx);
 }
+
+describe("outbox queue names", () => {
+  it("accepts the test runtime's names and Terraform's, and nothing else", () => {
+    for (const name of [
+      "tidegrid-outbox-test",
+      "tidegrid-outbox-test-dlq",
+      "tidegrid-staging-outbox",
+      "tidegrid-staging-outbox-dlq",
+      "tidegrid-production-outbox",
+    ])
+      expect(isOutboxQueue(name)).toBe(true);
+    for (const name of ["tidegrid-email-events", "tidegrid-staging-backups", "outbox", "x-outbox"])
+      expect(isOutboxQueue(name)).toBe(false);
+    expect(isDeadLetterQueue("tidegrid-staging-outbox-dlq")).toBe(true);
+    expect(isDeadLetterQueue("tidegrid-staging-outbox")).toBe(false);
+  });
+});
 
 describe("the outbox queue in the Workers runtime", () => {
   it("declares a Miniflare queue the publisher can send a batch to", async () => {
