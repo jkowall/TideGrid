@@ -67,7 +67,7 @@ export interface Bindings {
   /**
    * The queue Cloudflare's Email Sending event subscription publishes to
    * (W1-EMAIL-EVENTS, src/email-events.ts). Unset means no batch is treated
-   * as email events. No configuration in the repository declares the queue.
+   * as email events. Staging names tidegrid-staging-email-events.
    */
   EMAIL_EVENTS_QUEUE?: string;
   /**
