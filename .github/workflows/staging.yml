@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: rehearse (everything below, in order, under one approval), or one part on its own - deploy (migrate, seed, connect, deploy), probes (latency, read-after-write, restart), integration (all integration suites and the search benchmark on a throwaway branch of staging)
+        description: rehearse (everything below, in order, under one approval), deploy-and-probe (deploy then probes, no integration, about 6 minutes), or one part on its own - deploy (migrate, seed, connect, deploy), probes (latency, read-after-write, restart), integration (all integration suites and the search benchmark on a throwaway branch of staging)
         type: choice
-        options: [rehearse, deploy, probes, integration]
+        options: [rehearse, deploy-and-probe, deploy, probes, integration]
         default: rehearse
         required: true
       sha:
@@ -95,7 +95,7 @@ jobs:
       - name: Preflight (token can deploy, staging is not ahead of this SHA)
         # Both checks run before anything changes, so a run that would stop
         # halfway stops here instead.
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -117,7 +117,7 @@ jobs:
             echo "::error::staging has migrations this SHA does not: $(echo $ahead). Deploy a newer SHA"; exit 1
           fi
       - name: Migrate and seed staging
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         run: |
           export DATABASE_URL="$STAGING_ADMIN_URL"
           pnpm --silent --filter @tidegrid/database migrate:status | tail -3
@@ -129,14 +129,14 @@ jobs:
           echo "LAST_MIGRATION=$last" >> "$GITHUB_ENV"
           echo "staging migrated through $last" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Deploy the staging API
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         working-directory: apps/api-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy --env staging --var "BUILD_ID:${SHA:0:7}"
       - name: Connect it to the staging database and set its secrets
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -146,7 +146,7 @@ jobs:
           flag=""; [ "$ROTATE" = true ] && flag=--rotate
           tools/staging/configure.sh $flag | tee -a "$GITHUB_ENV"
       - name: Deploy the staging console
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         working-directory: apps/operator-site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -155,7 +155,7 @@ jobs:
           pnpm build
           pnpm exec wrangler deploy --env staging
       - name: Staging answers on the new commit and schema
-        if: inputs.action == 'deploy' || inputs.action == 'rehearse'
+        if: inputs.action == 'deploy' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         run: |
           for i in $(seq 1 24); do
             body=$(curl -fsS https://api-staging.tidegrid.us/v1/health || true)
@@ -172,13 +172,13 @@ jobs:
 
       # ---- probes ----
       - name: Placement latency and read-after-write
-        if: inputs.action == 'probes' || inputs.action == 'rehearse'
+        if: inputs.action == 'probes' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         env:
           PROBE_API: https://api-staging.tidegrid.us
           PROBE_ORIGIN: ${{ inputs.origin }}
         run: pnpm --silent --filter @tidegrid/release staging-probe latency raw | tee -a "$RUNNER_TEMP/probes.ndjson"
       - name: Compute restart, then read-after-write
-        if: inputs.action == 'probes' || inputs.action == 'rehearse'
+        if: inputs.action == 'probes' || inputs.action == 'deploy-and-probe' || inputs.action == 'rehearse'
         env:
           PROBE_API: https://api-staging.tidegrid.us
           PROBE_ORIGIN: ${{ inputs.origin }}
@@ -214,18 +214,25 @@ jobs:
           # The suites get only the throwaway branch, not staging's own URL or the Neon key.
           env -u STAGING_ADMIN_URL -u NEON_API_KEY \
             DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 TIDEGRID_SEARCH_BENCH=1 CI=true \
-            pnpm -r --no-bail --workspace-concurrency=1 --if-present test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
+            timeout --kill-after=1m 95m pnpm -r --no-bail --workspace-concurrency=1 --if-present test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
           status=$?
           set -e
+          # Every suite query crosses the network to Neon (run 43770709282 took
+          # 83 minutes), so the suites stop at 95 minutes, inside the job's 120,
+          # and the lines below still reach the summary and the evidence.
+          [ "$status" -eq 124 ] && echo "integration stopped at the 95-minute limit" | tee -a "$RUNNER_TEMP/integration.raw"
           # Only the totals, benchmark, and fairness lines are kept: the raw log
           # stays on the runner, because masking covers the live log only.
           # Error lines say why a test failed; any line naming a connection
           # string or the password is dropped.
-          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness|Error|error:' "$RUNNER_TEMP/integration.raw" \
+          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness|Error|error:|minute limit' "$RUNNER_TEMP/integration.raw" \
             | grep -v -F "${pw:-no-password-to-filter}" | grep -v -E 'postgres(ql)?://' \
             | cut -c1-400 > "$RUNNER_TEMP/integration.log" || true
           rm -f "$RUNNER_TEMP/integration.raw"
           { echo '```'; head -n 200 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # The same filtered lines in the job log, which the API can read
+          # when the run page and artifact cannot be opened.
+          echo "::group::integration results (filtered)"; head -n 200 "$RUNNER_TEMP/integration.log" || true; echo "::endgroup::"
           exit "$status"
 
       - name: Keep the evidence

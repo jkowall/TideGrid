@@ -4,7 +4,7 @@ Staging is the rehearsal copy of TideGrid: the `staging` branch of the Neon proj
 
 Everything here runs from GitHub, through the `staging` workflow (`.github/workflows/staging.yml`). Start it from main with a full SHA that is on main. Each run waits for one owner approval on the `infra-staging` environment.
 
-The default action, `rehearse`, does everything in one run under that one approval: deploy, then probes, then integration, stopping at the first failure. Use `deploy`, `probes`, or `integration` alone only to repeat one part. Start one run at a time: GitHub keeps only one run waiting behind a running one, so a third start cancels the second.
+The default action, `rehearse`, does everything in one run under that one approval: deploy, then probes, then integration, stopping at the first failure. `deploy-and-probe` does the deploy and the probes without the integration suites (about 6 minutes instead of about 90), for a configuration change such as the placement region. Use `deploy`, `probes`, or `integration` alone only to repeat one part. Start one run at a time: GitHub keeps only one run waiting behind a running one, so a third start cancels the second.
 
 If the run follows a Terraform change to staging (a new queue, bucket, or binding), the `infra-apply` run for staging must finish first, or the Worker deploy fails on the missing resource.
 
@@ -39,7 +39,7 @@ The Hyperdrive config's id is printed in the run summary. The API's `env.staging
 
 **integration**
 
-Creates a throwaway branch of staging (4-hour expiry, deleted at the end), empties it (the suites expect an empty database, as in CI, and migrate it from 0001), runs every integration suite on it, continuing past a failing package so every suite reports, with the search benchmark on (`TIDEGRID_SEARCH_BENCH=1`, about 50,000 bookings in one tenant), and puts the test totals, the benchmark lines, and the sweep fairness lines in the run summary. Only those filtered lines (totals, failures and their error lines, benchmark, fairness) are kept, as a run artifact for 90 days. The full log is never stored, because GitHub masks secrets only in the live log; to see a failing test in full, run that suite on a local throwaway database.
+Creates a throwaway branch of staging (4-hour expiry, deleted at the end), empties it (the suites expect an empty database, as in CI, and migrate it from 0001), runs every integration suite on it, continuing past a failing package so every suite reports, with the search benchmark on (`TIDEGRID_SEARCH_BENCH=1`, about 50,000 bookings in one tenant), and puts the test totals, the benchmark lines, and the sweep fairness lines in the run summary and, in a folded group, in the job log (which the GitHub API can read when the run page cannot be opened). Every suite query crosses the network to Neon, so the suites take far longer than in CI (83 minutes in run 43770709282); they stop at 95 minutes so the results are still written inside the job's 120. Only those filtered lines (totals, failures and their error lines, benchmark, fairness) are kept, as a run artifact for 90 days. The full log is never stored, because GitHub masks secrets only in the live log; to see a failing test in full, run that suite on a local throwaway database.
 
 ## What staging does not have yet
 

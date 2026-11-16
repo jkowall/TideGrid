@@ -194,7 +194,11 @@
       // The tidegrid-staging config made by tools/staging/configure.sh (staging
       // run 43751150410): staging's direct host, query caching disabled.
       "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "9c9970c1c7fd4433813445cbbfdf3ad1" }],
-      "placement": { "mode": "smart" },
+      // Pinned next to the database (staging run 43770709282 reported the
+      // compute region aws-us-east-2). Smart Placement kept the Worker at the
+      // runner's nearest site (local-PDX), so every query crossed the country:
+      // trips list p50 771 ms (docs/evidence/2026-11-15-staging-rehearsal.md).
+      "placement": { "region": "aws:us-east-2" },
       // Account-unique namespace ids, apart from production's 7211 and 7212.
       "ratelimits": [
         {
