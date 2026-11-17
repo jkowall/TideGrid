@@ -133,8 +133,11 @@ describe.skipIf(!env)("the email sweep takes fair turns across tenants", () => {
   it("still sends at most 25 of one tenant's messages a run", async () => {
     const t = await tenant("fair-mail-cap");
     const ids = await due(t, 30);
-    const { report } = await sweep([t]);
-    expect(report.failedTenants).toBe(0);
+    await sweep([t]);
+    // The run is global, so report.failedTenants also counts other files'
+    // tenants (sealed-email's keyless sends fail on purpose); check this
+    // tenant's own messages instead.
+    expect((await states(ids)).filter((s) => s === "failed")).toHaveLength(0);
     expect((await states(ids)).filter((s) => s === "sent")).toHaveLength(25);
   });
 
