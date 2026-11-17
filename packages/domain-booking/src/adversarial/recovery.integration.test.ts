@@ -506,7 +506,7 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
   // link (Neon from CI, staging run 44100529925) the default ran out before
   // this tenant's turn, and the sweep rightly left its refunds for next time.
   // Each sweep gets 50 s so that two sweeps plus setup fit inside the test's
-  // own 300 s limit (the file default of 120 s would cut the second sweep off).
+  // own 300 s limit (the file default of 120 s could cut a slow sweep off).
   const sweep = (provider: World["provider"] | null) =>
     sweepCheckouts(runtime.db, {
       runId: `adv-sweep-${randomUUID()}`,
@@ -582,9 +582,9 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
     expect(await problems(cases.map((c) => c.o.tripId))).toEqual([]);
   });
 
-  it("processes events recorded but never processed, once, and sends the refunds they request", async ({
-    expect,
-  }) => {
+  it("processes events recorded but never processed, once, and sends the refunds they request", {
+    timeout: 300_000,
+  }, async ({ expect }) => {
     // A success for an open checkout, and one for a checkout the guest canceled.
     const open = await openCheckout(world, A, trips.shared(), 2);
     const canceled = await openCheckout(world, A, trips.shared(), 2);
