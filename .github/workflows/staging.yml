@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: rehearse (everything below, in order, under one approval), deploy-and-probe (deploy then probes, no integration, about 6 minutes), or one part on its own - deploy (migrate, seed, connect, deploy), probes (latency, read-after-write, restart), integration (all integration suites and the search benchmark on a throwaway branch of staging)
+        description: rehearse (everything below, in order, under one approval), deploy-and-probe (deploy then probes, no integration, about 6 minutes), or one part on its own - deploy (migrate, seed, connect, deploy), probes (latency, read-after-write, restart), integration (the fairness, race, capacity, and tenant isolation suites on a throwaway branch of staging)
         type: choice
         options: [rehearse, deploy-and-probe, deploy, probes, integration]
         default: rehearse
@@ -187,7 +187,7 @@ jobs:
         run: pnpm --silent --filter @tidegrid/release staging-probe restart | tee -a "$RUNNER_TEMP/probes.ndjson"
 
       # ---- integration ----
-      - name: Integration suites and the search benchmark on a throwaway branch of staging
+      - name: Fairness, race, capacity, and isolation suites on a throwaway branch of staging
         if: inputs.action == 'integration' || inputs.action == 'rehearse'
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
@@ -204,35 +204,63 @@ jobs:
           [ -n "$pw" ] && echo "::add-mask::$pw"
           echo "throwaway branch $branch from staging" | tee -a "$GITHUB_STEP_SUMMARY"
           # The suites expect an empty database, as in CI (a fresh PostgreSQL
-          # container): some list every tenant, and the migration tests step
-          # the schema back. Empty the copy so the suites migrate it from 0001
+          # container): some list every tenant. Empty the copy so the suites migrate it from 0001
           # on the same Neon project, region, and compute size as staging.
           # tidegrid_app is a cluster role and survives; 0001 reuses it.
-          psql "$url" -XAtq -v ON_ERROR_STOP=1 \
+          PGOPTIONS='-c client_min_messages=warning' psql "$url" -XAtq -v ON_ERROR_STOP=1 \
             -c 'DROP SCHEMA IF EXISTS app CASCADE' -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public' >/dev/null
+          # A focused set, most important first: every sweep fairness suite,
+          # then the last-unit race, capacity, and tenant isolation suites. The
+          # whole integration suite took over 95 minutes on Neon (run
+          # 43871800993: every query crosses the network), and some suites need
+          # a PostgreSQL superuser, which Neon does not give: they set
+          # session_replication_role or clone a template database. The search
+          # benchmark is one of them (it bulk-loads with triggers off). Every
+          # suite still runs on each pull request in CI.
+          raw="$RUNNER_TEMP/integration.raw"
+          : > "$raw"
+          deadline=$(( $(date +%s) + 95 * 60 ))
+          status=0
+          suites() {
+            local pkg=$1; shift
+            local left=$(( deadline - $(date +%s) ))
+            if [ "$left" -le 60 ]; then
+              echo "== $pkg $*: not run, integration stopped at the 95-minute limit" >> "$raw"; status=124; return
+            fi
+            echo "== $pkg $*" >> "$raw"
+            local s=0
+            # The suites get only the throwaway branch, not staging's own URL or the Neon key.
+            env -u STAGING_ADMIN_URL -u NEON_API_KEY \
+              DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 CI=true \
+              timeout --kill-after=1m "${left}s" pnpm --silent --filter "$pkg" exec \
+                vitest run --config vitest.integration.config.ts "$@" >> "$raw" 2>&1 || s=$?
+            if [ "$s" -eq 124 ]; then echo "integration stopped at the 95-minute limit" >> "$raw"; status=124
+            elif [ "$s" -ne 0 ] && [ "$status" -eq 0 ]; then status=$s; fi
+          }
           set +e
-          # The suites get only the throwaway branch, not staging's own URL or the Neon key.
-          env -u STAGING_ADMIN_URL -u NEON_API_KEY \
-            DATABASE_URL="$url" TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1 TIDEGRID_SEARCH_BENCH=1 CI=true \
-            timeout --kill-after=1m 95m pnpm -r --no-bail --workspace-concurrency=1 --if-present test:integration > "$RUNNER_TEMP/integration.raw" 2>&1
-          status=$?
+          suites @tidegrid/domain-booking src/sweep-fairness.integration.test.ts
+          suites @tidegrid/domain-inventory src/sweep-fairness.integration.test.ts
+          suites @tidegrid/domain-messaging src/sweep-fairness.integration.test.ts
+          suites @tidegrid/domain-hostnames src/sweep-fairness.integration.test.ts
+          suites @tidegrid/domain-booking src/adversarial/races.integration.test.ts \
+            src/adversarial/chain-and-tenancy.integration.test.ts src/adversarial/expiry.integration.test.ts \
+            src/adversarial/recovery.integration.test.ts
+          suites @tidegrid/domain-inventory src/capacity-override.integration.test.ts
+          suites @tidegrid/api-worker test-integration/capacity-adversarial.integration.test.ts \
+            test-integration/capacity.integration.test.ts test-integration/tenant-access.integration.test.ts
           set -e
-          # Every suite query crosses the network to Neon (run 43770709282 took
-          # 83 minutes), so the suites stop at 95 minutes, inside the job's 120,
-          # and the lines below still reach the summary and the evidence.
-          [ "$status" -eq 124 ] && echo "integration stopped at the 95-minute limit" | tee -a "$RUNNER_TEMP/integration.raw"
-          # Only the totals, benchmark, and fairness lines are kept: the raw log
+          # Only the totals, failure, and fairness lines are kept: the raw log
           # stays on the runner, because masking covers the live log only.
           # Error lines say why a test failed; any line naming a connection
           # string or the password is dropped.
-          grep -E 'Test Files|Tests  |FAIL|B_BENCH|fairness|Error|error:|minute limit' "$RUNNER_TEMP/integration.raw" \
+          grep -E '^== |Test Files|Tests  |FAIL|fairness|Error|error:|minute limit' "$raw" \
             | grep -v -F "${pw:-no-password-to-filter}" | grep -v -E 'postgres(ql)?://' \
-            | cut -c1-400 > "$RUNNER_TEMP/integration.log" || true
-          rm -f "$RUNNER_TEMP/integration.raw"
-          { echo '```'; head -n 200 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            | cut -c1-600 > "$RUNNER_TEMP/integration.log" || true
+          rm -f "$raw"
+          { echo '```'; head -n 300 "$RUNNER_TEMP/integration.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # The same filtered lines in the job log, which the API can read
           # when the run page and artifact cannot be opened.
-          echo "::group::integration results (filtered)"; head -n 200 "$RUNNER_TEMP/integration.log" || true; echo "::endgroup::"
+          echo "::group::integration results (filtered)"; head -n 300 "$RUNNER_TEMP/integration.log" || true; echo "::endgroup::"
           exit "$status"
 
       - name: Keep the evidence

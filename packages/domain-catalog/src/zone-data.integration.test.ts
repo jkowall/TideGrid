@@ -22,6 +22,8 @@ const DAY_MS = 86_400_000;
  * Node 24.21.0 had agreed on both.)
  * (2026-11-03: Node 24.22.2 with ICU 79.1 and tz 2026e against the same image:
  * no new drift.)
+ * (2026-11-17: Neon PostgreSQL on the staging project, staging run 43871800993,
+ * added Havana. CI's postgres:17 image agreed on it.)
  */
 const KNOWN_DRIFT = new Set([
   "America/Vancouver",
@@ -30,6 +32,7 @@ const KNOWN_DRIFT = new Set([
   "America/Inuvik",
   "Africa/Casablanca",
   "Africa/El_Aaiun",
+  "America/Havana",
 ]);
 
 describe.skipIf(!env)("runtime zone data against PostgreSQL", () => {
