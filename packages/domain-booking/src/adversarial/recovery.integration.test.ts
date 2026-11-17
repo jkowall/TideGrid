@@ -505,15 +505,19 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
   // other tenants listed, and the tenant just served goes last. Over a slow
   // link (Neon from CI, staging run 44100529925) the default ran out before
   // this tenant's turn, and the sweep rightly left its refunds for next time.
+  // Each sweep gets 50 s so that two sweeps plus setup fit inside the test's
+  // own 300 s limit (the file default of 120 s would cut the second sweep off).
   const sweep = (provider: World["provider"] | null) =>
     sweepCheckouts(runtime.db, {
       runId: `adv-sweep-${randomUUID()}`,
       provider,
       graceSeconds: 0,
-      budgetMs: 120_000,
+      budgetMs: 50_000,
     });
 
-  it("sends a refund whose answer was lost again with the same key, once", async ({ expect }) => {
+  it("sends a refund whose answer was lost again with the same key, once", {
+    timeout: 300_000,
+  }, async ({ expect }) => {
     const cases = await Promise.all(
       (["before", "after"] as const).map(async (failure) => {
         const o = await boatLost();
