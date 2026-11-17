@@ -501,11 +501,16 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
     return o;
   }
 
+  // The run's budget is raised from its 20 s default: earlier suites leave
+  // other tenants listed, and the tenant just served goes last. Over a slow
+  // link (Neon from CI, staging run 44100529925) the default ran out before
+  // this tenant's turn, and the sweep rightly left its refunds for next time.
   const sweep = (provider: World["provider"] | null) =>
     sweepCheckouts(runtime.db, {
       runId: `adv-sweep-${randomUUID()}`,
       provider,
       graceSeconds: 0,
+      budgetMs: 120_000,
     });
 
   it("sends a refund whose answer was lost again with the same key, once", async ({ expect }) => {
@@ -538,7 +543,10 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
 
     await beacon();
     const report = await sweep(world.provider);
-    expect(report.refundsSettled).toBeGreaterThanOrEqual(2);
+    expect(
+      report.refundsSettled,
+      `deferred tenants ${report.deferredTenants}, complete ${report.complete}`,
+    ).toBeGreaterThanOrEqual(2);
     for (const { o } of cases) {
       const state = await stateOf(admin, o.sessionId);
       expect(state).toMatchObject({

@@ -18,7 +18,7 @@ All runs went through `.github/workflows/staging.yml` ([runbook](../runbooks/sta
 | [43770709282](https://github.com/jkowall/TideGrid/actions/runs/43770709282) | `18dfc17` | Second `rehearse`, integration on an emptied copy | Deploy and every probe passed. Integration ran for 83 minutes and failed. Its filtered results went only to the run summary, which could not be read from here; the next integration run repeated it with readable results |
 | [43794507058](https://github.com/jkowall/TideGrid/actions/runs/43794507058) | `4a7e86e` | `deploy-and-probe` with the API pinned next to the database (PR 195) | Passed. Placement `remote-ORD`; reads and writes 2 to 3 times faster (below) |
 | [43871800993](https://github.com/jkowall/TideGrid/actions/runs/43871800993) | `4a7e86e` | `integration`: every suite on an emptied Neon branch of staging | Stopped at the 95-minute limit before the waiver, booking, and API suites. Of what ran: hostname and inventory sweep fairness passed; four suites failed because Neon gives no superuser; two failures were test assumptions, fixed in PR 196 (below) |
-| [44100529925](https://github.com/jkowall/TideGrid/actions/runs/44100529925) | `249f9af` | `integration`: the focused set (PR 196) | RUN4_RESULT |
+| [44100529925](https://github.com/jkowall/TideGrid/actions/runs/44100529925) | `249f9af` | `integration`: the focused set (PR 196) | Finished in 20 minutes. All 4 fairness suites, the race, expiry, and chain-and-tenancy suites, capacity override, and the API's capacity, capacity-adversarial, and tenant-access suites passed. 1 recovery test failed for a timing reason, fixed in this page's pull request (below) |
 
 Four workflow fixes came out of these runs. PR 193 put deploy, probes, and integration under one approval (they had been three runs, each asking separately). PR 194 empties the throwaway branch before the suites, runs every package even when one fails, keeps error lines in the filtered log, and reports the compute region. PR 195 pins the staging API next to the database, adds the `deploy-and-probe` action (about 6 minutes), stops the suites at 95 minutes so their results are always written, and copies the filtered results into the job log. PR 196 runs a focused set of suites on staging (fairness, races, capacity, tenant isolation), because the whole suite cannot finish in time over the network and some suites need a superuser, and fixes the two test assumptions the full run found.
 
@@ -49,7 +49,15 @@ Under Smart Placement every response came from `local-PDX`: the Worker ran near 
 
 The search benchmark (`packages/domain-booking/src/search-benchmark.integration.test.ts`) grows one tenant to about 50,000 bookings by cloning rows with triggers and foreign keys off (`session_replication_role = replica`). Only a PostgreSQL superuser can do that, and Neon gives none: in run 43871800993 the suites that need it failed with `permission denied to set parameter "session_replication_role"`. So the 300 ms p95 target (D-E8) stays proven in CI only: the target was adopted once two CI runs showed every case at 225 ms or under, on CI's PostgreSQL rather than Neon. Proving it on Neon needs a loader that works without a superuser, such as cloning the quotes and holds as well, or loading through the API (follow-up).
 
-### Sweep fairness: RUN2_FAIRNESS
+### Sweep fairness: passed
+
+The four sweep fairness suites passed on a Neon branch of staging in run 44100529925. They cover the checkout sweep (5 tests), the inventory hold sweep (3), the email sweep (5), and the hostname sweep (19). Each one checks that a tenant with a large backlog cannot use up a run and that every listed tenant gets its turn. The email suite first failed in run 43871800993 because of a test assumption: its helper moved a message's next try to "one second ago", which over a slow link was later than the message's own time, and the delivery guard refused the change. PR 196 fixed the helper. The suites took 1 to 3 minutes each on Neon, against seconds in CI.
+
+### Tests on Neon
+
+Run 44100529925 also ran the last-unit race suites, booking chain and tenancy, hold expiry, capacity override, and the API's capacity, capacity-adversarial, and tenant-access suites. All passed except one recovery test. That test, "sends a refund whose answer was lost again with the same key, once", saw the second sweep settle 0 refunds where it expected 2. The likely cause is the sweep's 20-second budget. Earlier suites leave other tenants listed, the tenant just served goes last, and over the network the budget ran out before that tenant's turn. The sweep then correctly left the refunds for its next run: nothing was sent twice or lost. This page's pull request gives that test's sweeps a 120-second budget and makes the failure message name deferred tenants. It passes in CI, but it has not been re-run on Neon yet.
+
+What this means in production: a sweep run serves fewer tenants when each database round trip is slow, and the rest wait for the next run, in fair order. The API Worker now sits next to the database (placement above), so its round trips are far shorter than the runner's.
 
 ## Core live gate in staging
 
@@ -59,16 +67,16 @@ Status words: **Staging** means proven on the deployed staging Workers or on a N
 
 | # | Condition | Status | Evidence or what is missing |
 |---|---|---|---|
-| 1 | Every Core live workflow passes end-to-end acceptance for shared-seat and private-charter bookings | CI; RUN2_SUITES | The API integration suites cover checkout, deposits and balances, refunds and credits, reschedules, party changes, invitations, imports, waivers, and the console. Staging cannot run a guest checkout end to end: it has no guest site and no Turnstile secret, so checkout answers 503 `human_check_unavailable` (it fails closed). **Not met** in staging for a browser journey |
-| 2 | No overbooking or negative credit balance under last-unit races and retries | CI; RUN2_SUITES | `capacity-adversarial` and the booking adversarial suites (race rounds with an oversell check after each) |
+| 1 | Every Core live workflow passes end-to-end acceptance for shared-seat and private-charter bookings | CI | The API integration suites cover checkout, deposits and balances, refunds and credits, reschedules, party changes, invitations, imports, waivers, and the console. Staging cannot run a guest checkout end to end: it has no guest site and no Turnstile secret, so checkout answers 503 `human_check_unavailable` (it fails closed). **Not met** in staging for a browser journey |
+| 2 | No overbooking or negative credit balance under last-unit races and retries | **CI and staging** | `capacity-adversarial`, `capacity`, capacity override, and the booking race, expiry, and chain-and-tenancy suites (race rounds with an oversell check after each) passed on Neon in run 44100529925 |
 | 3 | Stripe direct-charge, deposit, balance, refund, fee-reversal, webhook-retry, and reconciliation cases pass in the operator's connected-account test environment and a controlled production verification | **Not met** | Staging uses the fake payment provider. Stripe test-mode cases pass in CI (`stripe-webhook`, `stripe-element`); the connected-account and production verification need a real operator account (O-STRIPE2, parked by the owner) |
-| 4 | Two-tenant isolation for guest links, accounts, console search, exports, messages, media, and support access | CI; RUN2_SUITES | `tenant-access`, `bookings-console`, the adversarial suites, and the sealed-contact suites. Staging holds two synthetic operators (`demo-harbor`, `demo-reef`) |
+| 4 | Two-tenant isolation for guest links, accounts, console search, exports, messages, media, and support access | **CI; staging for `tenant-access`** | `tenant-access` passed on Neon in run 44100529925; `bookings-console`, the adversarial suites, and the sealed-contact suites. Staging holds two synthetic operators (`demo-harbor`, `demo-reef`) |
 | 5 | The operator approves catalog, price, tax, fee, policy, waiver, intake, brand, email, and support configuration | **Not met** | Needs a real operator |
 | 6 | Sender-domain authentication, delivery, delivery-failure visibility, and automatic waiver-request tests pass | CI; partly live | Email is live behind an allow-list (O-P7). Staging sends only to the owner's address (`EMAIL_ALLOWED_RECIPIENTS`). Bounce and complaint events need the owner's Email Sending event subscription (PR 190) |
 | 7 | Migration dry run and final import reconcile; the operator signs launch totals and the cutover plan | CI; **not met** for an operator | `imports` suites. Needs a real operator's data |
 | 8 | Branded PWA passes production domain, payment, accessibility, responsive, link, receipt, and analytics checks | **Not met** | No staging guest site; production custom hostnames need Cloudflare for SaaS |
 | 9 | Roles, exports, roster, exception queues, audit, data export, deletion request, backups, support runbook, incident contacts verified | CI; partly ready | Runbooks merged (W3-OPS-7). Backups, restore drills, and the hourly ops check are built but switched off until the owner sets them up (W3-OPS-5/6). The staging console needs its host added to Cloudflare Access before staff can sign in |
-| 10 | No open defect that can cause cross-tenant access, oversell, duplicate value, lost waiver evidence, missing consent, silent message failure, or a wrong remedy | RUN2_DEFECTS | No such defect is open in the repository. This run found none |
+| 10 | No open defect that can cause cross-tenant access, oversell, duplicate value, lost waiver evidence, missing consent, silent message failure, or a wrong remedy | No open defect found | No such defect is open in the repository. The staging runs found none: every failure traced to the test environment (no superuser, slower round trips) or a test assumption, and none changed a booking, payment, or message wrongly |
 
 ### Architecture gates ([Build, hosting, and operations](../v2/08-build-hosting-and-operations.md#architecture-acceptance-gates))
 
@@ -76,9 +84,9 @@ Status words: **Staging** means proven on the deployed staging Workers or on a N
 |---|---|---|
 | Shared web build | **Not met** in staging | Proven locally for two brands (G2.14b); needs a staging guest site |
 | Custom hostname | **Not met** | Needs Cloudflare for SaaS and an operator-owned DNS zone |
-| Tenant isolation | CI | As condition 4. R2 objects and queues are per environment; staging's are its own (Terraform) |
+| Tenant isolation | CI; staging for `tenant-access` | As condition 4. R2 objects and queues are per environment; staging's are its own (Terraform) |
 | Database connection | **Staging, passed** | Hyperdrive to the direct endpoint, caching off, restart survived, read-after-write held (above) |
-| Transaction correctness (Core) | CI; RUN2_SUITES | Final-seat, exclusive-boat, service-credit, late-payment, and duplicate-callback suites |
+| Transaction correctness (Core) | **CI and staging** for races and final seat | Final-seat, exclusive-boat, service-credit, late-payment, and duplicate-callback suites |
 | Async recovery | CI | Outbox, inbox, retry, and dead letter suites (`delivery`, `after-commit-delivery`). Staging's queues and dead letter queues exist and the Worker consumes them |
 | Deployment | Partly | Staging deploys from CI with retained evidence (these runs). Production promotion runs from the GitHub release workflow (W3-OPS-3), which has not run live yet |
 | Migration | CI; **staging, passed** for forward | All 58 migrations applied to staging from CI; the expand-contract rehearsal runs in CI |
@@ -106,4 +114,5 @@ Already done by the owner today: the `infra-staging` Cloudflare token can now de
 - Production placement: set the production API's hint from the production database's region when W3-OPS-2 creates it, and run a longer latency probe to check the slowest reads.
 - During a compute restart, answer a dropped database connection with a retryable 503 instead of a 500 (seen once in run 43794507058).
 - A search benchmark loader that works without a superuser, so search p95 can be measured on Neon.
-- RUN4_FOLLOWUPS
+- Re-run the recovery suite on Neon with the larger budget at the next staging `integration` run.
+- Watch how many tenants one sweep run covers once production traffic exists (the sweep reports `deferredTenants`).

@@ -2,6 +2,29 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-17
+
+### Staging rehearsal and Core live gate proof (W3-PREPILOT, W3-CLG-1), November 15 to 17, 2026
+
+Goal branch `claude/project-thread-wwferz`. PRs: 191 (Hyperdrive binding), 193 (one approval per staging run), 194 (an emptied branch for the suites), 195 (API pinned next to the database, `deploy-and-probe`), 196 (a focused suite set on Neon and two test fixes), and this page's pull request (proof doc, recovery test budget). Staging only: the Neon `staging` branch, the staging Workers, and synthetic data. Nothing touched Neon main or production.
+
+- **Built.** Staging deploys, probes, and runs integration suites from `.github/workflows/staging.yml` under one owner approval. The staging API connects through Hyperdrive (caching off) to the direct endpoint and is pinned to `aws:us-east-2`, next to the database.
+- **Proof.** [docs/evidence/2026-11-15-staging-rehearsal.md](evidence/2026-11-15-staging-rehearsal.md):
+  - Read-after-write passed: 20 of 20 pairs, 0 stale.
+  - A compute restart was survived, with 8 of 8 pairs afterwards.
+  - Pinning cut typical reads 2 to 3 times (trips list p50 771 ms to 304 ms).
+  - All four sweep fairness suites passed on a Neon branch of staging, as did the race, capacity, and tenant-access suites (run 44100529925).
+- **Review.** Each failure was traced:
+  - Neon gives no superuser, so 4 suites, the search benchmark among them, run in CI only.
+  - Two test assumptions broke over a slow link and were fixed: the email fairness helper and a recovery test's sweep budget.
+  - Neon's PostgreSQL drifted on America/Havana, now on the known drift list.
+  - One restart read answered 500 rather than a retryable 503 (follow-up).
+- **Still open.**
+  - Search p95 on Neon needs a loader that works without a superuser.
+  - The recovery test is not yet re-run on Neon.
+  - Production placement waits on the production database.
+  - Ten owner-only setup items are listed in the proof doc.
+
 ## 2026-11-15
 
 ### Every guest contact detail sealed (W3-OPS-4, owner decision), built November 15, 2026
