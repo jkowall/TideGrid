@@ -26,6 +26,12 @@
   },
   "vulnerabilities": {
     "fail_on": ["high", "critical"],
-    "exceptions": []
+    "exceptions": [
+      {
+        "id": "GHSA-fc5q-39xc-vjpf",
+        "reason": "picomatch ReDoS, no patched version yet. Reached only through test and build tooling (vitest, expo > @expo/cli); not in any Worker or web bundle and never sees guest or staff input. Approved by the owner 2026-11-17.",
+        "review_by": "2026-12-17"
+      }
+    ]
   }
 }
