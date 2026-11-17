@@ -57,7 +57,11 @@ describe.skipIf(!env)("the email sweep takes fair turns across tenants", () => {
       );
       ids.push(queued.messageId);
     }
-    await admin`update public.email_messages set next_attempt_at = now() - interval '1 second'
+    // Only ever earlier: the delivery guard refuses a later time, and over a
+    // slow link (Neon from CI, run 43871800993) the first message can be
+    // queued more than a second before this update.
+    await admin`update public.email_messages
+      set next_attempt_at = least(next_attempt_at, now() - interval '1 second')
       where id in ${admin(ids)} and state = 'queued'`;
     return ids;
   }
