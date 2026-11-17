@@ -16,13 +16,13 @@ Goal branch `claude/project-thread-wwferz`. PRs: 191 (Hyperdrive binding), 193 (
   - All four sweep fairness suites passed on a Neon branch of staging, as did the race, capacity, and tenant-access suites (run 44100529925).
 - **Review.** Each failure was traced:
   - Neon gives no superuser, so 4 suites, the search benchmark among them, run in CI only.
-  - Two test assumptions broke over a slow link: the email fairness helper (fixed) and a recovery test's sweep budget (proposed fix, cause not yet verified on Neon).
+  - Two test assumptions broke over a slow link: the email fairness helper (fixed) and a recovery test that swept every tenant (proposed fix: sweep its own tenant only; cause not yet verified on Neon).
   - Neon's PostgreSQL drifted on America/Havana, now on the known drift list.
   - One restart read answered 500 rather than a retryable 503 (follow-up).
 - **Still open.**
-  - Search p95 on Neon needs a loader that works without a superuser.
+  - Search p95 is a domain-level CI measurement only; on Neon it needs a loader that works without a superuser.
   - The recovery test is not yet re-run on Neon, so its cause and the refunds' final state are unverified.
-  - Core gate conditions 1, 2 (credit races), and 10 (late email bounces show "Sent") are not met; guest credit redemption at checkout is not built.
+  - Core gate conditions 1, 2 (credit races), and 10 (late email bounces show "Sent"; balance payment gaps) are not met; guest credit redemption at checkout is not built.
   - Placement does not apply to cron sweeps; their database latency is unmeasured.
   - Production placement waits on the production database.
   - Ten owner-only setup items are listed in the proof doc.

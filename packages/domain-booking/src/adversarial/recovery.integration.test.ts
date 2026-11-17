@@ -26,6 +26,7 @@ import {
   settleRefund,
   sweepCheckouts,
 } from "../index.ts";
+import { checkoutSweepStore, runCheckoutSweep } from "../sweep.ts";
 import {
   type CheckoutFixture,
   createCheckoutFixture,
@@ -501,23 +502,25 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
     return o;
   }
 
-  // The run's budget is raised from its 20 s default: earlier suites leave
-  // other tenants listed, and the tenant just served goes last. Over a slow
-  // link (Neon from CI, staging run 44100529925) the default ran out before
-  // this tenant's turn, and the sweep rightly left its refunds for next time.
-  // Each sweep gets 50 s so that two sweeps plus setup fit inside the test's
-  // own 300 s limit (the file default of 120 s could cut a slow sweep off).
-  const sweep = (provider: World["provider"] | null) =>
-    sweepCheckouts(runtime.db, {
-      runId: `adv-sweep-${randomUUID()}`,
-      provider,
-      graceSeconds: 0,
-      budgetMs: 50_000,
-    });
+  // Each sweep serves this file's tenant only, as the fairness suite does.
+  // A global sweep also lists tenants other suites left behind, and the tenant
+  // just served goes last, so whether this tenant got its turn depended on the
+  // run's budget and tenant limit (staging run 44100529925 settled 0 of 2
+  // refunds; the cause is not yet verified on Neon). Fairness across tenants
+  // is proven in sweep-fairness.integration.test.ts.
+  const sweep = (provider: World["provider"] | null) => {
+    const real = checkoutSweepStore(runtime.db, provider, undefined);
+    return runCheckoutSweep(
+      {
+        ...real,
+        listTenants: async (limit, grace) =>
+          (await real.listTenants(1000, grace)).filter((id) => id === A.id).slice(0, limit),
+      },
+      { runId: `adv-sweep-${randomUUID()}`, provider, graceSeconds: 0 },
+    );
+  };
 
-  it("sends a refund whose answer was lost again with the same key, once", {
-    timeout: 300_000,
-  }, async ({ expect }) => {
+  it("sends a refund whose answer was lost again with the same key, once", async ({ expect }) => {
     const cases = await Promise.all(
       (["before", "after"] as const).map(async (failure) => {
         const o = await boatLost();
@@ -582,9 +585,9 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
     expect(await problems(cases.map((c) => c.o.tripId))).toEqual([]);
   });
 
-  it("processes events recorded but never processed, once, and sends the refunds they request", {
-    timeout: 300_000,
-  }, async ({ expect }) => {
+  it("processes events recorded but never processed, once, and sends the refunds they request", async ({
+    expect,
+  }) => {
     // A success for an open checkout, and one for a checkout the guest canceled.
     const open = await openCheckout(world, A, trips.shared(), 2);
     const canceled = await openCheckout(world, A, trips.shared(), 2);
