@@ -155,7 +155,9 @@ describe.skipIf(!env)("sealed email (W3-OPS-4, 0057)", () => {
     expect(row.to_email).toBe(`${row.to_email_index}@sealed.invalid`);
     expect(row.to_email_index).toMatch(/^[0-9a-f]{64}$/);
     expect(row.content_sealed).toMatch(/^tgf1:k1:/);
-    expect(JSON.stringify(row)).not.toMatch(/Ana|example\.test/);
+    // The ciphertext is left out: random base64url can spell "Ana" by chance.
+    const { content_sealed: _ciphertext, ...readable } = row;
+    expect(JSON.stringify(readable)).not.toMatch(/Ana|example\.test/);
 
     // A handle with no keyring cannot send it, and never sends it blank.
     const fixture = createCloudflareEmailFixture();

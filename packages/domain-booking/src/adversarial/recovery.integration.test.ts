@@ -26,6 +26,7 @@ import {
   settleRefund,
   sweepCheckouts,
 } from "../index.ts";
+import { checkoutSweepStore, runCheckoutSweep } from "../sweep.ts";
 import {
   type CheckoutFixture,
   createCheckoutFixture,
@@ -501,12 +502,23 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
     return o;
   }
 
-  const sweep = (provider: World["provider"] | null) =>
-    sweepCheckouts(runtime.db, {
-      runId: `adv-sweep-${randomUUID()}`,
-      provider,
-      graceSeconds: 0,
-    });
+  // Each sweep serves this file's tenant only, as the fairness suite does.
+  // A global sweep also lists tenants other suites left behind, and the tenant
+  // just served goes last, so whether this tenant got its turn depended on the
+  // run's budget and tenant limit (staging run 44100529925 settled 0 of 2
+  // refunds; the cause is not yet verified on Neon). Fairness across tenants
+  // is proven in sweep-fairness.integration.test.ts.
+  const sweep = (provider: World["provider"] | null) => {
+    const real = checkoutSweepStore(runtime.db, provider, undefined);
+    return runCheckoutSweep(
+      {
+        ...real,
+        listTenants: async (limit, grace) =>
+          (await real.listTenants(1000, grace)).filter((id) => id === A.id).slice(0, limit),
+      },
+      { runId: `adv-sweep-${randomUUID()}`, provider, graceSeconds: 0 },
+    );
+  };
 
   it("sends a refund whose answer was lost again with the same key, once", async ({ expect }) => {
     const cases = await Promise.all(
@@ -538,7 +550,10 @@ describe.skipIf(!env)("G2.7 adversarial: the sweep finishes interrupted work", (
 
     await beacon();
     const report = await sweep(world.provider);
-    expect(report.refundsSettled).toBeGreaterThanOrEqual(2);
+    expect(
+      report.refundsSettled,
+      `deferred tenants ${report.deferredTenants}, complete ${report.complete}`,
+    ).toBeGreaterThanOrEqual(2);
     for (const { o } of cases) {
       const state = await stateOf(admin, o.sessionId);
       expect(state).toMatchObject({
