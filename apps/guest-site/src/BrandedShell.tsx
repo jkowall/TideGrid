@@ -10,7 +10,7 @@ import { useLinkClick } from "./navigation.tsx";
 import { ParticipantPage } from "./participant/ParticipantPage.tsx";
 import { useTitle } from "./States.tsx";
 import { OfflinePage, SupportPage } from "./support/SupportPage.tsx";
-import { UpcomingTrips } from "./UpcomingTrips.tsx";
+import { TripsSection } from "./TripsSection.tsx";
 import { WaiverPage } from "./waiver/WaiverPage.tsx";
 
 /**
@@ -128,7 +128,7 @@ function Home({ brand }: { brand: PublicBrand }) {
         </svg>
       </section>
       <div className="guest-container guest-content">
-        <UpcomingTrips />
+        <TripsSection />
       </div>
     </>
   );

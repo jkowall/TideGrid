@@ -62,7 +62,7 @@ describe("guest app", () => {
     vi.stubGlobal("fetch", vi.fn(site()));
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
-    await screen.findByRole("heading", { name: "No trips in these dates" });
+    await screen.findByRole("heading", { name: /^Nothing open in / });
     // Let any pending effects run before checking that nothing moved focus.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(document.activeElement).toBe(document.body);
@@ -203,7 +203,7 @@ describe("guest app", () => {
     const heading = await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
     await waitFor(() => expect(document.activeElement).toBe(heading));
     // The trips list arriving afterwards leaves focus where the shell put it.
-    await screen.findByRole("heading", { name: "No trips in these dates" });
+    await screen.findByRole("heading", { name: /^Nothing open in / });
     expect(document.activeElement).toBe(heading);
   });
 

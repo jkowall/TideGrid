@@ -24,7 +24,7 @@ import {
   todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import { type Ref, useEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
 import { bookingHref } from "./booking/address.ts";
 import { useLinkClick } from "./navigation.tsx";
 import {
@@ -61,12 +61,20 @@ type State =
   /** `retrying`: "Try again" is working; the notice stays so focus stays on it. */
   | { kind: "failed"; reason: TripsFailure; retrying: boolean; failures: number };
 
-const guests = (n: number) => (n === 1 ? "1 guest" : `${n} guests`);
-const partyOptions = partySizes.map((n) => ({ value: String(n), label: guests(n) }));
+export const guests = (n: number) => (n === 1 ? "1 guest" : `${n} guests`);
+export const partyOptions = partySizes.map((n) => ({ value: String(n), label: guests(n) }));
 const currentYear = () => new Date().getFullYear();
 const sameQuery = (a: TripQuery, b: TripQuery) => a.start === b.start && a.party === b.party;
 
-export function UpcomingTrips() {
+export function UpcomingTrips({
+  list = false,
+  viewSwitch,
+}: {
+  /** Shown as the list a guest chose over the calendar: the address keeps `view=list`. */
+  list?: boolean;
+  /** The Calendar and List switch, beside the heading. */
+  viewSwitch?: ReactNode;
+} = {}) {
   // The guest's own date. Trip dates are the marina's; see windowOf.
   const [today] = useState(() => todayIn());
   const [query, setQuery] = useState<TripQuery>(() => readQuery(window.location.search, today));
@@ -116,12 +124,12 @@ export function UpcomingTrips() {
 
   // The address keeps the dates and party, so a reload shows the same list.
   useEffect(() => {
-    const search = writeQuery(query, today);
+    const search = writeQuery(query, today, list);
     if (search !== window.location.search) {
       const { pathname, hash } = window.location;
       window.history.replaceState(window.history.state, "", `${pathname}${search}${hash}`);
     }
-  }, [query, today]);
+  }, [query, today, list]);
 
   // "Try again" is gone once the list arrives, so the dates take focus, as the
   // week does in the console.
@@ -182,9 +190,12 @@ export function UpcomingTrips() {
   return (
     <section aria-labelledby="trips-title" className="guest-section trips">
       <div className="trips__head">
-        <h2 id="trips-title" tabIndex={-1}>
-          Upcoming trips
-        </h2>
+        <div className="trips__title-row">
+          <h2 id="trips-title" tabIndex={-1}>
+            Upcoming trips
+          </h2>
+          {viewSwitch}
+        </div>
         {shown && shown.trips.length > 0 && (
           <TimeNote trips={shown.trips} start={range.start} end={range.end} />
         )}
@@ -334,7 +345,7 @@ const failureCopy: Record<TripsFailure, { title: string; body: string }> = {
   },
 };
 
-function TripsFailed({
+export function TripsFailed({
   reason,
   failures,
   retrying,
@@ -391,7 +402,7 @@ function TripsFailed({
  * dates shown. Trips at one place share one note; trips in several zones each
  * carry their place instead.
  */
-function TimeNote({
+export function TimeNote({
   trips,
   start,
   end,
@@ -432,7 +443,7 @@ function TimeNote({
   );
 }
 
-function TripList({
+export function TripList({
   trips,
   busy,
   party,
