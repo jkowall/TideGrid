@@ -37,11 +37,11 @@ export function CalendarView({
 
   /**
    * The month a date was picked in, so Month from that week returns to it even
-   * when the week starts in the month before. Null: this month.
+   * when the week starts in the month before, this month included.
    */
   const fromMonth = useRef<string | null | undefined>(undefined);
 
-  const go = (next: CalendarMode, date?: LocalDate, moveFocus = true) => {
+  const go = (next: CalendarMode, date?: LocalDate, moveFocus = true, shownMonth?: string) => {
     const params = new URLSearchParams(window.location.search);
     if (next === "month") {
       const week = params.get("week");
@@ -64,7 +64,7 @@ export function CalendarView({
       }
     } else {
       const month = params.get("month");
-      fromMonth.current = month;
+      fromMonth.current = shownMonth ?? month;
       params.delete("view");
       params.delete("month");
       if (date) params.set("week", date);
@@ -103,7 +103,7 @@ export function CalendarView({
       membership={membership}
       focusHeading={focusHeading}
       viewSwitch={viewSwitch}
-      onOpenWeek={(date) => go("week", date, false)}
+      onOpenWeek={(date, shown) => go("week", date, false, shown)}
     />
   ) : (
     <CalendarPage

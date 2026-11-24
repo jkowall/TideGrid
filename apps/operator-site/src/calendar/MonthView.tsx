@@ -74,7 +74,7 @@ export function MonthPage({
   membership: Membership;
   viewSwitch?: ReactNode;
   /** Open the week holding a date in the week view. */
-  onOpenWeek: (date: LocalDate) => void;
+  onOpenWeek: (date: LocalDate, month: string) => void;
 } & FocusOnArrival) {
   const { tenantId, tenantName } = membership;
   const [zone, setZone] = useState<string | undefined>();
@@ -174,6 +174,8 @@ export function MonthPage({
       if (load.kind === "failed") retry();
       return;
     }
+    // A new month drops a pending focus claim from Try again.
+    focusOnLoad.current = false;
     if (moveFocus) focusOnMonth.current = true;
     setMonth(target);
   };
@@ -250,7 +252,7 @@ export function MonthPage({
               today={today}
               trips={load.kind === "ready" ? trips : null}
               source={source}
-              onOpenWeek={onOpenWeek}
+              onOpenWeek={(date) => onOpenWeek(date, (month ?? thisMonth).slice(0, 7))}
             />
             <ul className="cal-month__legend">
               {tones.map((tone) => (

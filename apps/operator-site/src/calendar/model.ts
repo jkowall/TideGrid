@@ -522,8 +522,8 @@ export const monthToneLabels: Record<MonthTone, string> = {
 
 /**
  * What a tag shows at its end, so state never rests on color alone: seats
- * while on sale or departed ("13/20", a charter's "Open" or "Booked"), and
- * otherwise a word for the state.
+ * while on sale ("13/20", a charter's "Open" or "Booked"), and otherwise a
+ * word for the state.
  */
 export function monthSeats(
   trip: Pick<StaffTrip, "capacity">,
@@ -545,6 +545,7 @@ export function monthSeats(
     closed: "Closed",
     draft: "Draft",
     canceled: "Canceled",
+    done: "Departed",
   };
   const short =
     word[tone] ??

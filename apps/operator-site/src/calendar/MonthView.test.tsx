@@ -226,6 +226,37 @@ describe("the month view", () => {
     expect(window.location.search).toBe("?view=month&month=2026-12");
   });
 
+  it("returns to this month from a week that runs into the next", async () => {
+    api(
+      () => json({ trips: [] }),
+      () => json({ trips: [] }),
+      () => json({ trips: [] }),
+    );
+    render(<CalendarView membership={membership} focusHeading={false} />);
+    const month = await screen.findByRole("table", { name: "Trips in November 2026" });
+    fireEvent.click(
+      await within(month).findByRole("button", { name: /^Monday, November 30, no trips/ }),
+    );
+    // Nov 29 to Dec 5 leans into December, but the date was picked in November.
+    await screen.findByRole("heading", { name: "No trips this week" });
+    fireEvent.click(screen.getByRole("button", { name: "Month" }));
+    expect(await screen.findByRole("table", { name: "Trips in November 2026" })).toBeTruthy();
+    expect(window.location.search).toBe("?view=month");
+  });
+
+  it("leaves focus on Next when a failed retry is followed by a new month", async () => {
+    const failed = () => json({ error: { code: "internal", message: "x", requestId: "r" } }, 500);
+    api(failed, failed, () => json({ trips: [] }));
+    render(<CalendarView membership={membership} focusHeading={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Try again" })).toBeTruthy());
+    const next = screen.getByRole("button", { name: /Next/ });
+    next.focus();
+    fireEvent.click(next);
+    await screen.findByRole("heading", { name: "No trips in December 2026" });
+    expect(document.activeElement).toBe(next);
+  });
+
   it("opens the month's first week when Week is pressed in another month", async () => {
     window.history.replaceState(null, "", "/calendar?view=month&month=2027-03&source=direct");
     api(
@@ -282,5 +313,6 @@ describe("month rules", () => {
     // Past its booking cutoff but not yet departed: not selling.
     expect(monthTone(sunsetOn(4), new Date("2026-11-04T22:30:00Z"))).toBe("closed");
     expect(monthSeats(sunsetOn(4), "closed").short).toBe("Closed");
+    expect(monthSeats(sunsetOn(3), "done").short).toBe("Departed");
   });
 });
