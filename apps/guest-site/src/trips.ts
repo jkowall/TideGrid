@@ -223,29 +223,31 @@ export function clampMonth(month: MonthStart, today: LocalDate): MonthStart {
 
 /**
  * The dates a month asks the API for: the whole month, from today on. As the
- * list does (see windowOf), a month holding today asks for the day before
- * too, so a guest east of the marina still sees the marina's today.
+ * list does (see windowOf), the month holding today also asks for the day
+ * before, even when that day is in the previous month, so a guest east of the
+ * marina still sees the marina's today.
  */
 export function monthWindow(
   month: MonthStart,
   today: LocalDate,
 ): { from: LocalDate; to: LocalDate } {
   const end = monthEnd(month);
-  return { from: month <= today ? later(month, addDays(today, -1)) : month, to: end };
+  return { from: month <= today ? addDays(today, -1) : month, to: end };
 }
 
 /**
  * The calendar's weeks: Sunday to Saturday, from the week holding the 1st to
- * the week holding the last day. Dates outside the month are null.
+ * the week holding the last day. Dates from the months either side fill the
+ * first and last weeks; the calendar shows them only when they hold a trip.
  */
-export function monthGrid(month: MonthStart): Array<Array<LocalDate | null>> {
+export function monthGrid(month: MonthStart): LocalDate[][] {
   const end = monthEnd(month);
-  const weeks: Array<Array<LocalDate | null>> = [];
+  const weeks: LocalDate[][] = [];
   let day = addDays(month, -new Date(`${month}T12:00:00Z`).getUTCDay());
   while (day <= end) {
-    const week: Array<LocalDate | null> = [];
+    const week: LocalDate[] = [];
     for (let i = 0; i < 7; i++) {
-      week.push(day >= month && day <= end ? day : null);
+      week.push(day);
       day = addDays(day, 1);
     }
     weeks.push(week);

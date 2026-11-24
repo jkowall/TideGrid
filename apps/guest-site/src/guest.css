@@ -871,9 +871,21 @@
 .trip-calendar__legend-few {
   color: var(--status-warning);
 }
-.trip-calendar__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: currentColor;
+.trip-calendar__count-short {
+  display: none;
+}
+/* Narrow phones: shorter labels and a tighter card, so neighbors never touch. */
+@media (max-width: 24rem) {
+  .trip-calendar__month {
+    padding: var(--space-2);
+  }
+  .trip-calendar__grid {
+    border-spacing: 2px;
+  }
+  .trip-calendar__count-long {
+    display: none;
+  }
+  .trip-calendar__count-short {
+    display: inline;
+  }
 }

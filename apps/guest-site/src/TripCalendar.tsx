@@ -19,6 +19,7 @@ import {
   monthBounds,
   monthEnd,
   monthGrid,
+  monthOf,
   monthWindow,
   readCalendarQuery,
   summarizeDays,
@@ -95,6 +96,13 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
   const retryRequested = useRef(false);
   /** The month's name takes focus once a new month renders from a control that goes away. */
   const focusMonth = useRef(false);
+  /** After "Try again" or a jump back to today, the month's name takes focus once it loads. */
+  const focusMonthOnLoad = useRef(false);
+  /**
+   * Opened with nothing in the address: if this month has nothing left open,
+   * such as on its last day, show the next month once instead.
+   */
+  const advanceIfEmpty = useRef(window.location.search === "");
 
   const { month, party } = query;
   useEffect(() => {
@@ -151,13 +159,42 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
     }
   }, [month]);
 
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    if (focusMonthOnLoad.current) {
+      focusMonthOnLoad.current = false;
+      monthLabel.current?.focus();
+    }
+    const shouldAdvance = advanceIfEmpty.current;
+    advanceIfEmpty.current = false;
+    if (shouldAdvance && state.loaded.trips.length === 0) {
+      setQuery((q) =>
+        q.month === state.loaded.query.month
+          ? { ...q, month: clampMonth(addMonths(q.month, 1), today) }
+          : q,
+      );
+    }
+  }, [state, today]);
+
   const { first, last } = monthBounds(today);
   const canPrevious = month > first;
   const canNext = month < last;
   const goToMonth = (next: MonthStart, moveFocus = false) => {
+    advanceIfEmpty.current = false;
     setQuery((q) => ({ ...q, month: clampMonth(next, today), date: null }));
     setAnnounce("");
     if (moveFocus) focusMonth.current = true;
+  };
+  const setParty = (next: number, moveFocus = false) => {
+    advanceIfEmpty.current = false;
+    setQuery((q) => ({ ...q, party: next }));
+    setAnnounce("");
+    if (moveFocus) focusMonthOnLoad.current = true;
+  };
+  const retry = () => {
+    retryRequested.current = true;
+    focusMonthOnLoad.current = true;
+    setAttempt((n) => n + 1);
   };
 
   const loaded = state.kind === "ready" ? state.loaded : undefined;
@@ -167,13 +204,16 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
   const shown = current ? loaded : updating ? previous : undefined;
   const days = shown ? summarizeDays(shown.trips) : new Map<LocalDate, DaySummary>();
   const tripDates = [...days.keys()].sort();
-  const picked =
-    query.date && days.has(query.date)
-      ? query.date
-      : current
-        ? (tripDates.find((d) => d >= today) ?? tripDates[0] ?? null)
-        : null;
+  // The window starts at the marina's today at the earliest, so the first date
+  // with a trip is the soonest a guest can book.
+  const picked = query.date && days.has(query.date) ? query.date : (tripDates[0] ?? null);
   const dayTrips = shown && picked ? shown.trips.filter((t) => t.localDate === picked) : [];
+
+  // A date picked for another party that has nothing open now leaves the address.
+  const staleDate = current && query.date !== null && !days.has(query.date);
+  useEffect(() => {
+    if (staleDate) setQuery((q) => ({ ...q, date: null }));
+  }, [staleDate]);
 
   const pick = (date: LocalDate) => {
     setQuery((q) => ({ ...q, date }));
@@ -181,7 +221,8 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
     setAnnounce(`${formatDate(date, "full")}: ${tripCount(summary?.count ?? 0)}.`);
     // On a phone the day's trips sit under the month: bring them up.
     if (window.matchMedia?.("(max-width: 47.99rem)").matches) {
-      dayPanel.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      dayPanel.current?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
     }
   };
 
@@ -211,7 +252,7 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
           label="Party size"
           options={partyOptions}
           value={String(party)}
-          onChange={(event) => setQuery((q) => ({ ...q, party: Number(event.target.value) }))}
+          onChange={(event) => setParty(Number(event.target.value))}
         />
       </div>
 
@@ -219,20 +260,7 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
         {announce || status}
       </p>
 
-      {state.kind === "failed" && (
-        <TripsFailed
-          reason={state.reason}
-          failures={state.failures}
-          retrying={state.retrying}
-          onRetry={() => {
-            retryRequested.current = true;
-            setAttempt((n) => n + 1);
-          }}
-          onFromToday={() => goToMonth(first, true)}
-        />
-      )}
-
-      {state.kind !== "failed" && (
+      {
         <div className="trip-calendar">
           <div className="trip-calendar__month" aria-busy={!current || undefined}>
             <div className="trip-calendar__nav">
@@ -261,7 +289,7 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
               today={today}
               days={days}
               picked={picked}
-              loading={!shown}
+              loading={!shown && state.kind !== "failed"}
               onPick={pick}
             />
             {updating && (
@@ -279,16 +307,30 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
                 <span className="trip-calendar__swatch" />
                 Nothing open
               </li>
-              <li className="trip-calendar__legend-few">
-                <span className="trip-calendar__dot" />
-                Few seats left
-              </li>
+              <li className="trip-calendar__legend-few">"Few left": 4 seats or fewer</li>
             </ul>
           </div>
 
           <div className="trip-calendar__day" ref={dayPanel}>
-            {!shown && <TripListSkeleton />}
-            {shown && picked && <TripList trips={dayTrips} busy={updating} party={party} />}
+            {state.kind === "failed" && (
+              <TripsFailed
+                reason={state.reason}
+                failures={state.failures}
+                retrying={state.retrying}
+                onRetry={retry}
+                onFromToday={() => {
+                  if (month === first) retry();
+                  else {
+                    focusMonthOnLoad.current = true;
+                    goToMonth(first);
+                  }
+                }}
+              />
+            )}
+            {!shown && state.kind !== "failed" && <TripListSkeleton />}
+            {shown && picked && (
+              <TripList trips={dayTrips} busy={updating} party={shown.query.party} />
+            )}
             {shown && shown.trips.length === 0 && (
               <EmptyState
                 icon="calendar"
@@ -304,9 +346,7 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
                       Try {monthName.format(noon(addMonths(month, 1)))}
                     </Button>
                   ) : party > 1 ? (
-                    <Button onClick={() => setQuery((q) => ({ ...q, party: 1 }))}>
-                      Show trips for 1 guest
-                    </Button>
+                    <Button onClick={() => setParty(1, true)}>Show trips for 1 guest</Button>
                   ) : undefined
                 }
               >
@@ -318,7 +358,7 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
             )}
           </div>
         </div>
-      )}
+      }
     </section>
   );
 }
@@ -354,10 +394,12 @@ function MonthGrid({
       </thead>
       <tbody>
         {monthGrid(month).map((week) => (
-          <tr key={week.find((d) => d !== null) ?? "week"}>
-            {week.map((date, i) => {
-              if (!date) return <td key={`blank-${i}`} />;
+          <tr key={week[0]}>
+            {week.map((date) => {
               const day = days.get(date);
+              // Another month's date shows only when it holds a trip: the
+              // marina's today, seen from a guest whose month has turned.
+              if (!day && monthOf(date) !== month) return <td key={date} />;
               const number = Number(date.slice(8));
               const isToday = date === today;
               if (!day) {
@@ -399,7 +441,12 @@ function MonthGrid({
                       {number}
                     </span>
                     <span className="trip-calendar__count" aria-hidden="true">
-                      {day.few ? "Few left" : tripCount(day.count)}
+                      <span className="trip-calendar__count-long">
+                        {day.few ? "Few left" : tripCount(day.count)}
+                      </span>
+                      <span className="trip-calendar__count-short">
+                        {day.few ? "Few" : day.count}
+                      </span>
                     </span>
                     <VisuallyHidden>
                       {formatDate(date, "full")}

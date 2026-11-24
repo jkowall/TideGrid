@@ -131,6 +131,8 @@ describe("the trip calendar", () => {
       () => json({ trips: [] }),
       () => json({ trips: [sunsetOn(4, "2026-11-03")] }),
     );
+    // A month asked for in the address stays, even when empty.
+    window.history.replaceState(null, "", "/?month=2026-10");
     render(<TripCalendar />);
     expect(await screen.findByRole("heading", { name: "Nothing open in October" })).toBeTruthy();
     const previous = screen.getByRole("button", { name: /^Previous month/ });
@@ -179,10 +181,74 @@ describe("the trip calendar", () => {
       () => json({ trips: [sunsetOn(1, "2026-10-09")] }),
     );
     render(<TripCalendar />);
-    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    // The month's own controls stay while it is failed.
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Next month/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(
       await screen.findByRole("heading", { level: 3, name: "Friday, October 9" }),
     ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "October 2026" })),
+    );
+  });
+
+  it("opens the next month by itself when this one has nothing left", async () => {
+    const queries = tripsApi(
+      () => json({ trips: [] }),
+      () => json({ trips: [sunsetOn(4, "2026-11-03")] }),
+    );
+    render(<TripCalendar />);
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "Tuesday, November 3" }),
+    ).toBeTruthy();
+    expect(queries).toHaveLength(2);
+    expect(queries[1]?.get("from")).toBe("2026-11-01");
+  });
+
+  it("shows the marina's today to a guest whose month has already turned", async () => {
+    // 01:00 on Dec 1 in Tokyo; 11:00 on Nov 30 in New York.
+    vi.setSystemTime(new Date("2026-11-30T16:00:00Z"));
+    const queries = tripsApi(() =>
+      json({ trips: [sunsetOn(1, "2026-11-30"), sunsetOn(2, "2026-12-03")] }),
+    );
+    render(<TripCalendar />);
+    const month = await screen.findByRole("table", { name: /December 2026/ });
+    expect(queries[0]?.get("from")).toBe("2026-11-30");
+    // Nov 30 is shown in December's first week, and picked first.
+    expect(
+      await within(month).findByRole("button", { name: /^Monday, November 30, 1 trip/ }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 3, name: /Monday, November 30$/ }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the day's trips while another party loads, and drops a date with nothing for it", async () => {
+    window.history.replaceState(null, "", "/?date=2026-10-10");
+    let release: (res: Response) => void = () => {};
+    tripsApi(
+      () => json({ trips: [sunsetOn(1, "2026-10-09"), sunsetOn(2, "2026-10-10", 3)] }),
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    render(<TripCalendar />);
+    await screen.findByRole("heading", { level: 3, name: "Saturday, October 10" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Party size" }), {
+      target: { value: "8" },
+    });
+    // While 8 guests load, the day stays, its Book link still for the party it was loaded for.
+    expect(await screen.findByText("Updating for 8 guests…")).toBeTruthy();
+    const book = screen.getByRole("link", { name: /^Book Sunset Harbor Cruise/ });
+    expect(book.getAttribute("href")).not.toContain("party=8");
+    release(json({ trips: [sunsetOn(1, "2026-10-09")] }));
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "Friday, October 9" }),
+    ).toBeTruthy();
+    await waitFor(() => expect(window.location.search).toBe("?party=8"));
+    expect(screen.getByRole("status").textContent).toContain("for 8 guests");
   });
 });
 
@@ -232,7 +298,8 @@ describe("calendar dates", () => {
     expect(weeks).toHaveLength(5);
     expect(weeks[0]?.[0]).toBe("2026-11-01");
     expect(weeks[4]?.[1]).toBe("2026-11-30");
-    expect(weeks[4]?.[2]).toBeNull();
+    // The neighbors' dates fill the last week.
+    expect(weeks[4]?.[2]).toBe("2026-12-01");
     const feb = monthGrid("2026-02-01");
     expect(feb).toHaveLength(4);
     expect(monthGrid("2026-08-01")).toHaveLength(6);
