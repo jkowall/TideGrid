@@ -267,6 +267,45 @@
 .trips__head h2:focus {
   outline: none;
 }
+/* The heading, with the Calendar and List switch at its end. */
+.trips__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.trips-view {
+  display: inline-flex;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.trips-view__option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.trips-view__option + .trips-view__option {
+  border-left: 1px solid var(--border-subtle);
+}
+.trips-view__option[aria-pressed="true"] {
+  background: var(--brand-primary);
+  color: var(--brand-primary-ink);
+}
+.trips-view__option:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
 .trips__notes {
   display: grid;
   gap: var(--space-1);
@@ -659,4 +698,182 @@
 }
 .human-check > * {
   pointer-events: auto;
+}
+
+/* The calendar ------------------------------------------------------------------ */
+
+/* Only the party size in the controls; the month has its own Previous and Next. */
+@media (min-width: 48rem) {
+  .trips__controls--calendar {
+    grid-template-columns: 13rem;
+  }
+}
+
+/* Phone: the month, then the picked day's trips. Desktop: side by side. */
+.trip-calendar {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+@media (min-width: 60rem) {
+  .trip-calendar {
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+    gap: var(--space-8);
+  }
+  /* Beside the month the column is narrower than the page: the card keeps its
+     two-column layout, with Book under the facts. */
+  .trip-calendar__day .trip-card {
+    grid-template-columns: 7rem minmax(0, 1fr);
+    grid-template-areas:
+      "when main"
+      "when facts"
+      "when action";
+  }
+}
+.trip-calendar__day {
+  min-width: 0;
+  scroll-margin-top: var(--space-4);
+}
+.trip-calendar__month {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  transition: opacity var(--duration-fast) ease;
+}
+@media (min-width: 60rem) {
+  .trip-calendar__month {
+    position: sticky;
+    top: var(--space-4);
+  }
+}
+.trip-calendar__nav {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+.trip-calendar__step {
+  min-width: var(--tap-min);
+  padding-inline: 0;
+  justify-content: center;
+}
+.trip-calendar__title {
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-lg);
+}
+.trip-calendar__title:focus {
+  outline: none;
+}
+.trip-calendar__grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  table-layout: fixed;
+}
+.trip-calendar__grid th {
+  padding-bottom: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-align: center;
+}
+.trip-calendar__grid td {
+  padding: 0;
+  vertical-align: top;
+}
+.trip-calendar__date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+}
+.trip-calendar__date--past {
+  opacity: 0.5;
+}
+.trip-calendar__date--loading {
+  color: var(--text-muted);
+}
+.trip-calendar__date--open {
+  background: color-mix(in srgb, var(--brand-primary) 12%, var(--surface-raised));
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.trip-calendar__date--open:hover {
+  background: color-mix(in srgb, var(--brand-primary) 22%, var(--surface-raised));
+}
+.trip-calendar__date--open:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 1px;
+}
+.trip-calendar__date--today {
+  box-shadow: inset 0 0 0 2px var(--brand-accent);
+}
+.trip-calendar__count {
+  font-size: 0.6875rem;
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.trip-calendar__date--few .trip-calendar__count {
+  color: var(--status-warning);
+}
+.trip-calendar__date--picked,
+.trip-calendar__date--picked:hover {
+  background: var(--brand-primary);
+  color: var(--brand-primary-ink);
+}
+.trip-calendar__date--picked .trip-calendar__count {
+  color: var(--brand-primary-ink);
+}
+.trip-calendar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.trip-calendar__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.trip-calendar__swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
+.trip-calendar__swatch--open {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--brand-primary) 18%, var(--surface-raised));
+}
+.trip-calendar__legend-few {
+  color: var(--status-warning);
+}
+.trip-calendar__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
 }

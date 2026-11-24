@@ -2,6 +2,12 @@
 
 The branded guest site for the demo build: one React and Vite build serves every operator, which the API names from the page's Origin, with that operator's validated brand. Pages: `/` (the operator's upcoming trips, G2.11a), `/book/<tripId>` (the checkout, G2.11b), `/manage` (the booking's management page, G2.11c), the placeholder legal pages (also at `/terms` and `/privacy`), and `/support` and `/offline` (G2.14b). The site moves between its own pages in place, through the History API, so the brand stays on screen; Back and Forward work.
 
+## Picking a date (proposed, 2026-11-24)
+
+The home page opens on a calendar. A month grid sits beside the party size (above the day's trips on a phone). Each date with a trip open for the party is a button that says how many ("2 trips") or "Few left" when a shared trip that day has 4 or fewer seats left; dates with nothing open are plain text, so the keyboard visits only dates that lead somewhere. Picking a date shows that day's trips with the list's own cards and Book links. Until the guest picks, the first open date from today is shown. Previous and Next move a month at a time, from this month to the month a year ahead. One request covers the month (from the marina's today in the current month), through the same `GET /v1/public/trips` the list uses; no API change.
+
+Calendar and List beside the heading switch views and keep the party and the dates. The address carries the choice: `?date=YYYY-MM-DD`, `?month=YYYY-MM`, and `?party=` for the calendar; `?view=list&from=…&party=…` for the four-week list. An old list address without `view=list` opens the calendar at the month of its `from`. Code: `src/TripCalendar.tsx`, `src/TripsSection.tsx`, and the calendar helpers at the end of `src/trips.ts`.
+
 ## The checkout (G2.11b)
 
 The minimal guest checkout in the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence). It consumes the pricing and checkout API unchanged ([pricing contract](../../packages/domain-pricing/README.md#api), [checkout contract](../../packages/domain-booking/README.md#api)).

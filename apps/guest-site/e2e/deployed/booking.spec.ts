@@ -55,7 +55,7 @@ function required(host: DeployedHost | undefined, slug: string): DeployedHost {
  * narrows it to some weekdays.
  */
 async function openTrip(page: Page, host: DeployedHost, product: string, from: string, day = "") {
-  await page.goto(hostPath(host, `/?from=${from}&party=${party}`));
+  await page.goto(hostPath(host, `/?view=list&from=${from}&party=${party}`));
   await expect(page.getByRole("heading", { level: 1, name: host.name })).toBeVisible({
     timeout: 20_000,
   });

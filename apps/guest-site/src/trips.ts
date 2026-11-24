@@ -76,9 +76,13 @@ export function readQuery(search: string, today: LocalDate): TripQuery {
   };
 }
 
-/** The address query for a page; empty for the first page for one guest. */
-export function writeQuery(query: TripQuery, today: LocalDate): string {
+/**
+ * The address query for a page; empty for the first page for one guest.
+ * `list`: the list was chosen over the calendar, so the address says so.
+ */
+export function writeQuery(query: TripQuery, today: LocalDate, list = false): string {
   const params = new URLSearchParams();
+  if (list) params.set("view", "list");
   if (query.start > today) params.set("from", query.start);
   if (query.party !== 1) params.set("party", String(query.party));
   const text = params.toString();
@@ -172,4 +176,144 @@ export function groupByDate(trips: readonly AvailableTrip[]): TripDay[] {
       date,
       trips: list.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)),
     }));
+}
+
+// The calendar ---------------------------------------------------------------------
+
+/** How the home page shows trips: a month to pick a date from, or the four-week list. */
+export type TripView = "calendar" | "list";
+
+/** `?view=list` opens the list; anything else, the calendar. */
+export function readView(search: string): TripView {
+  return new URLSearchParams(search).get("view") === "list" ? "list" : "calendar";
+}
+
+/** A month as its first date, YYYY-MM-01. */
+export type MonthStart = LocalDate;
+
+/** The month holding `date`, as its first date. */
+export function monthOf(date: LocalDate): MonthStart {
+  return `${date.slice(0, 7)}-01`;
+}
+
+/** The first date of the month `months` after (or before) `month`. */
+export function addMonths(month: MonthStart, months: number): MonthStart {
+  const year = Number(month.slice(0, 4));
+  const index = Number(month.slice(5, 7)) - 1 + months;
+  const y = year + Math.floor(index / 12);
+  const m = ((index % 12) + 12) % 12;
+  return `${String(y).padStart(4, "0")}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+/** The last date of a month. */
+export function monthEnd(month: MonthStart): LocalDate {
+  return addDays(addMonths(month, 1), -1);
+}
+
+/** The first month a guest can see, and the last: today's, through the horizon's. */
+export function monthBounds(today: LocalDate): { first: MonthStart; last: MonthStart } {
+  return { first: monthOf(today), last: monthOf(addDays(today, horizonDays)) };
+}
+
+/** A month kept between today's and the horizon's. */
+export function clampMonth(month: MonthStart, today: LocalDate): MonthStart {
+  const { first, last } = monthBounds(today);
+  return later(first, earlier(month, last));
+}
+
+/**
+ * The dates a month asks the API for: the whole month, from today on. As the
+ * list does (see windowOf), a month holding today asks for the day before
+ * too, so a guest east of the marina still sees the marina's today.
+ */
+export function monthWindow(
+  month: MonthStart,
+  today: LocalDate,
+): { from: LocalDate; to: LocalDate } {
+  const end = monthEnd(month);
+  return { from: month <= today ? later(month, addDays(today, -1)) : month, to: end };
+}
+
+/**
+ * The calendar's weeks: Sunday to Saturday, from the week holding the 1st to
+ * the week holding the last day. Dates outside the month are null.
+ */
+export function monthGrid(month: MonthStart): Array<Array<LocalDate | null>> {
+  const end = monthEnd(month);
+  const weeks: Array<Array<LocalDate | null>> = [];
+  let day = addDays(month, -new Date(`${month}T12:00:00Z`).getUTCDay());
+  while (day <= end) {
+    const week: Array<LocalDate | null> = [];
+    for (let i = 0; i < 7; i++) {
+      week.push(day >= month && day <= end ? day : null);
+      day = addDays(day, 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+export interface CalendarQuery {
+  month: MonthStart;
+  party: number;
+  /** The date picked, if any; it may sit in another month only until the month loads. */
+  date: LocalDate | null;
+}
+
+/**
+ * Read `?month=YYYY-MM`, `?date=YYYY-MM-DD`, and `?party=` from the address. A
+ * date picks its own month. An old list address (`?from=`) opens the month
+ * holding that date. Anything unreadable falls back to this month.
+ */
+export function readCalendarQuery(search: string, today: LocalDate): CalendarQuery {
+  const params = new URLSearchParams(search);
+  const party = Number(params.get("party"));
+  const date = params.get("date") ?? "";
+  const monthParam = params.get("month") ?? "";
+  const from = params.get("from") ?? "";
+  const picked = isLocalDate(date) && date >= addDays(today, -1) ? date : null;
+  const month = picked
+    ? monthOf(picked)
+    : /^\d{4}-\d{2}$/.test(monthParam) && isLocalDate(`${monthParam}-01`)
+      ? `${monthParam}-01`
+      : isLocalDate(from)
+        ? monthOf(from)
+        : monthOf(today);
+  const clamped = clampMonth(month, today);
+  return {
+    month: clamped,
+    party: partySizes.includes(party) ? party : 1,
+    date: picked && monthOf(picked) === clamped ? picked : null,
+  };
+}
+
+/** The address query for the calendar; empty for this month, one guest, no date picked. */
+export function writeCalendarQuery(query: CalendarQuery, today: LocalDate): string {
+  const params = new URLSearchParams();
+  if (query.date) params.set("date", query.date);
+  else if (query.month !== monthOf(today)) params.set("month", query.month.slice(0, 7));
+  if (query.party !== 1) params.set("party", String(query.party));
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+/** Seats left at or under this on a shared trip read as "few left". */
+export const fewSeats = 4;
+
+/** What a day in the calendar says about its trips. */
+export interface DaySummary {
+  count: number;
+  /** A shared trip that day has `fewSeats` or fewer seats left. */
+  few: boolean;
+}
+
+export function summarizeDays(trips: readonly AvailableTrip[]): Map<LocalDate, DaySummary> {
+  const days = new Map<LocalDate, DaySummary>();
+  for (const trip of trips) {
+    const day = days.get(trip.localDate) ?? { count: 0, few: false };
+    day.count += 1;
+    if (trip.capacity.kind === "seats" && trip.capacity.remaining <= fewSeats) day.few = true;
+    days.set(trip.localDate, day);
+  }
+  return days;
 }
