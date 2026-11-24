@@ -64,7 +64,7 @@ Prospects can try the app without installing it. The guest site serves it at `ht
 - In a browser, booking sessions live in the tab's sessionStorage (`src/tab-store.ts`), as on the guest site, and end with the tab. Android's back button does nothing there, and "Leave checkout?" uses the browser's own confirm dialog (`src/back.ts`).
 - `/app/*` has its own Content-Security-Policy in `apps/guest-site/public/_headers`: inline styles only (React Native for the web writes its styles at run time), no inline script, the API as the only connection, and only the same host may frame it. `/phone/*` may frame only its own host and cannot be framed.
 - A release build always talks to `https://api.tidegrid.us`. Only a local or CI build with `GUEST_LOCAL_API` set to a loopback API points the app at it; the release refuses that setting. The export runs with `--clear`, so no cached build can carry another API address.
-- The browser check `apps/guest-site/e2e/full/phone-app.spec.ts` books a trip inside the frame on a desktop and opens the app full screen on a phone, with no policy violations.
+- The browser check `apps/guest-site/e2e/full/phone-app.spec.ts` books a trip inside the frame on a desktop and opens the app full screen on a phone, and fails on any securitypolicyviolation event. zod runs jitless (`src/install-polyfills.ts`), so its eval probe never trips the policy.
 
 ## Builds for testers
 

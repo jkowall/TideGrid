@@ -105,7 +105,7 @@ describe("static files", () => {
     // only, never inline script, and the API as the only connection.
     expect(app.get("script-src")).toBe("'self'");
     expect(app.get("style-src")).toBe("'self' 'unsafe-inline'");
-    expect(app.get("connect-src")).toBe("'self' https://api.tidegrid.us");
+    expect(app.get("connect-src")).toBe("https://api.tidegrid.us");
     expect(app.get("frame-ancestors")).toBe("'self'");
     expect(app.get("frame-src")).toBe("'none'");
     const phone = policyFor("/phone/*");

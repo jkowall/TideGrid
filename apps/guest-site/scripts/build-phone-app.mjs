@@ -19,7 +19,19 @@ if (!existsSync(dist)) {
 }
 
 const localApi = process.env.GUEST_LOCAL_API;
-const env = { ...process.env, CI: "1", TIDEGRID_VARIANT: variant, TIDEGRID_WEB_BASE: "/app" };
+// The release scripts pass --release: a deployed app talks only to the
+// deployed API, so a local API setting stops the build.
+if (process.argv.includes("--release") && localApi) {
+  console.error("build-phone-app: unset GUEST_LOCAL_API for a release build");
+  process.exit(2);
+}
+const env = {
+  ...process.env,
+  CI: "1",
+  EXPO_NO_TELEMETRY: "1",
+  TIDEGRID_VARIANT: variant,
+  TIDEGRID_WEB_BASE: "/app",
+};
 delete env.TIDEGRID_API_BASE;
 delete env.TIDEGRID_GUEST_ORIGIN;
 delete env.TIDEGRID_RELEASE;

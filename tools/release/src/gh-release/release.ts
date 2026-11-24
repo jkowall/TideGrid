@@ -579,7 +579,7 @@ async function build(deps: GhDeps, worker: GhWorker): Promise<void> {
     guest: [
       ["pnpm", ["exec", "vite", "build"]],
       ["node", ["scripts/check-precache.mjs"]],
-      ["node", ["scripts/build-phone-app.mjs"]],
+      ["node", ["scripts/build-phone-app.mjs", "--release"]],
     ],
   };
   for (const [cmd, args] of steps[worker]) {

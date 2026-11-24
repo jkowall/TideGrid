@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Frame, type Page, test } from "@playwright/test";
 import { collectCspViolations, hostUrl, localHost, tenantManifests } from "../helpers.ts";
 
 /**
@@ -11,12 +11,45 @@ import { collectCspViolations, hostUrl, localHost, tenantManifests } from "../he
 
 const harbor = tenantManifests().find((t) => t.slug === "demo-harbor");
 
+/**
+ * Every securitypolicyviolation event, in the page and in its frames.
+ * Chromium logs no console line for some, such as an eval probe.
+ */
+async function watchPolicy(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { __violations: string[] }).__violations = seen;
+    document.addEventListener("securitypolicyviolation", (e) => {
+      seen.push(`${e.violatedDirective} ${e.blockedURI}`);
+    });
+  });
+}
+
+async function policyEvents(...targets: (Page | Frame)[]): Promise<string[]> {
+  const all: string[] = [];
+  for (const target of targets) {
+    all.push(
+      ...(await target.evaluate(
+        () => (globalThis as unknown as { __violations?: string[] }).__violations ?? [],
+      )),
+    );
+  }
+  return all;
+}
+
+function appFrame(page: Page): Frame {
+  const frame = page.frames().find((f) => f.url().includes("/app/"));
+  if (!frame) throw new Error("the app frame is missing");
+  return frame;
+}
+
 test("on a desktop, the phone frame shows the app, and a trip books inside it", async ({
   page,
 }) => {
   test.skip(test.info().project.name !== "desktop", "the frame is for wide screens");
   if (!harbor) throw new Error("demo-harbor is missing from config/tenants");
   const violations = collectCspViolations(page);
+  await watchPolicy(page);
   const dialogs: string[] = [];
   page.on("dialog", (d) => {
     dialogs.push(d.message());
@@ -46,17 +79,20 @@ test("on a desktop, the phone frame shows the app, and a trip books inside it", 
   await app.getByText("View your booking").click();
   await expect(app.getByText(/demo test payment/)).toBeVisible();
   expect(violations).toEqual([]);
+  expect(await policyEvents(page, appFrame(page))).toEqual([]);
 });
 
 test("on a phone, the link opens the app full screen", async ({ page }) => {
   test.skip(test.info().project.name !== "phone", "phones skip the frame");
   if (!harbor) throw new Error("demo-harbor is missing from config/tenants");
   const violations = collectCspViolations(page);
+  await watchPolicy(page);
   await page.goto(hostUrl(localHost("demo-harbor"), "/phone/"));
   await expect(page).toHaveURL(/\/app\/$/);
   await expect(page.getByText(harbor.name).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Upcoming trips")).toBeVisible();
   expect(violations).toEqual([]);
+  expect(await policyEvents(page)).toEqual([]);
 });
 
 test("the app may be framed only by its own host, and the frame page by nobody", async ({
