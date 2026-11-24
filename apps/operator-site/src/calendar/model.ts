@@ -421,3 +421,134 @@ export function reasonProblem(reason: string): string | undefined {
   if (/[\u0000-\u001f\u007f]/.test(value)) return "Remove tabs and line breaks from the reason.";
   return undefined;
 }
+
+// The month view (2026-11-24) ------------------------------------------------------
+
+/** A month as its first date, YYYY-MM-01. */
+export type MonthStart = LocalDate;
+
+export function monthOf(date: LocalDate): MonthStart {
+  return `${date.slice(0, 7)}-01`;
+}
+
+/** The first date of the month `months` after (or before) `month`. */
+export function addMonths(month: MonthStart, months: number): MonthStart {
+  const index = Number(month.slice(5, 7)) - 1 + months;
+  const year = Number(month.slice(0, 4)) + Math.floor(index / 12);
+  const m = ((index % 12) + 12) % 12;
+  return `${String(year).padStart(4, "0")}-${String(m + 1).padStart(2, "0")}-01`;
+}
+
+/**
+ * The month's weeks, Sunday to Saturday, from the week holding the 1st to the
+ * week holding the last day. Dates from the months either side fill the first
+ * and last weeks, as on a wall calendar.
+ */
+export function monthWeeks(month: MonthStart): LocalDate[][] {
+  const end = addDays(addMonths(month, 1), -1);
+  const weeks: LocalDate[][] = [];
+  for (let start = startOfWeek(month); start <= end; start = addDays(start, 7)) {
+    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
+  }
+  return weeks;
+}
+
+/**
+ * The months a person can reach: those whose whole grid lies inside the weeks
+ * the week view reaches, so the API never refuses a month's dates.
+ */
+export function monthBounds(today: LocalDate): { first: MonthStart; last: MonthStart } {
+  const weeks = weekBounds(today);
+  const first = monthOf(weeks.first);
+  const last = monthOf(addDays(weeks.last, 6));
+  return {
+    first: startOfWeek(first) >= weeks.first ? first : addMonths(first, 1),
+    last:
+      addDays(startOfWeek(addDays(addMonths(last, 1), -1)), 6) <= addDays(weeks.last, 6)
+        ? last
+        : addMonths(last, -1),
+  };
+}
+
+export function clampMonth(month: MonthStart, today: LocalDate): MonthStart {
+  const { first, last } = monthBounds(today);
+  return later(first, earlier(monthOf(month), last));
+}
+
+/** Read `?month=YYYY-MM`, kept within the bounds; this month when missing or unreadable. */
+export function readMonth(search: string, today: LocalDate): MonthStart {
+  const value = new URLSearchParams(search).get("month") ?? "";
+  return /^\d{4}-\d{2}$/.test(value) && isLocalDate(`${value}-01`)
+    ? clampMonth(`${value}-01`, today)
+    : clampMonth(today, today);
+}
+
+/** How a trip reads at a glance in the month: on sale, sold out, or its sales state. */
+export type MonthTone = "on-sale" | "held" | "sold-out" | "closed" | "draft" | "canceled" | "done";
+
+/**
+ * Order matters: a final or departed trip says so first; a trip staff stopped
+ * selling says so before its seats; then sold out (confirmed seats), held (a
+ * checkout holds the last seats or the boat, and may still let go), and past
+ * its booking cutoff.
+ */
+export function monthTone(
+  trip: Pick<StaffTrip, "salesState" | "capacity" | "startsAt" | "salesCloseAt" | "blackedOut">,
+  now: Date,
+): MonthTone {
+  if (trip.salesState === "canceled") return "canceled";
+  if (trip.salesState === "completed" || hasDeparted(trip, now)) return "done";
+  if (trip.salesState === "draft") return "draft";
+  if (trip.salesState === "closed" || trip.blackedOut) return "closed";
+  const { kind, total, remaining, confirmed = 0 } = trip.capacity;
+  const full = trip.capacity.soldOut || remaining === 0;
+  if (full) {
+    const allConfirmed = kind === "whole_boat" ? confirmed > 0 : confirmed >= total;
+    return allConfirmed ? "sold-out" : "held";
+  }
+  if (cutoffPassed(trip, now)) return "closed";
+  return "on-sale";
+}
+
+export const monthToneLabels: Record<MonthTone, string> = {
+  "on-sale": "On sale",
+  held: "Held for a checkout",
+  "sold-out": "Sold out",
+  closed: "Not selling",
+  draft: "Draft",
+  canceled: "Canceled",
+  done: "Departed",
+};
+
+/**
+ * What a tag shows at its end, so state never rests on color alone: seats
+ * while on sale ("13/20", a charter's "Open" or "Booked"), and otherwise a
+ * word for the state.
+ */
+export function monthSeats(
+  trip: Pick<StaffTrip, "capacity">,
+  tone: MonthTone = "on-sale",
+): { short: string; long: string } {
+  const { kind, total, remaining, confirmed } = trip.capacity;
+  const booked = kind === "whole_boat" ? undefined : (confirmed ?? total - remaining);
+  const long =
+    kind === "whole_boat"
+      ? (confirmed ?? 0) > 0
+        ? "whole boat booked"
+        : remaining === 0
+          ? "whole boat held"
+          : "whole boat open"
+      : `${booked} of ${total} seats booked`;
+  const word: Partial<Record<MonthTone, string>> = {
+    held: "Held",
+    "sold-out": kind === "whole_boat" ? "Booked" : "Full",
+    closed: "Closed",
+    draft: "Draft",
+    canceled: "Canceled",
+    done: "Departed",
+  };
+  const short =
+    word[tone] ??
+    (kind === "whole_boat" ? ((confirmed ?? 0) > 0 ? "Booked" : "Open") : `${booked}/${total}`);
+  return { short, long };
+}

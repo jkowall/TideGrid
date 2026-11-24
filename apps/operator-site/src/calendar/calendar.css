@@ -451,3 +451,250 @@
   color: var(--text-body);
   font-size: var(--text-sm);
 }
+
+/* Week and Month ---------------------------------------------------------------- */
+
+.cal-view {
+  display: inline-flex;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cal-view__option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.cal-view__option + .cal-view__option {
+  border-left: 1px solid var(--border-control);
+}
+.cal-view__option[aria-pressed="true"] {
+  background: var(--brand-accent);
+  color: var(--tg-deep-forest);
+}
+.cal-view__option:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* The month: a wall calendar. Each trip is a tag whose left edge takes its
+   tone; the tag's hidden text says the state in words. On a phone the tags
+   give way to a count per date, and a date opens its week. */
+.cal-month {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: var(--space-1);
+  table-layout: fixed;
+}
+.cal-month th {
+  padding-bottom: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.cal-month__day {
+  height: 6.5rem;
+  padding: var(--space-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  vertical-align: top;
+}
+.cal-month__day--outside {
+  background: transparent;
+}
+.cal-month__day--today {
+  border: 2px solid var(--brand-accent);
+}
+.cal-month__date {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: var(--weight-bold);
+  text-align: left;
+  cursor: pointer;
+}
+.cal-month__day--outside .cal-month__date {
+  color: var(--text-muted);
+}
+.cal-month__date:hover {
+  background: var(--surface-sunken);
+}
+.cal-month__date:focus-visible,
+.cal-month__tag:focus-visible,
+.cal-month__more:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 1px;
+}
+.cal-month__count {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+.cal-month__skeleton {
+  margin: var(--space-1);
+}
+.cal-month__tags {
+  display: grid;
+  gap: 2px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.cal-month__tags li {
+  min-width: 0;
+}
+.cal-month__tag {
+  --tone: var(--status-ready);
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 1px var(--space-1);
+  border-left: 3px solid var(--tone);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--text-strong);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  text-decoration: none;
+}
+.cal-month__tag:hover {
+  background: color-mix(in srgb, var(--tone) 26%, transparent);
+}
+.cal-month__tag-time {
+  flex: none;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.cal-month__tag-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-month__tag-seats {
+  flex: none;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cal-month__tag--on-sale {
+  --tone: var(--status-ready);
+}
+.cal-month__tag--sold-out {
+  --tone: var(--status-blocked);
+}
+.cal-month__tag--closed {
+  --tone: var(--status-warning);
+}
+.cal-month__tag--draft {
+  --tone: var(--status-pending);
+}
+.cal-month__tag--canceled {
+  --tone: var(--text-muted);
+}
+.cal-month__tag--canceled .cal-month__tag-name {
+  text-decoration: line-through;
+}
+/* Departed: a darker grey than canceled, and its text dims, not the whole tag. */
+.cal-month__tag--done {
+  --tone: var(--border-control);
+}
+.cal-month__tag--done .cal-month__tag-name {
+  color: var(--text-muted);
+}
+.cal-month__tag--held {
+  --tone: var(--status-info);
+}
+.cal-month__more {
+  padding: 0 var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--link, var(--text-strong));
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.cal-month__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.cal-month__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.cal-month__swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  background: var(--tone);
+}
+.cal-month__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+/* Phone and small tablet: a count per date; the date opens its week. */
+@media (max-width: 47.99rem) {
+  .cal-month {
+    border-spacing: 2px;
+  }
+  .cal-month__day {
+    height: 3.5rem;
+    padding: 2px;
+  }
+  .cal-month__date {
+    flex-direction: column;
+    align-items: center;
+    min-height: 3rem;
+    padding: 0;
+  }
+  .cal-month__count {
+    font-size: 0.625rem;
+  }
+  .cal-month__tags,
+  .cal-month__skeleton {
+    display: none;
+  }
+  .cal-month th {
+    text-align: center;
+  }
+}
+/* The month uses the page's width, so trip names have room. */
+.cal--month {
+  max-width: 96rem;
+}

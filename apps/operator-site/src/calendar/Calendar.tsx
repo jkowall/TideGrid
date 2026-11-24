@@ -94,7 +94,15 @@ const actionKey = (tripId: string, kind: ActionKind) => `${tripId}:${kind}`;
 export function CalendarPage({
   membership,
   focusHeading,
-}: { membership: Membership } & FocusOnArrival) {
+  viewSwitch,
+  openDay,
+}: {
+  membership: Membership;
+  /** The Week and Month switch, at the end of the bar. */
+  viewSwitch?: ReactNode;
+  /** A date picked in the month: its day takes focus once the week arrives. */
+  openDay?: LocalDate | undefined;
+} & FocusOnArrival) {
   const { tenantId, tenantName, role } = membership;
   const canChange = canChangeTrips(role);
   const canBook = canCreateBookings(role);
@@ -210,6 +218,22 @@ export function CalendarPage({
       focusRangeOnLoad.current = false;
       range.current?.focus();
     }
+  }, [load]);
+
+  // A date picked in the month: its day takes focus once, when its week arrives.
+  const dayToOpen = useRef(openDay);
+  useEffect(() => {
+    const day = dayToOpen.current;
+    if (load.kind !== "ready" || !day) return;
+    dayToOpen.current = undefined;
+    const heading = document.getElementById(dayHeadingId(day));
+    if (!heading) {
+      // A week with no trips shows no days: its dates take focus instead.
+      range.current?.focus();
+      return;
+    }
+    heading.scrollIntoView?.({ block: "start" });
+    heading.focus({ preventScroll: true });
   }, [load]);
 
   // After the dialog closes, the trip it was about keeps the person's place.
@@ -330,6 +354,7 @@ export function CalendarPage({
             onChange={(e) => setSource(e.target.value ? (e.target.value as ListSource) : undefined)}
             options={sourceFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
           />
+          {viewSwitch}
         </div>
 
         {source && <p className="cal-source-note">Seat counts cover bookings from every source.</p>}
@@ -454,13 +479,14 @@ const failureText: Record<WeekFailure, { title: string; body: (tenant: string) =
   },
 };
 
-function WeekFailed({
+export function WeekFailed({
   reason,
   tenantName,
   failures,
   retrying,
   onRetry,
   onThisWeek,
+  period = "week",
 }: {
   reason: WeekFailure;
   tenantName: string;
@@ -468,8 +494,16 @@ function WeekFailed({
   retrying: boolean;
   onRetry: () => void;
   onThisWeek: () => void;
+  /** What the page shows: the week view, or the month view (2026-11-24). */
+  period?: "week" | "month";
 }) {
-  const text = failureText[reason];
+  const text =
+    reason === "rejected" && period === "month"
+      ? {
+          title: "This month can't be shown",
+          body: () => "The calendar shows months within two years of today.",
+        }
+      : failureText[reason];
   const canRetry = reason === "unreachable" || reason === "unavailable" || reason === "unreadable";
   let action: ReactNode;
   if (reason === "signed_out") {
@@ -481,7 +515,7 @@ function WeekFailed({
   } else if (reason === "rejected") {
     action = (
       <Button variant="primary" icon="calendar" onClick={onThisWeek}>
-        Go to this week
+        Go to this {period}
       </Button>
     );
   } else if (canRetry) {
