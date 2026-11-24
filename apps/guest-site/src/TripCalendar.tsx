@@ -251,7 +251,12 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
           {viewSwitch}
         </div>
         {shown && shown.trips.length > 0 && (
-          <TimeNote trips={shown.trips} start={later(month, today)} end={monthEnd(month)} />
+          <TimeNote
+            // The picked day's trips, so the note matches the cards below it.
+            trips={dayTrips.length > 0 ? dayTrips : shown.trips}
+            start={later(month, today)}
+            end={monthEnd(month)}
+          />
         )}
       </div>
 

@@ -48,7 +48,12 @@ export function TripsSection() {
         : (() => {
             const list = readQuery(search, today);
             return writeCalendarQuery(
-              { month: monthOf(list.start), party: list.party, date: null },
+              // The list's first date stays picked, unless it is simply today.
+              {
+                month: monthOf(list.start),
+                party: list.party,
+                date: list.start > today ? list.start : null,
+              },
               today,
             );
           })();

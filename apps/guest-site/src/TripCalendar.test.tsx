@@ -293,16 +293,20 @@ describe("calendar and list", () => {
   });
 
   it("opens the list from the address and switches back to the calendar", async () => {
-    window.history.replaceState(null, "", "/?view=list&from=2026-11-01&party=2");
+    window.history.replaceState(null, "", "/?view=list&from=2026-11-04&party=2");
     tripsApi(
-      () => json({ trips: [sunsetOn(4, "2026-11-03")] }),
-      () => json({ trips: [sunsetOn(4, "2026-11-03")] }),
+      () => json({ trips: [sunsetOn(4, "2026-11-04"), sunsetOn(5, "2026-11-05")] }),
+      () => json({ trips: [sunsetOn(3, "2026-11-03"), sunsetOn(4, "2026-11-04")] }),
     );
     render(<TripsSection />);
-    await screen.findByRole("region", { name: "Tuesday, November 3" });
+    await screen.findByRole("region", { name: "Wednesday, November 4" });
     fireEvent.click(screen.getByRole("button", { name: "Calendar" }));
     expect(await screen.findByRole("table", { name: /November 2026/ })).toBeTruthy();
-    expect(window.location.search).toBe("?month=2026-11&party=2");
+    // The list's first date stays picked, not the month's first open date.
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "Wednesday, November 4" }),
+    ).toBeTruthy();
+    expect(window.location.search).toBe("?date=2026-11-04&party=2");
   });
 });
 
