@@ -12,7 +12,7 @@ import { BookingsPage } from "./bookings/BookingsPage.tsx";
 import { ExceptionsPage } from "./bookings/ExceptionsPage.tsx";
 import { isUuid } from "./bookings/model.ts";
 import { RosterPage } from "./bookings/RosterPage.tsx";
-import { CalendarPage } from "./calendar/Calendar.tsx";
+import { CalendarView } from "./calendar/CalendarView.tsx";
 import { EmailExceptionsPage } from "./email/EmailExceptionsPage.tsx";
 import { canSeeEmailExceptions, emailExceptionsPath } from "./email/exceptions.ts";
 import { Wordmark } from "./Gate.tsx";
@@ -385,7 +385,7 @@ export function ConsoleShell({
       break;
     case "calendar":
       page = (
-        <CalendarPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+        <CalendarView key={selected.tenantId} membership={selected} focusHeading={focusPage} />
       );
       break;
     case "bookings":
