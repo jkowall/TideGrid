@@ -224,6 +224,22 @@ describe("the trip calendar", () => {
     ).toBeTruthy();
   });
 
+  it("adds the week before when the marina's today falls in it", async () => {
+    // 01:00 on Sunday, Nov 1 in Tokyo; noon on Saturday, Oct 31 in New York.
+    vi.setSystemTime(new Date("2026-10-31T16:00:00Z"));
+    tripsApi(() => json({ trips: [sunsetOn(1, "2026-10-31"), sunsetOn(2, "2026-11-03")] }));
+    render(<TripCalendar />);
+    const month = await screen.findByRole("table", { name: /November 2026/ });
+    const oct31 = await within(month).findByRole("button", {
+      name: /^Saturday, October 31, 1 trip/,
+    });
+    fireEvent.click(within(month).getByRole("button", { name: /^Tuesday, November 3/ }));
+    fireEvent.click(oct31);
+    expect(
+      await screen.findByRole("heading", { level: 3, name: /Saturday, October 31$/ }),
+    ).toBeTruthy();
+  });
+
   it("keeps the day's trips while another party loads, and drops a date with nothing for it", async () => {
     window.history.replaceState(null, "", "/?date=2026-10-10");
     let release: (res: Response) => void = () => {};

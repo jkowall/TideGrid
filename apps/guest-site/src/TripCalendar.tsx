@@ -7,7 +7,13 @@ import {
   Spinner,
   VisuallyHidden,
 } from "@tidegrid/design-system/components";
-import { formatDate, type LocalDate, later, todayIn } from "@tidegrid/design-system/format";
+import {
+  addDays,
+  formatDate,
+  type LocalDate,
+  later,
+  todayIn,
+} from "@tidegrid/design-system/format";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   addMonths,
@@ -132,6 +138,9 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
         setState({ kind: "ready", loaded: { query: asked, trips: result.trips } });
         return;
       }
+      // A failed retry gives up its claim on focus, so a later load for
+      // another reason never pulls focus from the control in use.
+      focusMonthOnLoad.current = false;
       setState((current) => ({
         kind: "failed",
         reason: result.reason,
@@ -363,6 +372,20 @@ export function TripCalendar({ viewSwitch }: { viewSwitch?: ReactNode }) {
   );
 }
 
+/**
+ * The month's weeks, with the week before when a trip falls in it: the
+ * marina's today, seen by a guest whose month began on a Sunday.
+ */
+function weeksFor(month: MonthStart, days: Map<LocalDate, DaySummary>): LocalDate[][] {
+  const weeks = monthGrid(month);
+  const first = weeks[0]?.[0];
+  if (first && [...days.keys()].some((date) => date < first)) {
+    const before = addDays(first, -7);
+    weeks.unshift(Array.from({ length: 7 }, (_, i) => addDays(before, i)));
+  }
+  return weeks;
+}
+
 function MonthGrid({
   month,
   today,
@@ -393,7 +416,7 @@ function MonthGrid({
         </tr>
       </thead>
       <tbody>
-        {monthGrid(month).map((week) => (
+        {weeksFor(month, days).map((week) => (
           <tr key={week[0]}>
             {week.map((date) => {
               const day = days.get(date);
