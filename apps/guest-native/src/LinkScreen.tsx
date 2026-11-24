@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BackHandler } from "react-native";
+import { onHardwareBack } from "./back.ts";
 import { type OpenedSession, openWithLink } from "./booking-api.ts";
 import { linkTokenFrom } from "./booking-model.ts";
 import { Body, Button, Field, Notice, Screen } from "./ui.tsx";
@@ -36,11 +36,10 @@ export function LinkScreen({
   );
 
   useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+    return onHardwareBack(() => {
       onClose();
       return true;
     });
-    return () => sub.remove();
   }, [onClose]);
 
   const open = async () => {

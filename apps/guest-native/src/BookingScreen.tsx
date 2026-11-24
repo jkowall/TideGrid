@@ -1,7 +1,8 @@
 import type { ManagedBooking } from "@tidegrid/contracts";
 import { formatDuration, formatMoney } from "@tidegrid/design-system/format";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackHandler, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { onHardwareBack } from "./back.ts";
 import { endSession, type PartyWaivers, readBooking, readPartyWaivers } from "./booking-api.ts";
 import { tripWhen, waiverDetail, waiverStatus } from "./booking-model.ts";
 import type { StoredSession } from "./sessions.ts";
@@ -82,11 +83,10 @@ export function BookingScreen({
   useEffect(read, []);
 
   useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+    return onHardwareBack(() => {
       onClose();
       return true;
     });
-    return () => sub.remove();
   }, [onClose]);
 
   const close = async () => {

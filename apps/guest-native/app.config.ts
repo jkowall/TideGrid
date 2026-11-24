@@ -39,6 +39,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   }
   const buildNumber = buildText && /^[1-9][0-9]{0,8}$/.test(buildText) ? Number(buildText) : 1;
   const assets = `./assets/${variant.slug}`;
+  const webBase = process.env.TIDEGRID_WEB_BASE || undefined;
+  if (webBase && !/^\/[a-z][a-z0-9-]*$/.test(webBase)) {
+    throw new Error("TIDEGRID_WEB_BASE must be a path such as /app");
+  }
   const base: ExpoConfig = {
     ...config,
     name: variant.appName,
@@ -63,6 +67,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         backgroundColor: variant.iconBackground,
       },
     },
+    // The browser build (W1N-WEB): one page, served by the guest site under
+    // /app/ on the operator's own host, so the browser's Origin is that host.
+    web: { bundler: "metro", output: "single", name: variant.appName },
+    ...(webBase ? { experiments: { baseUrl: webBase } } : {}),
     extra: {
       variant: variant.slug,
       apiBase,

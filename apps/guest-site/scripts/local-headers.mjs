@@ -26,10 +26,8 @@ if (origin !== value || !(host === "localhost" || host === "127.0.0.1")) {
 
 const file = new URL("../dist/_headers", import.meta.url);
 const headers = readFileSync(file, "utf8");
-const next = headers.replace(
-  "connect-src 'self' https://api.tidegrid.us",
-  `connect-src 'self' https://api.tidegrid.us ${origin}`,
-);
+// Every connect-src that allows the API: the site's and the phone app's.
+const next = headers.replace(/(connect-src [^;\n]*https:\/\/api\.tidegrid\.us)/g, `$1 ${origin}`);
 if (next === headers) {
   console.error("dist/_headers has no connect-src to extend");
   process.exit(1);

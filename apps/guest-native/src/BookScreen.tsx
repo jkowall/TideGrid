@@ -7,7 +7,8 @@ import type {
 } from "@tidegrid/contracts";
 import { formatMoney, formatTimeLeft } from "@tidegrid/design-system/format";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, BackHandler, Pressable, Switch, Text, View } from "react-native";
+import { Pressable, Switch, Text, View } from "react-native";
+import { confirmStep, onHardwareBack } from "./back.ts";
 import {
   type CheckoutBody,
   cancelCheckout,
@@ -536,25 +537,22 @@ export function BookScreen({
         resendFirst();
         return;
       }
-      Alert.alert("Leave checkout?", "Canceling releases your hold at once.", [
-        { text: "Stay", style: "cancel" },
-        {
-          text: "Cancel checkout",
-          style: "destructive",
-          onPress: () => void cancel(phase.offer, phase.session, phase.secret),
-        },
-      ]);
+      confirmStep(
+        "Leave checkout?",
+        "Canceling releases your hold at once.",
+        { stay: "Stay", go: "Cancel checkout" },
+        () => void cancel(phase.offer, phase.session, phase.secret),
+      );
       return;
     }
     onClose();
   }, [phase, inDoubt, onClose, go]);
 
   useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+    return onHardwareBack(() => {
       back();
       return true;
     });
-    return () => sub.remove();
   }, [back]);
 
   const title = trip.product.name;

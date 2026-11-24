@@ -430,11 +430,29 @@ describe("gh-release release", () => {
 
   it("builds the guest site and checks each host", async () => {
     const w = world();
+    w.files.set(
+      "/repo/apps/guest-site/package.json",
+      JSON.stringify({
+        scripts: { release: "vite build && node scripts/build-phone-app.mjs --release" },
+      }),
+    );
     await releaseWorker(deps(w, "guest"), opts("guest"));
     expect(w.calls[1]).toBe("pnpm exec vite build");
     expect(w.calls[2]).toBe("node scripts/check-precache.mjs");
+    expect(w.calls[3]).toBe("node scripts/build-phone-app.mjs --release");
     expect(w.calls.find((c) => c.includes("upload"))).not.toContain("BUILD_ID");
     expect(w.fetched.some((f) => f.url === "https://demo.tidegrid.us/")).toBe(true);
+    expect(ledger(w)[0].outcome).toBe("released");
+  });
+
+  it("an older guest commit without the phone app builds as before", async () => {
+    const w = world();
+    w.files.set(
+      "/repo/apps/guest-site/package.json",
+      JSON.stringify({ scripts: { release: "vite build && wrangler deploy" } }),
+    );
+    await releaseWorker(deps(w, "guest"), opts("guest"));
+    expect(w.calls.some((c) => c.includes("build-phone-app"))).toBe(false);
     expect(ledger(w)[0].outcome).toBe("released");
   });
 

@@ -571,6 +571,18 @@ export function parseUploadOutput(text: string): string {
   return id;
 }
 
+/** Whether the guest site's own release script, in the tree being released, builds the phone app. */
+function guestBuildsPhoneApp(deps: GhDeps): boolean {
+  try {
+    const pkg = JSON.parse(
+      deps.readFile(join(deps.repoRoot, workerInfo.guest.dir, "package.json")),
+    ) as { scripts?: Record<string, string> };
+    return pkg.scripts?.release?.includes("build-phone-app.mjs") ?? false;
+  } catch {
+    return false;
+  }
+}
+
 async function build(deps: GhDeps, worker: GhWorker): Promise<void> {
   // The same build each package's `release` script runs before wrangler.
   const steps: Record<GhWorker, [string, string[]][]> = {
@@ -579,6 +591,11 @@ async function build(deps: GhDeps, worker: GhWorker): Promise<void> {
     guest: [
       ["pnpm", ["exec", "vite", "build"]],
       ["node", ["scripts/check-precache.mjs"]],
+      // The phone app demo (W1N-WEB), only for a commit whose own release
+      // script builds it: an older commit has no such script.
+      ...(guestBuildsPhoneApp(deps)
+        ? [["node", ["scripts/build-phone-app.mjs", "--release"]] as [string, string[]]]
+        : []),
     ],
   };
   for (const [cmd, args] of steps[worker]) {
