@@ -26,7 +26,7 @@ if (origin !== value || !(host === "localhost" || host === "127.0.0.1")) {
 
 const file = new URL("../dist/_headers", import.meta.url);
 const headers = readFileSync(file, "utf8");
-const next = headers.replace(
+const next = headers.replaceAll(
   "connect-src 'self' https://api.tidegrid.us",
   `connect-src 'self' https://api.tidegrid.us ${origin}`,
 );

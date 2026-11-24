@@ -4,7 +4,15 @@ import { getRandomValues } from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { isoDate, loadStart, loadTrips, type Start, type Trips } from "./src/api.ts";
 import { BookingScreen } from "./src/BookingScreen.tsx";
@@ -12,7 +20,8 @@ import { BookScreen } from "./src/BookScreen.tsx";
 import { tripWhen } from "./src/booking-model.ts";
 import { LinkScreen } from "./src/LinkScreen.tsx";
 import { setRandomSource } from "./src/random.ts";
-import { SessionStore, type StoredSession } from "./src/sessions.ts";
+import { type KeyValueStore, SessionStore, type StoredSession } from "./src/sessions.ts";
+import { tabStore } from "./src/tab-store.ts";
 import { type Endpoint, endpointFor, type Variant, variantFor } from "./src/variant.ts";
 
 // The platform's secure generator, for checkout secrets and Idempotency-Keys.
@@ -22,11 +31,16 @@ setRandomSource((bytes) => {
 
 /** Booking sessions live in the Keychain or Keystore, readable only while the phone is unlocked. */
 const secureOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
-const secureStore = {
+const nativeStore: KeyValueStore = {
   get: (key: string) => SecureStore.getItemAsync(key, secureOptions),
   set: (key: string, value: string) => SecureStore.setItemAsync(key, value, secureOptions),
   remove: (key: string) => SecureStore.deleteItemAsync(key, secureOptions),
 };
+/**
+ * In a browser (the phone app demo page), the same three fields live in the
+ * tab's sessionStorage, as the guest web app keeps them.
+ */
+const secureStore: KeyValueStore = Platform.OS === "web" ? tabStore() : nativeStore;
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
 const variant: Variant | null = variantFor(extra.variant);

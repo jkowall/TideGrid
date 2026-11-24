@@ -433,6 +433,7 @@ describe("gh-release release", () => {
     await releaseWorker(deps(w, "guest"), opts("guest"));
     expect(w.calls[1]).toBe("pnpm exec vite build");
     expect(w.calls[2]).toBe("node scripts/check-precache.mjs");
+    expect(w.calls[3]).toBe("node scripts/build-phone-app.mjs");
     expect(w.calls.find((c) => c.includes("upload"))).not.toContain("BUILD_ID");
     expect(w.fetched.some((f) => f.url === "https://demo.tidegrid.us/")).toBe(true);
     expect(ledger(w)[0].outcome).toBe("released");

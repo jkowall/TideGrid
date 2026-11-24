@@ -85,6 +85,42 @@ describe("static files", () => {
     expect(directives.get("manifest-src")).toBe("'self'");
   });
 
+  it("gives the phone app demo its own policies, and keeps them tight (W1N-WEB)", () => {
+    const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+    /** The one policy a path rule sets, after it detaches the site-wide one. */
+    const policyFor = (path: string) => {
+      const block = new RegExp(
+        `\\n${path.replace(/[/*]/g, (c) => `\\${c}`)}\\n {2}! Content-Security-Policy\\n {2}Content-Security-Policy: (.+)\\n`,
+      ).exec(headers);
+      const policy = block?.[1] ?? "";
+      return new Map(
+        policy.split(";").map((d) => {
+          const [name = "", ...values] = d.trim().split(/\s+/);
+          return [name, values.join(" ")];
+        }),
+      );
+    };
+    const app = policyFor("/app/*");
+    // React Native for the web writes its styles at run time: inline styles
+    // only, never inline script, and the API as the only connection.
+    expect(app.get("script-src")).toBe("'self'");
+    expect(app.get("style-src")).toBe("'self' 'unsafe-inline'");
+    expect(app.get("connect-src")).toBe("'self' https://api.tidegrid.us");
+    expect(app.get("frame-ancestors")).toBe("'self'");
+    expect(app.get("frame-src")).toBe("'none'");
+    const phone = policyFor("/phone/*");
+    expect(phone.get("script-src")).toBe("'self'");
+    expect(phone.get("style-src")).toBe("'self'");
+    expect(phone.get("frame-src")).toBe("'self'");
+    expect(phone.get("frame-ancestors")).toBe("'none'");
+    for (const policy of [app, phone]) {
+      expect([...policy.values()].join(" ")).not.toMatch(/unsafe-eval|\*/);
+    }
+    const page = readFileSync(new URL("../public/phone/index.html", import.meta.url), "utf8");
+    expect(page).not.toMatch(/<script>|<style|style="/);
+    expect(page).toContain('<iframe src="/app/"');
+  });
+
   it("serves sw.js uncached and hashed assets immutable (G2.14b)", () => {
     const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
     expect(headers).toMatch(

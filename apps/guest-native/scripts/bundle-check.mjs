@@ -10,7 +10,7 @@ const variants = readdirSync(new URL("../variants/", import.meta.url))
 const out = new URL("../dist-check/", import.meta.url);
 rmSync(out, { recursive: true, force: true });
 for (const variant of variants) {
-  for (const platform of ["ios", "android"]) {
+  for (const platform of ["ios", "android", "web"]) {
     console.log(`bundle-check: ${variant} ${platform}`);
     execFileSync(
       "npx",
@@ -26,4 +26,4 @@ for (const variant of variants) {
     );
   }
 }
-console.log(`bundle-check: ${variants.length * 2} bundles built`);
+console.log(`bundle-check: ${variants.length * 3} bundles built`);

@@ -49,7 +49,8 @@ export const accessTeamDomain = "winter-feather-7169.cloudflareaccess.com";
 const releaseCommand: Record<Worker, string> = {
   api: "wrangler deploy --var BUILD_ID:$(git describe --always --dirty)",
   console: "vite build && wrangler deploy",
-  guest: "vite build && node scripts/check-precache.mjs && wrangler deploy",
+  guest:
+    "vite build && node scripts/check-precache.mjs && node scripts/build-phone-app.mjs && wrangler deploy",
 };
 
 export function releasePlan(worker: Worker, phase: Phase, rollback: boolean): Plan {
